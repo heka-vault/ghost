@@ -41,6 +41,13 @@ impl Controller for Daemon {
         self.repair_mic(true).await
     }
 
+    async fn reopen_microphone(&self) {
+        // An automatic repair's rule: restart a running canceller at most, never install.
+        if let Err(e) = self.repair_mic(false).await {
+            tracing::info!("microphone: not reopened now: {e}");
+        }
+    }
+
     /// `conversation`: the line the session opens in (the desktop's Call button); Ghost
     /// when unset. A retired or unknown line is refused.
     async fn wake(&self, first_utterance: Option<String>, conversation: Option<String>) -> bool {

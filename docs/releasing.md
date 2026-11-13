@@ -118,10 +118,13 @@ What `tauri build` does, in order (`apps/desktop/src-tauri/tauri.conf.json`):
    the four binaries in `/usr/bin`, the runtime's library in
    `/usr/lib/heka-ghost-desktop/onnxruntime/libonnxruntime.so.1.24.4`, the model files
    in `/usr/lib/heka-ghost-desktop/models/` and the build's record beside them,
-   `/usr/lib/heka-ghost-desktop/ghost-build.json` (`bundle.resources`); the AppImage
+   `/usr/lib/heka-ghost-desktop/ghost-build.json` (`bundle.resources`); the echo canceller's installer and its templates in
+   `/usr/lib/heka-ghost-desktop/pipewire/` (`ghostd echo-cancel`, ADR 0066); the AppImage
    carries them in its `usr/bin` and `usr/lib`. The .deb depends on
    `libespeak-ng1` (Kokoro's phonemizer; the one system library `ghostd` links that a bare
-   Ubuntu lacks) on top of the GTK and WebKit packages Tauri adds.
+   Ubuntu lacks) and `pulseaudio-utils` (`pactl`, which the echo canceller's installer and
+   Ghost's sound checks use; the tools only, not the PulseAudio server), recommends
+   `pipewire-bin`, on top of the GTK and WebKit packages Tauri adds.
 
 The shell's build script hides `externalBin` and `resources` from `tauri-build` (the
 sidecars are the workspace's own binaries, which `tauri-build` would otherwise copy over

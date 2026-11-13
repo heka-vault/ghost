@@ -688,10 +688,8 @@ export default function SettingsScreen({ params: route }: RouteProps) {
     setEchoMsg(null);
     let msg: NonNullable<typeof echoMsg>;
     try {
+      // Ghost itself reopens the microphone once it is installed or removed (ADR 0066).
       const r = await client.setupEchoCancel(uninstall);
-      // Reopen the microphone so Ghost's plan takes the change now, not at the next start;
-      // a session open, or listening off, keeps it for later (ADR 0066).
-      if (r.ok) await client.repairMicrophone().catch(() => undefined);
       msg = r.ok && !uninstall && installerNotNeeded(r.detail)
         ? { tone: "ok", title: "Echo cancellation isn’t needed here", text: "Your microphone cancels Ghost’s voice on its own chip, and Ghost plays through it, so Ghost listens to it directly. Nothing was installed." }
         : r.ok

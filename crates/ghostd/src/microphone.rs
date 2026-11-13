@@ -57,7 +57,11 @@ impl Node {
     }
 
     fn is_source(&self) -> bool {
-        self.class == "Audio/Source" || self.class == "Audio/Duplex"
+        // A virtual source (a noise-suppression app's, a loopback) is a microphone too.
+        matches!(
+            self.class.as_str(),
+            "Audio/Source" | "Audio/Duplex" | "Audio/Source/Virtual"
+        )
     }
 
     fn is_sink(&self) -> bool {
@@ -1237,6 +1241,21 @@ mod tests {
         );
         assert_eq!(p.wake, p.session);
         assert!(p.fell_back.is_some());
+    }
+
+    /// A virtual source under the canceller is its microphone: the canceller is found and
+    /// Ghost listens through it (found in the release's container test, 2026-11-13).
+    #[test]
+    fn a_virtual_microphone_under_the_canceller_is_still_a_microphone() {
+        let mut facts = laptop(true);
+        for n in &mut facts.nodes {
+            if n.class == "Audio/Source" && n.name != CANCELLER_SOURCE {
+                n.class = "Audio/Source/Virtual".into();
+            }
+        }
+        let p = plan(None, None, None, Some(&facts));
+        assert_eq!(p.case, Case::HostCanceller, "{}", p.summary);
+        assert!(p.session.is_canceller());
     }
 
     /// ADR 0064, ADR 0066: Repair sets the canceller up only where it is the right answer.

@@ -35,6 +35,39 @@ again; `ghostd models fetch` does the same on a desk with no display. The daemon
 which already waited for missing files (ADR 0038), is woken as the download ends. The routes
 are the operator's: the phone, outside tools and Ghost's own app have none of this.
 
+**The release carries Ghost's echo canceller** (issue #116, ADR 0064). The installer and its
+two templates (`infra/pipewire/`) are bundle resources, found beside the daemon's binary
+(`/usr/lib/heka-ghost-desktop/pipewire/`, the AppImage's the same under its mount). The
+installer copies the user unit to `~/.config/systemd/user/` and renders its config into
+`~/.config/ghost/echo-cancel.conf`; the unit runs the system's own `/usr/bin/pipewire` on it,
+so nothing it leaves points into the bundle, an AppImage's moving mount included, and no
+root is asked for. The same runner (`ghost_api::echo_cancel`) is behind Settings › Sound's
+Install and Remove, the first run's Set it up, Repair and `ghostd echo-cancel on|off|status`
+(the checkout's `make echo-cancel`). It first asks the sound server what it is (`pactl info`,
+through the devices port): a PulseAudio machine, no sound server, or no `pactl` gets one
+sentence and the installer never runs. Repair, pressed by the operator, installs it where
+nothing cancels Ghost's voice (the unprotected case) and reinstalls it where Ghost should
+listen through it and its unit is gone; an automatic repair only restarts it; on a chip that
+cancels echo or a headset it is never offered. After an install or a removal the daemon
+reopens the microphone, so the change applies at once. The .deb depends on
+`pulseaudio-utils` (`pactl`: the tools, not the PulseAudio server) and recommends
+`pipewire-bin`; the AppImage can declare nothing, and there the missing `pactl` is the
+sentence that names the package.
+
+**Quitting never ends in a crash report** (issue #115). WebKit's web-content process exits
+when the app does, and in Mesa's exit handlers (`libgallium`, software GL in the tests) one
+quit in five to eight aborted with `free(): corrupted unsorted chunks`, after the daemon had
+stopped cleanly, a fresh start's quit as much as an update's. The app, and the floating
+room's process, end their own web-content processes with SIGKILL on the way out
+(`webkit_exit.rs`): no exit handler runs, no core is left; the network process, which holds
+the window's storage, exits on its own.
+
+**A dead speaker never hangs a turn** (issue #117). A playback write gives up when the
+stream has taken nothing for three seconds (`ghost_audio::playback::StallWatch`) and at once
+after that until it plays again, a session goes on without its chime, the reply shows on
+screen, and the waiting list says once that sound is unavailable (`output:unavailable`, its
+place Settings › Sound), clearing when sound plays out again.
+
 **The app updates itself, on the operator's button only** (`updater.rs` in the shell,
 `tauri-plugin-updater` 2.14.1). The installed app checks
 `https://github.com/heka-vault/ghost/releases/latest/download/latest.json` when it starts (after

@@ -43,7 +43,7 @@ On Ubuntu 24.04 or 26.04 (x86-64), from the [latest release](https://github.com/
 1. **Download** `heka-ghost-desktop_<version>_amd64.deb` (or the `.AppImage`, below).
 2. **Install** it: open it with App Center, or
    `sudo apt install ./heka-ghost-desktop_<version>_amd64.deb`. apt brings what it needs
-   (WebKitGTK and eSpeak NG).
+   (WebKitGTK, eSpeak NG, and `pactl` from pulseaudio-utils, the sound tools only).
 3. **Open Ghost** from the app menu. The first run walks you through the rest: its ears and
    voice (Parakeet and Kokoro, 2.9 GB, downloaded once by the app with progress; nothing is
    left for you to fetch by hand), connecting a model (a key from Anthropic, OpenRouter or
@@ -60,9 +60,13 @@ and voice, and it needs a working sound output, since it answers out loud as wel
 screen. Turn listening off (the switch by the brand, or Settings › Sound) to keep it from
 looking for a microphone.
 
-**Speakers, not headphones?** The release does not carry the echo canceller yet (its "Set it
-up" button needs the installer from a checkout, `infra/pipewire/install.sh`); until it does,
-headphones or a microphone that cancels echo itself keep Ghost from hearing its own voice.
+**Speakers, not headphones?** Ghost's echo canceller keeps it from hearing its own voice:
+the first run's **Set it up**, **Install** in Settings › Sound, **Repair** on the microphone's
+note, or `ghostd echo-cancel on` from a terminal (`off` removes it). It is a user service
+that runs your system's PipeWire, so it needs no password; Ghost offers it only where it
+helps, not on a headset or a microphone that cancels echo itself. On a machine whose sound
+runs on PulseAudio rather than PipeWire it can't be set up, and Ghost says so; use
+headphones there.
 
 **Updates.** Ghost checks for a new release when it starts and once a day, and says
 "Update available" on the rail; Settings › General shows what's new and has **Update and

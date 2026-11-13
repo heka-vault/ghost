@@ -1497,6 +1497,11 @@ async fn setup_echo_cancel(
             .unwrap_or(crate::echo_cancel::SoundServer::Unknown)
     };
     let (ok, detail) = crate::echo_cancel::run(&deps.infra_dir, uninstall, server).await;
+    // Ghost listens through it, or without it, now, not at its next start (ADR 0066). A
+    // session open or listening off keeps the change for later.
+    if ok {
+        deps.control.reopen_microphone().await;
+    }
     Ok(Json(Ack {
         ok,
         detail: Some(detail),
