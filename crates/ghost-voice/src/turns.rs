@@ -68,6 +68,27 @@ pub enum StartEvent {
 /// + "hold on" arrive as separate finals that never make `min_words` alone.
 const BURST_WINDOW: Duration = Duration::from_secs(2);
 
+/// One word that is a barge-in by itself, whatever `min_words` asks: the operator said
+/// "Stop." twice over a story and Ghost read on (2026-11-13), since one word was never
+/// enough. A lone "okay" or "yeah" is still the operator listening along and is dropped.
+/// Ghost's own "stop" leaking past a canceller is the echo filter's to drop, by its words,
+/// before this stage sees it.
+const STOP_WORDS: &[&str] = &["stop", "wait", "enough", "quiet", "pause"];
+
+/// `text` is one of [`STOP_WORDS`] and nothing else.
+fn stops_ghost(text: &str) -> bool {
+    let mut words = text.split_whitespace();
+    let (Some(word), None) = (words.next(), words.next()) else {
+        return false;
+    };
+    let word: String = word
+        .chars()
+        .filter(|c| c.is_alphabetic())
+        .flat_map(char::to_lowercase)
+        .collect();
+    STOP_WORDS.contains(&word.as_str())
+}
+
 pub struct BargeInUserTurnStartStrategy {
     min_words: usize,
     bot_speaking: bool,
@@ -153,7 +174,7 @@ impl BargeInUserTurnStartStrategy {
             self.bursts
                 .retain(|(at, _)| now.duration_since(*at) <= BURST_WINDOW);
             let earlier: usize = self.bursts.iter().map(|(_, n)| n).sum();
-            if words + earlier >= self.min_words {
+            if words + earlier >= self.min_words || stops_ghost(text) {
                 debug::audio(|| {
                     format!(
                         "turn: barge-in on {}{text:?}{}",
@@ -2249,15 +2270,64 @@ mod tests {
     }
 
     #[test]
+    fn test_one_stop_word_while_bot_speaking_interrupts() {
+        // 2026-11-13: "Stop." said twice over a story, heard both times, dropped both.
+        for word in ["Stop.", "stop", "Wait!", "Enough.", "Quiet.", "Pause."] {
+            let mut s = strategy(2);
+            s.process_frame(&Frame::BotStarted);
+            assert_eq!(
+                s.process_frame(&said(word)),
+                ProcessFrameResult::Stop,
+                "{word}"
+            );
+            assert_eq!(s.take_events(), vec![StartEvent::Started]);
+        }
+        // An interim is enough, so the cut doesn't wait for the segment to close.
+        let mut s = strategy(2);
+        s.process_frame(&Frame::BotStarted);
+        assert_eq!(
+            s.process_frame(&Frame::Interim("Stop.".into())),
+            ProcessFrameResult::Stop
+        );
+        // Listening along is not an interruption, and neither is a word that only
+        // contains one.
+        for word in [
+            "Okay.",
+            "Yeah.",
+            "Mm-hm.",
+            "Yes.",
+            "No.",
+            "Stopwatch.",
+            "the",
+        ] {
+            let mut s = strategy(2);
+            s.process_frame(&Frame::BotStarted);
+            assert_eq!(
+                s.process_frame(&said(word)),
+                ProcessFrameResult::Continue,
+                "{word}"
+            );
+            assert_eq!(s.take_events(), vec![StartEvent::Reset]);
+        }
+        // Barge-in turned off stays off.
+        let mut s = strategy(0);
+        s.process_frame(&Frame::BotStarted);
+        assert_eq!(
+            s.process_frame(&said("Stop.")),
+            ProcessFrameResult::Continue
+        );
+    }
+
+    #[test]
     fn test_short_bursts_over_ghost_add_up_to_a_barge_in() {
         // 2026-10-30: the canceller chops the operator into one-word pieces under a
         // reading; "stop" three times over had to cut the reply.
         let mut s = strategy(3);
         s.process_frame(&Frame::BotStarted);
-        assert_eq!(s.process_frame(&said("stop")), ProcessFrameResult::Continue);
+        assert_eq!(s.process_frame(&said("hey")), ProcessFrameResult::Continue);
         assert_eq!(s.take_events(), vec![StartEvent::Reset]);
-        assert_eq!(s.process_frame(&said("stop")), ProcessFrameResult::Continue);
-        assert_eq!(s.process_frame(&said("stop")), ProcessFrameResult::Stop);
+        assert_eq!(s.process_frame(&said("that")), ProcessFrameResult::Continue);
+        assert_eq!(s.process_frame(&said("one")), ProcessFrameResult::Stop);
         assert_eq!(
             s.take_events(),
             vec![StartEvent::Reset, StartEvent::Started]
@@ -2265,11 +2335,11 @@ mod tests {
         // What was heard over one reply does not count toward the next.
         let mut s = strategy(3);
         s.process_frame(&Frame::BotStarted);
-        s.process_frame(&said("stop"));
-        s.process_frame(&said("stop"));
+        s.process_frame(&said("hey"));
+        s.process_frame(&said("that"));
         s.process_frame(&Frame::BotStopped);
         s.process_frame(&Frame::BotStarted);
-        assert_eq!(s.process_frame(&said("stop")), ProcessFrameResult::Continue);
+        assert_eq!(s.process_frame(&said("one")), ProcessFrameResult::Continue);
         assert!(!s.take_events().contains(&StartEvent::Started));
     }
 
@@ -2278,12 +2348,12 @@ mod tests {
         let mut s = strategy(2);
         s.process_frame(&Frame::BotStarted);
         assert_eq!(
-            s.process_frame(&Frame::Interim("wait".into())),
+            s.process_frame(&Frame::Interim("hang".into())),
             ProcessFrameResult::Continue
         );
         assert!(s.take_events().is_empty()); // nothing was aggregated to drop
         assert_eq!(
-            s.process_frame(&Frame::Interim("wait stop".into())),
+            s.process_frame(&Frame::Interim("hang on".into())),
             ProcessFrameResult::Stop
         );
         assert_eq!(s.take_events(), vec![StartEvent::Started]);
@@ -3551,7 +3621,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_a_two_word_interim_while_ghost_speaks_cuts_it_off() {
-        for (heard, cuts_in) in [(vec!["wait"], false), (vec!["wait", "wait stop"], true)] {
+        for (heard, cuts_in) in [(vec!["hang"], false), (vec!["hang", "hang on"], true)] {
             let mut agg = aggregator(2);
             let (out, mut rx) = Out::capture();
             agg.started(&out).await;
