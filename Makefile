@@ -265,9 +265,9 @@ perf-hear: ## how well Ghost hears (docs/benchmarks/hear-harness.md): make perf-
 	@$(load_env) target/release/ghostd perf hear $(if $(TAKES),--takes $(TAKES)) \
 	  $(if $(BASELINE),--baseline $(BASELINE)) $(ARGS)
 
-perf-turns: ## when Ghost would take a turn for over, on the same takes (docs/benchmarks/hear-harness.md): make perf-turns [TAKES=latest|dir] [ARGS=--set turn_confident_prob=0.95 ...]
+perf-turns: ## when Ghost would take a turn for over, on the same takes (docs/benchmarks/hear-harness.md): make perf-turns [TAKES=latest|dir] [ARGS=--set turn_confident_prob=0.95 ...]; with REALTIME_KEY_ENV=VAR the realtime voice's first sound and relay instead (docs/realtime-voice.md)
 	@cargo build --release -q -p ghostd --bin ghostd
-	@$(load_env) target/release/ghostd perf turns $(if $(TAKES),--takes $(TAKES)) $(ARGS)
+	@$(if $(REALTIME_KEY_ENV),target/release/ghostd perf realtime --key-env $(REALTIME_KEY_ENV) $(ARGS),$(load_env) target/release/ghostd perf turns $(if $(TAKES),--takes $(TAKES)) $(ARGS))
 
 record: ## record a 4 s wake-phrase clip from ghost.mic and the raw mic: make record NAME=hey-ghost-1
 	@scripts/record-clip.sh "$(NAME)" $(or $(SECS),4)

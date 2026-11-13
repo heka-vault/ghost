@@ -471,6 +471,9 @@ pub struct SessionParams {
     /// Into the model's context before the greeting, without running it: why Ghost
     /// started this session itself (ADR 0032).
     pub context_note: Option<String>,
+    /// The realtime voice in front (ADR 0063): only when the operator chose it, for the
+    /// desk with its microphone open. `None` builds exactly the local pipeline.
+    pub realtime: Option<crate::realtime::stage::RealtimeParams>,
 }
 
 pub struct GhostSession {
@@ -605,12 +608,16 @@ pub fn build_session(p: SessionParams) -> GhostSession {
     let settings = p.settings;
     let session_id = uuid::Uuid::new_v4().simple().to_string();
     let origin = p.media.origin;
+    let realtime = p.realtime;
     let latency = settings.latency.then(|| {
         let mut obs = LatencyObserver::new(&session_id, origin, Some(&p.model.model_name()))
             .with_log(
                 p.latency_log.clone(),
                 (settings.latency_max_mb * 1024.0 * 1024.0) as u64,
             );
+        if realtime.is_some() {
+            obs = obs.with_voice("realtime");
+        }
         if let Some(sink) = p.hooks.on_latency.clone() {
             obs = obs.with_sink(sink);
         }
@@ -729,10 +736,21 @@ pub fn build_session(p: SessionParams) -> GhostSession {
     // that, not the pieces it was heard in (`crate::tap::TurnRecord`). The pieces still go
     // out as they come, to whatever shows them (`UserTap`).
     let on_heard = p.hooks.on_heard.clone();
+    // The realtime voice's shared state (ADR 0063): its gate learns each spoken turn here.
+    let rt_shared = realtime
+        .as_ref()
+        .map(|_| Arc::new(crate::realtime::stage::Shared::default()));
     let on_record: OnTurnRecord = {
         let heard = heard.clone();
         let runtime = runtime.clone();
+        let rt_shared = rt_shared.clone();
         Arc::new(move |record| {
+            if let Some(sh) = &rt_shared {
+                match &record {
+                    TurnRecord::Closed(text) => sh.closed(text),
+                    TurnRecord::Reopened => sh.reopened(),
+                }
+            }
             let told = on_heard.as_ref().map(|on| on(record.clone()));
             {
                 let mut h = heard.lock().unwrap();
@@ -860,6 +878,8 @@ pub fn build_session(p: SessionParams) -> GhostSession {
             Box::pin(async move { c.inject(frames).await })
         })
     };
+    let inject_rt = inject.clone();
+    let hold_rt = hold_action.clone();
 
     // Interceptors: Ghost's fixed intents, then the sources'.
     let mut interceptors: Vec<Arc<dyn ghost_core::TurnInterceptor>> = Vec::new();
@@ -876,6 +896,16 @@ pub fn build_session(p: SessionParams) -> GhostSession {
         Some(Slot::AudioIn),
         Box::new(AudioInput::new(input, session_token.clone())),
     ));
+    if let Some(sh) = &rt_shared {
+        stages.push((
+            None,
+            Box::new(crate::realtime::stage::Uplink::new(
+                sh.clone(),
+                hold_state.clone(),
+                speaking.clone(),
+            )),
+        ));
+    }
     let interim = if settings.barge_in_min_words > 0 {
         settings.barge_in_interim_secs
     } else {
@@ -930,6 +960,17 @@ pub fn build_session(p: SessionParams) -> GhostSession {
                 .with_record(on_record.clone()),
         ),
     ));
+    if let Some(sh) = &rt_shared {
+        stages.push((
+            None,
+            Box::new(crate::realtime::stage::ConfirmWatch::new(
+                sh.clone(),
+                p.gate.clone(),
+                &session_id,
+                speaking.clone(),
+            )),
+        ));
+    }
     stages.push((
         Some(Slot::AfterStt),
         Box::new(
@@ -968,7 +1009,8 @@ pub fn build_session(p: SessionParams) -> GhostSession {
                 settings.barge_in_min_words,
                 Some(analyzer),
                 settings.turn_grace_secs,
-                settings.turn_speculate,
+                // With the realtime voice in front the agent never answers early (ADR 0063).
+                settings.turn_speculate && rt_shared.is_none(),
                 turns.clone(),
             )
             .with_confident_close(
@@ -983,6 +1025,12 @@ pub fn build_session(p: SessionParams) -> GhostSession {
             .with_speaking(speaking.clone()),
         ),
     ));
+    if let Some(sh) = &rt_shared {
+        stages.push((
+            None,
+            Box::new(crate::realtime::stage::Gate::new(sh.clone())),
+        ));
+    }
     let compaction = runtime.as_ref().map(|_| Compaction {
         trigger_tokens: settings.compact_trigger_tokens,
         keep_messages: settings.compact_keep_messages,
@@ -1003,7 +1051,11 @@ pub fn build_session(p: SessionParams) -> GhostSession {
     };
     // The reply's first clause is rendered while the reply is held (ADR 0049): with the
     // local voice unless set otherwise, never behind a paid one.
-    let prerender = (settings.prerender() && settings.tts_engine != "elevenlabs").then(|| {
+    // Not behind the realtime voice, which says the reply itself (ADR 0063).
+    let prerender = (settings.prerender()
+        && settings.tts_engine != "elevenlabs"
+        && rt_shared.is_none())
+    .then(|| {
         crate::tts::Prerender::new(
             p.models.tts.clone(),
             tts_settings.clone(),
@@ -1051,9 +1103,28 @@ pub fn build_session(p: SessionParams) -> GhostSession {
         None,
         Box::new(NarrationCut::default().with_turns(turns.clone())),
     ));
+    if let (Some(sh), Some(params)) = (&rt_shared, realtime) {
+        stages.push((
+            None,
+            Box::new(crate::realtime::stage::Voice::new(
+                crate::realtime::stage::VoiceParts {
+                    shared: sh.clone(),
+                    params,
+                    gate: p.gate.clone(),
+                    session_id: session_id.clone(),
+                    on_turn: on_turn.clone(),
+                    inject: inject_rt.clone(),
+                    hang_up: hang_up.clone(),
+                    hold: hold_rt.clone(),
+                    probe: probe.clone(),
+                },
+            )),
+        ));
+    }
     // At the turn's first call to an app, a word or two before the tools run (#43). Kokoro
-    // only: an ElevenLabs reply would answer in another voice than the acknowledgment.
-    if settings.ack && settings.tts_engine != "elevenlabs" {
+    // only: an ElevenLabs reply would answer in another voice than the acknowledgment. Not
+    // behind the realtime voice, which says its own few words.
+    if settings.ack && settings.tts_engine != "elevenlabs" && rt_shared.is_none() {
         let outside: Outside = {
             let d = dispatcher.clone();
             Arc::new(move |name: &str| d.outside(name))

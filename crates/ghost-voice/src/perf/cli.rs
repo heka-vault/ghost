@@ -39,7 +39,7 @@ use super::harness::{AppSet, Bench, Profile, RealModel, RunConfig, parse_ablatio
 use super::report::render;
 use super::scenarios::{DEFAULT, by_name, scenarios};
 
-pub const USAGE: &str = "usage: ghost-perf run|micro|llm|providers|report|hear|hear-report|hear-check|turns|turns-report [options]";
+pub const USAGE: &str = "usage: ghost-perf run|micro|llm|providers|realtime|report|hear|hear-report|hear-check|turns|turns-report [options]";
 
 fn csv(s: Option<&String>) -> Vec<String> {
     s.map(|s| {
@@ -139,6 +139,10 @@ pub fn main(argv: &[String]) -> i32 {
             .unwrap_or_default();
         print!("{}", render(&runs, &meta));
         return 0;
+    }
+    if args.cmd == "realtime" {
+        // Its own arguments; the key only from the variable named (ADR 0063).
+        return realtime(&argv[1..], &root, &scratch);
     }
     if args.cmd == "providers" {
         // Its own arguments: providers by name, keys only from the variables named.
@@ -258,6 +262,44 @@ pub fn main(argv: &[String]) -> i32 {
         other => {
             eprintln!("unknown command {other:?}; {USAGE}");
             2
+        }
+    }
+}
+
+/// The realtime voice against a real provider (`super::realtime`).
+fn realtime(argv: &[String], _root: &Path, scratch: &Path) -> i32 {
+    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
+    let a = match super::realtime::parse(argv, &scratch.join(format!("{stamp}-realtime"))) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("{e}");
+            return 2;
+        }
+    };
+    let settings = match crate::config::VoiceSettings::from_env() {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("{e}");
+            return 2;
+        }
+    };
+    let kokoro = match ghost_infer::Kokoro::load(&settings.kokoro_paths()) {
+        Ok(k) => k,
+        Err(e) => {
+            eprintln!("realtime: Kokoro, to speak the lines, did not load: {e}");
+            return 2;
+        }
+    };
+    let synth: crate::tts::SharedSynth = std::sync::Arc::new(std::sync::Mutex::new(kokoro));
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("a runtime");
+    match rt.block_on(super::realtime::run(&a, synth, scratch)) {
+        Ok(code) => code,
+        Err(e) => {
+            eprintln!("realtime: {e}");
+            1
         }
     }
 }

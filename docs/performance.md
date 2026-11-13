@@ -85,6 +85,16 @@ one lookup is 5.1 s with the main model alone and 3.2 s when the fast model make
 itself (`GHOST_LLM_FAST_READS`). The plain reply's 1.5 s budget is met at the p50 only by
 the greeting; the lookup's 2.5 s by nothing yet.
 
+With the realtime voice (ADR 0063, off by default, [realtime-voice.md](realtime-voice.md)) the
+first sound is the provider's: its VAD's silence (500 ms, `GHOST_REALTIME_SILENCE_MS`) and its
+first audio, a few hundred milliseconds by the provider's account, not yet measured here
+against the real service. A lookup is the consult (the provider's first sound plus its call),
+the agent's own time as above, and the relay's start (the provider saying a given text). The
+harness for it is `make perf-turns REALTIME_KEY_ENV=VAR` (`ghostd perf realtime`), with a
+key from that variable only; its records in `latency.jsonl` are `kind: realtime` and every
+record of such a session carries `"voice": "realtime"`, so `make latency` never mixes the two
+voices' numbers. With the mode off nothing of it is built or run.
+
 Delay added on purpose counts against the budget like any other. Today that is the
 turn grace, so a pause doesn't end the operator's turn: 0.35 s when Smart Turn is sure
 and the words end a sentence, 1.2 s otherwise (ADR 0049, `GHOST_TURN_CONFIDENT_*`; the

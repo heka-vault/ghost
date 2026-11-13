@@ -84,6 +84,82 @@ impl Answer {
     }
 }
 
+/// The realtime voice for this session, when the operator chose it (ADR 0063): the desk's
+/// session with its microphone open only (the phone's call and a typed turn while not
+/// listening keep the voice on this machine), under the day's cap, with its password in
+/// the vault. Anything missing is a note on the waiting list and a local session; Ghost
+/// never changes the mode itself.
+pub(crate) fn realtime_for(
+    d: &Arc<Daemon>,
+    desk_with_mic: bool,
+) -> Option<ghost_voice::realtime::stage::RealtimeParams> {
+    use ghost_voice::realtime::Failure;
+    use ghost_voice::realtime::spend::today;
+    let settings = d.realtime_settings();
+    if !settings.on || !desk_with_mic {
+        return None;
+    }
+    let note = |d: &Arc<Daemon>, text: String| {
+        *lock(&d.realtime_note) = Some(text);
+        d.refresh_waiting_now();
+    };
+    let ledger = Arc::new(d.realtime_ledger());
+    if ledger.over(&today(), settings.daily_cap_usd) {
+        info!("voice: the realtime voice's cap for today is reached; this session is local");
+        note(d, Failure::Cap.note());
+        return None;
+    }
+    let env = d.env();
+    let provider = match ghost_voice::realtime::provider(&settings, |k| env.get(k).cloned()) {
+        Ok(p) => p,
+        Err(e) => {
+            info!("voice: {e}; this session is local");
+            note(
+                d,
+                format!(
+                    "The realtime voice is on, but {e}; Ghost used the voice on this machine. Add it in Settings › Passwords."
+                ),
+            );
+            return None;
+        }
+    };
+    if let Some(vault) = d.passwords() {
+        vault.note_used(&[settings.password.as_str()]);
+    }
+    ledger.session_started(&today());
+    let cap = settings.daily_cap_usd;
+    let on_usage: ghost_voice::realtime::stage::OnUsage = {
+        let ledger = ledger.clone();
+        let weak = Arc::downgrade(d);
+        Arc::new(move |_usage, usd| {
+            let spent = ledger.add(&today(), usd);
+            if let Some(d) = weak.upgrade() {
+                // It answers: whatever went wrong before is past.
+                let had = lock(&d.realtime_note).take().is_some();
+                if had {
+                    d.refresh_waiting_now();
+                }
+            }
+            cap.is_some_and(|c| spent.usd >= c)
+        })
+    };
+    let on_fallback: ghost_voice::realtime::stage::OnFallback = {
+        let weak = Arc::downgrade(d);
+        Arc::new(move |f| {
+            if let Some(d) = weak.upgrade() {
+                *lock(&d.realtime_note) = Some(f.note());
+                d.refresh_waiting_now();
+            }
+        })
+    };
+    Some(ghost_voice::realtime::stage::RealtimeParams {
+        provider,
+        on_usage: Some(on_usage),
+        on_fallback: Some(on_fallback),
+        connect_timeout: std::time::Duration::from_secs(4),
+    })
+}
+
 pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
     let SessionStart {
         first_utterance,
@@ -417,6 +493,7 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
         latency_log: Some(cfg.latency_path()),
         reach: d.reach(),
         context_note,
+        realtime: realtime_for(d, origin == SessionOrigin::Desk && !d.mic.is_off()),
     }));
     if let Some(p) = &phone {
         session.set_rtvi(Arc::new(PhoneRtvi(p.media.clone())));
@@ -766,4 +843,69 @@ fn activity_view(a: ghost_voice::activity::Activity) -> ghost_api::models::Activ
         Activity::Error => v.kind = ActivityKind::Error,
     }
     v
+}
+
+#[cfg(test)]
+mod realtime_tests {
+    use std::collections::BTreeMap;
+
+    use super::*;
+    use crate::daemon::tests::daemon;
+
+    fn set(d: &Arc<Daemon>, pairs: &[(&str, &str)]) {
+        let values: BTreeMap<String, Option<String>> = pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), Some(v.to_string())))
+            .collect();
+        d.apply_realtime(&values);
+    }
+
+    #[tokio::test]
+    async fn the_realtime_voice_is_used_only_when_chosen_for_the_desk_with_its_mic_and_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        let d = daemon(tmp.path());
+        // The default: the voice on this machine, nothing noted.
+        assert!(realtime_for(&d, true).is_none());
+        assert!(lock(&d.realtime_note).is_none());
+        // Chosen, but its password is not in the vault: local, with a note saying so.
+        set(
+            &d,
+            &[
+                ("GHOST_VOICE_MODE", "realtime"),
+                ("GHOST_REALTIME_PASSWORD", "RT_TEST_KEY_NOT_SET"),
+            ],
+        );
+        assert!(realtime_for(&d, true).is_none());
+        let note = lock(&d.realtime_note).clone().expect("a note");
+        assert!(note.contains("RT_TEST_KEY_NOT_SET"), "{note}");
+        // With the key: the desk's session gets it; the phone's or a mic-less one never.
+        lock(&d.environ).insert("RT_TEST_KEY_NOT_SET".into(), "sk-test".into());
+        assert!(realtime_for(&d, true).is_some());
+        assert!(realtime_for(&d, false).is_none());
+        // Today's cap reached: local, noted.
+        set(&d, &[("GHOST_REALTIME_DAILY_CAP_USD", "0.10")]);
+        d.realtime_ledger()
+            .add(&ghost_voice::realtime::spend::today(), 0.25);
+        assert!(realtime_for(&d, true).is_none());
+        assert!(lock(&d.realtime_note).clone().unwrap().contains("cap"));
+        // Back to this machine: the note goes.
+        set(&d, &[("GHOST_VOICE_MODE", "local")]);
+        assert!(lock(&d.realtime_note).is_none());
+        assert!(realtime_for(&d, true).is_none());
+    }
+
+    #[test]
+    fn a_setting_that_does_not_read_is_refused_and_the_old_one_kept() {
+        let tmp = tempfile::tempdir().unwrap();
+        let d = daemon(tmp.path());
+        set(&d, &[("GHOST_VOICE_MODE", "realtime")]);
+        let values: BTreeMap<String, Option<String>> = [(
+            "GHOST_REALTIME_VOICE".to_string(),
+            Some("nobody".to_string()),
+        )]
+        .into();
+        assert!(d.apply_realtime(&values).is_empty());
+        assert_eq!(d.realtime_settings().voice, "marin");
+        assert!(d.realtime_settings().on);
+    }
 }

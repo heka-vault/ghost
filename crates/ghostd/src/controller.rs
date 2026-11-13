@@ -224,6 +224,7 @@ impl Controller for Daemon {
     /// model connection (ADR 0037) by the next session and the next model step.
     fn apply_settings(&self, values: &BTreeMap<String, Option<String>>) -> Vec<String> {
         let mut applied = self.apply_model(values);
+        applied.extend(Daemon::apply_realtime(self, values));
         let Some(listener) = lock(&self.listener).clone() else {
             return applied;
         };
@@ -264,6 +265,63 @@ impl Controller for Daemon {
 
     fn apply_model(&self, values: &BTreeMap<String, Option<String>>) -> Vec<String> {
         Daemon::apply_model(self, values)
+    }
+
+    async fn check_realtime(&self) -> Option<ghost_api::realtime::RealtimeCheckView> {
+        let settings = self.realtime_settings();
+        let env = self.env();
+        let at = chrono::Utc::now();
+        let view = match ghost_voice::realtime::provider(&settings, |k| env.get(k).cloned()) {
+            Err(e) => ghost_api::realtime::RealtimeCheckView {
+                checked_at: at,
+                provider: settings.provider.clone(),
+                model: settings.model.clone(),
+                reachable: false,
+                error: Some(e),
+                connect_ms: None,
+                first_audio_ms: None,
+                tools: None,
+                usd: 0.0,
+            },
+            Ok(p) => {
+                if let Some(vault) = self.passwords() {
+                    vault.note_used(&[settings.password.as_str()]);
+                }
+                let r = ghost_voice::realtime::check::check(&*p).await;
+                if r.usd > 0.0 {
+                    self.realtime_ledger()
+                        .add(&ghost_voice::realtime::spend::today(), r.usd);
+                }
+                info!(
+                    "voice: realtime check: {} {} reachable={} first audio {:?} ms, consult {:?}",
+                    r.provider, r.model, r.reachable, r.first_audio_ms, r.tools
+                );
+                ghost_api::realtime::RealtimeCheckView {
+                    checked_at: at,
+                    provider: r.provider,
+                    model: r.model,
+                    reachable: r.reachable,
+                    error: r.error,
+                    connect_ms: r.connect_ms,
+                    first_audio_ms: r.first_audio_ms,
+                    tools: r.tools,
+                    usd: r.usd,
+                }
+            }
+        };
+        *lock(&self.realtime_check) = Some(view.clone());
+        Some(view)
+    }
+
+    fn last_realtime_check(&self) -> Option<ghost_api::realtime::RealtimeCheckView> {
+        lock(&self.realtime_check).clone()
+    }
+
+    fn realtime_spend(&self) -> Option<ghost_core::realtime::Spend> {
+        Some(
+            self.realtime_ledger()
+                .read(&ghost_voice::realtime::spend::today()),
+        )
     }
 
     async fn check_model(

@@ -4,7 +4,7 @@
 
 ## Shape
 
-One operator, one Linux workstation (ADR 0001). Ghost is one desktop app with the daemon inside (ADR 0038): the app runs `ghostd` while the operator is logged in, lives in the tray, and Quit stops everything; the `ghostd` user unit is the headless mode for a desk with no display. The daemon and the app's shell are one Cargo workspace (ADR 0039). Only two kinds of thing leave the machine: LLM calls, and calls to the apps the operator connected (ADR 0034).
+One operator, one Linux workstation (ADR 0001). Ghost is one desktop app with the daemon inside (ADR 0038): the app runs `ghostd` while the operator is logged in, lives in the tray, and Quit stops everything; the `ghostd` user unit is the headless mode for a desk with no display. The daemon and the app's shell are one Cargo workspace (ADR 0039). Only two kinds of thing leave the machine: LLM calls, and calls to the apps the operator connected (ADR 0034); and, when the operator has chosen the realtime voice, a desk session's audio after the wake ([the realtime voice](#the-realtime-voice-adr-0063), ADR 0063).
 
 ```mermaid
 flowchart LR
@@ -226,7 +226,7 @@ One Cargo workspace (ADR 0039): the crates under `crates/` and the desktop app's
 | Crate | Responsibility |
 |---|---|
 | `ghostd` | The daemon (`crates/ghostd`). Owns the microphone, runs the passive wake listener (local VAD and Parakeet matching a phrase, ADR 0010, or the trained detectors, ADR 0025), and on wake runs a session over the desk's audio; ducks and restores music, plays the chime and the thinking sound, and returns to passive on a goodbye or the idle timeout; "hang on, Ghost" holds the session until it is addressed by name again (ADR 0021). Serves the control API, the phone listener, the webhook listener and the listener for outside tools (ADR 0048), runs the watches, the routes and the schedules (ADR 0047: an agent's run with nobody there, beside any session), and is the desktop's `Controller`. `ghostd check`, `passwords`, `mcp`, `latency`, `perf`, `push`, `restore-volumes` and `api-schema` are its subcommands |
-| `ghost-voice` | Ghost's own pipeline, written for one session and one transport at a time (ADR 0039; Pipecat's ideas, not its code): typed frames over bounded channels, one task per stage, a cancellation token per session and per turn. The speech-in stage (Silero VAD, Parakeet with interim re-reads), the user's turn (Smart Turn, the patient stop with the grace, the speculative answer, barge-in), the interceptors and the confirmation processor, the model stage with compaction, the narration cut and the spoken filter, Kokoro a clause at a time or ElevenLabs with failover, the echo filter, hold, the latency timeline, and the harness behind `make perf`. Also the one thing with no audio in it: `ghost_voice::headless`, an agent's run with nobody there, over the same model port and tool dispatcher (ADR 0047) |
+| `ghost-voice` | Ghost's own pipeline, written for one session and one transport at a time (ADR 0039; Pipecat's ideas, not its code): typed frames over bounded channels, one task per stage, a cancellation token per session and per turn. The speech-in stage (Silero VAD, Parakeet with interim re-reads), the user's turn (Smart Turn, the patient stop with the grace, the speculative answer, barge-in), the interceptors and the confirmation processor, the model stage with compaction, the narration cut and the spoken filter, Kokoro a clause at a time or ElevenLabs with failover, the echo filter, hold, the latency timeline, and the harness behind `make perf`. With the realtime voice chosen, four more stages put a realtime speech-to-speech model in front of the agent (`ghost_voice::realtime`, ADR 0063). Also the one thing with no audio in it: `ghost_voice::headless`, an agent's run with nobody there, over the same model port and tool dispatcher (ADR 0047) |
 | `ghost-llm` | The one model client (ADR 0037): the session's streamed reply, a one-shot completion and a first-token probe, for the Anthropic Messages API and for OpenAI-compatible Chat Completions. Every tool call of a reply is delivered; a reply cut at the output cap is redone once in smaller steps and flagged `cut_off` |
 | `ghost-infer` | The local models on ONNX Runtime (ADR 0004): Parakeet TDT v3 for speech to text, Silero for voice activity, Smart Turn v3 for the end of a turn, the trained wake detectors with the transcript matcher behind them, and Kokoro for speech. The runtime is loaded at start (ONNX Runtime 1.24.4, the one the parity fixtures were recorded on: in the bundle, or `~/.cache/ghost/onnxruntime/`, or `ORT_DYLIB_PATH`), and the four small model files are found the same way (`GHOST_MODELS_DIR`, the bundle, `~/.cache/ghost/models/`, where `scripts/models.sh` puts them) |
 | `ghost-audio` | The audio engine: PipeWire through the project's own binding (one clock domain), a realtime-safe ring between its thread and tokio, ducking, the chime and the thinking sound |
@@ -500,6 +500,39 @@ of PipeWire's WebRTC echo canceller running as its own user service
 reference, so what Kokoro plays is subtracted from what the microphone hears before VAD or
 STT see it. Device names are rendered into the user's config at install time and never
 committed.
+
+### The realtime voice (ADR 0063)
+
+Off by default; the operator chooses it in Settings › Sound (`GHOST_VOICE_MODE=realtime`,
+[realtime-voice.md](realtime-voice.md)). A desk session with the microphone open then
+builds the local pipeline whole, with four stages added, so it can fall back at any moment:
+
+```text
+capture -> [uplink] -> speech-in (Parakeet, beside) -> hold -> echo -> taps -> interceptors
+  -> [confirm watch] -> confirmation -> the user's turn -> [gate] -> model (Ghost's agent)
+  -> narration cut -> [voice] -> thinking -> taps -> TTS (Kokoro, the fallback) -> playback
+```
+
+- **uplink** sends the session's audio to the provider: never on hold, and while Ghost
+  speaks only once Ghost's barge-in rule has said the operator is talking over it.
+- **confirm watch** marks the turn that answers a change waiting for its yes.
+- **gate** keeps the operator's spoken turns from the agent while the realtime model
+  answers them itself (kept as the words of record for the next consult) and lets a
+  consult, a typed turn, a resume, a confirmation turn and everything after a fallback
+  through.
+- **voice** connects (`RealtimeProvider`, OpenAI Realtime first), plays the provider's
+  audio through the output stage, turns a `consult` call into a user turn for the agent at
+  the session's source, and has the agent's final reply said exactly (`response.create` with
+  the text, no tools), checking the provider's transcript of its own speech against it and
+  releasing the audio only two words ahead (`realtime::relay`); a reading that strays is cut
+  and the rest said by Kokoro. The provider's automatic reply is off while a change waits
+  for its yes. A failure falls back for the session with one sentence and a note on the
+  waiting list; usage is priced into `realtime-spend.json` and the day's cap.
+
+The realtime model has three tools (`consult`, `hang_up`, `hold`) and no app's. Parakeet
+still reads every segment: the transcript, `heard`, the fixed intents and the gate's
+evidence are Ghost's own words. The phone's call, typed turns while not listening and
+schedules never use it.
 
 ## Open items
 

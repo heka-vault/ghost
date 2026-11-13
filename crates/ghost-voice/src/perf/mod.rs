@@ -18,6 +18,7 @@ pub mod join;
 pub mod llm;
 pub mod micro;
 pub mod providers;
+pub mod realtime;
 pub mod report;
 pub mod scenarios;
 pub mod shaped;

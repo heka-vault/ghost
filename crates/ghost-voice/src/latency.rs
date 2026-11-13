@@ -52,6 +52,9 @@ pub const TTS: &str = "tts";
 /// Durations Ghost's stages measure themselves. Every method is a no-op by default, so a
 /// stage built without a session (tests, the wake listener) needs no checks.
 pub trait LatencyProbe: Send + Sync {
+    /// One exchange of the realtime voice (ADR 0063), kept as its own record: what it was
+    /// (`talk`, `answer`, `line`, `connect`, `fallback`), its timings and numbers only.
+    fn realtime(&self, _record: Value) {}
     /// The turn model said done and the grace hold ran `secs` before the turn ended.
     fn held(&self, _secs: f64) {}
     /// The operator went on during the grace hold; the turn stayed open.
@@ -272,6 +275,9 @@ pub struct LatencyObserver {
     log_line: bool,
     built: Instant,
     state: Mutex<State>,
+    /// `realtime` in a session with the realtime voice in front (ADR 0063): every record
+    /// says so, so the local voice's numbers are never mixed with its.
+    voice: Option<&'static str>,
 }
 
 impl LatencyObserver {
@@ -293,6 +299,28 @@ impl LatencyObserver {
                 pipeline_t0: None,
                 records: Vec::new(),
             }),
+            voice: None,
+        }
+    }
+
+    pub fn with_voice(mut self, voice: &'static str) -> Self {
+        self.voice = Some(voice);
+        self
+    }
+
+    fn emit(&self, s: &mut State, mut record: Value) {
+        if let (Some(v), Some(m)) = (self.voice, record.as_object_mut()) {
+            m.insert("voice".into(), json!(v));
+        }
+        s.records.push(record.clone());
+        if self.log_line {
+            info!("{}", format_line(&record));
+        }
+        if let Some(sink) = &self.sink {
+            sink(&record);
+        }
+        if let Some(path) = &self.path {
+            append_record(path, &record, self.max_bytes);
         }
     }
 
@@ -681,16 +709,7 @@ impl LatencyObserver {
             self.model.as_deref(),
             build_secs,
         );
-        s.records.push(record.clone());
-        if self.log_line {
-            info!("{}", format_line(&record));
-        }
-        if let Some(sink) = &self.sink {
-            sink(&record);
-        }
-        if let Some(path) = &self.path {
-            append_record(path, &record, self.max_bytes);
-        }
+        self.emit(s, record);
     }
 
     /// Finish whatever turn is open (the session is over).
@@ -713,6 +732,25 @@ impl Observer for LatencyObserver {
 }
 
 impl LatencyProbe for LatencyObserver {
+    fn realtime(&self, record: Value) {
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut s = self.lock();
+            let mut rec = Map::new();
+            rec.insert("v".into(), json!(RECORD_VERSION));
+            rec.insert("ts".into(), json!(now_stamp()));
+            rec.insert("session".into(), json!(self.session_id));
+            rec.insert("origin".into(), json!(self.origin));
+            rec.insert("kind".into(), json!("realtime"));
+            if let Value::Object(m) = record {
+                rec.extend(m);
+            }
+            self.emit(&mut s, Value::Object(rec));
+        }));
+        if r.is_err() {
+            error!("latency: a realtime record failed");
+        }
+    }
+
     fn held(&self, secs: f64) {
         if let Some(turn) = &mut self.lock().turn {
             turn.hold += secs;
@@ -1106,6 +1144,24 @@ fn calls_of(rec: &Value) -> Vec<Value> {
 
 /// One log line per turn, timings only.
 pub fn format_line(rec: &Value) -> String {
+    if rec["kind"] == "realtime" {
+        let mut line = format!(
+            "latency: realtime {} {}",
+            rec["origin"].as_str().unwrap_or(""),
+            rec["what"].as_str().unwrap_or("")
+        );
+        for k in ["first_sound", "answer", "consult", "first_audio", "secs"] {
+            if let Some(v) = num(rec.get(k)) {
+                line.push_str(&format!(" {k} {v:.2}s"));
+            }
+        }
+        for k in ["outcome", "reason"] {
+            if let Some(v) = rec[k].as_str() {
+                line.push_str(&format!(" {k} {v}"));
+            }
+        }
+        return line;
+    }
     let mut head = format!(
         "latency: turn {} {} {}",
         rec["turn"],
