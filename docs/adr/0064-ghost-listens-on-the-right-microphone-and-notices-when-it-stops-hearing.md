@@ -34,6 +34,7 @@ Until now Ghost listened on one input, `ghost.mic` by default: PipeWire's WebRTC
   - The note says to plug the device into the computer, not a hub.
   - Repair can't fix it and isn't offered as the fix.
 - **Deaf**: three final checks at −35 dBFS or louder that read no words, within 20 minutes; a loud check that reads words clears it (#58).
+  - A desk session's reads count the same way (2026-11-13): each segment's level and word count, never its words or audio (`stt::OnRead`); not a segment heard while Ghost spoke, and not the phone's.
   - The note says Repair restarts the echo canceller (when it is in use) and reopens the microphone.
   - When the hardware cancels on chip, the note adds that Ghost can listen to it directly.
 
@@ -57,5 +58,4 @@ A problem is a note of Ghost's own on the waiting list (`input:degraded`), shown
   - Their cases are tested on fixtures shaped like their PipeWire nodes. When a detection is wrong it fails toward working: no canceller assumed, the default microphone, the sentence that Ghost may hear itself.
   - A device that cancels on chip but isn't on the list reads as unprotected until it is added.
 - **Still open:**
-  - A session's own empty reads (`HeardNothing` on loud segments) don't feed the health yet; only the passive checks do.
   - The echo filter's warm-up guard after Ghost's voice (#42, #54) exists for the host canceller's onset leak. On the on-chip path it may cost more than it saves, to be measured once Ghost's voice can be played in the room again.

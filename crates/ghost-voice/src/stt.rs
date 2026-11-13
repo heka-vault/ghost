@@ -175,7 +175,14 @@ pub struct ParakeetStt {
     /// How much quiet starts the early read: the VAD dips between words for a frame or
     /// two, and a read begun there is thrown away.
     early_after_secs: f64,
+    /// Each segment's read as numbers (the microphone's health, ADR 0064).
+    on_read: Option<OnRead>,
 }
+
+/// A segment's read as numbers: its level in dBFS and how many words were read. Never the
+/// words, never the audio. Not called for a segment heard while Ghost spoke (its echo may
+/// leak loud and read as nothing without the microphone being at fault).
+pub type OnRead = Arc<dyn Fn(f64, usize) + Send + Sync>;
 
 /// Whether a segment is read from its first quiet frame (`ParakeetStt::with_early_read`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -253,6 +260,22 @@ impl ParakeetStt {
             quiet_secs: 0.0,
             early_tried: false,
             early_after_secs: 0.0,
+            on_read: None,
+        }
+    }
+
+    /// Report each segment's read (level, words) to `on_read`.
+    pub fn with_on_read(mut self, on_read: Option<OnRead>) -> Self {
+        self.on_read = on_read;
+        self
+    }
+
+    fn report_read(&self, dbfs: f64, words: usize) {
+        if self.mode == VadMode::OverGhost || self.speaking.is_on() {
+            return;
+        }
+        if let Some(f) = &self.on_read {
+            f(dbfs, words);
         }
     }
 
@@ -539,8 +562,9 @@ impl ParakeetStt {
             }))
             .await;
             let secs_audio = segment.len() as f64 / f64::from(SAMPLE_RATE);
+            let dbfs = level_dbfs(&segment);
+            self.report_read(dbfs, text.split_whitespace().count());
             if text.is_empty() {
-                let dbfs = level_dbfs(&segment);
                 debug::audio(|| {
                     format!(
                         "heard nothing in a {secs_audio:.1}s segment at {dbfs:.0} dBFS (read early)"
@@ -591,6 +615,7 @@ impl ParakeetStt {
             }))
             .await;
         }
+        self.report_read(level, text.split_whitespace().count());
         if text.is_empty() {
             // 2026-10-30 19:28: a 2 s segment Smart Turn judged done (0.98) left no
             // line at all, and the turn closed on the words before it.
@@ -1180,6 +1205,42 @@ mod tests {
         assert_eq!(calls.len(), 2);
         assert_eq!(finals(&verify), finals(&off));
         assert_eq!(early_reads(&verify), vec!["same"]);
+    }
+
+    /// One segment through a stage that reads `text`, with `speaking` on or off: what
+    /// `on_read` was told.
+    async fn reads(text: &str, ghost_speaking: bool) -> Vec<(f64, usize)> {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let s = seen.clone();
+        let speaking = Speaking::new();
+        speaking.set(ghost_speaking);
+        let mut stt = ParakeetStt::new(model(text, 0.0).shared, None, VadParams::default(), 0.0)
+            .with_speaking(speaking)
+            .with_on_read(Some(Arc::new(move |db, words| {
+                s.lock().unwrap().push((db, words))
+            })));
+        let (out, _rx) = Out::capture();
+        stt.process(Frame::VadStarted { start_secs: 0.2 }, Direction::Down, &out)
+            .await;
+        for f in speech(0.5) {
+            stt.process(f, Direction::Down, &out).await;
+        }
+        stt.process(Frame::VadStopped { stop_secs: 0.2 }, Direction::Down, &out)
+            .await;
+        seen.lock().unwrap().clone()
+    }
+
+    #[tokio::test]
+    async fn test_each_read_is_reported_as_its_level_and_word_count() {
+        // A loud segment read as nothing inside a session is what the passive check
+        // watches for (ADR 0064): the daemon's health hears it as numbers only.
+        let empty = reads("", false).await;
+        assert_eq!(empty.len(), 1);
+        assert_eq!(empty[0].1, 0);
+        assert!(empty[0].0 > -35.0, "{}", empty[0].0);
+        assert_eq!(reads("what is on today", false).await[0].1, 4);
+        // Ghost talking: its echo is not the microphone's fault
+        assert!(reads("", true).await.is_empty());
     }
 
     #[tokio::test]
