@@ -119,7 +119,7 @@ html[data-capture="full"] .shell__main { height: auto; min-height: calc(100vh - 
 .shell-settings__mark.is-dirty { background: var(--text-2); }
 .shell-settings__mark.is-error { background: var(--danger); }
 .shell-settings__restart { display: inline-flex; flex: none; }
-.shell-settings__item .shell-settings__restart .lucide { width: var(--icon-xs); height: var(--icon-xs); color: var(--warn); }
+.shell-settings__item .shell-settings__restart .lucide { width: var(--icon-xs); height: var(--icon-xs); color: var(--info); }
 .shell-settings__page { display: flex; flex-direction: column; min-width: 0; }
 .shell-settings__page > * { flex: 1 0 auto; }
 .shell__main:has(.shell-settings) .g-page-bar { left: var(--settings-nav-width); }

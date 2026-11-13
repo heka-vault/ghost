@@ -28,7 +28,7 @@
 .set-help { font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-3); }
 .set-help.is-readable { color: var(--text-2); }
 .set-optional { color: var(--text-3); }
-.set-waits { color: var(--warn); font-weight: var(--weight-medium); }
+.set-waits { color: var(--info); font-weight: var(--weight-medium); }
 .set-live { color: var(--ok); font-weight: var(--weight-medium); }
 .set-slow { color: var(--danger); font-weight: var(--weight-medium); }
 .set-help-strong { color: var(--text-2); font-weight: var(--weight-medium); }

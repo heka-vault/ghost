@@ -866,7 +866,7 @@ a.g-btn, a.g-icon-btn, a.g-btn:hover, a.g-icon-btn:hover { text-decoration: none
 .g-savebar.has-description .g-savebar__dot { align-self: start; margin-top: var(--space-1_5); }
 .g-savebar--error .g-savebar__dot { background: var(--danger); }
 .g-savebar--offline .g-savebar__dot { background: var(--text-3); }
-.g-savebar__icon { grid-area: mark; display: inline-flex; color: var(--warn); }
+.g-savebar__icon { grid-area: mark; display: inline-flex; color: var(--info); }
 .g-savebar__icon .lucide { width: var(--icon-sm); height: var(--icon-sm); }
 .g-savebar__text { grid-area: text; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-md); line-height: var(--leading-md); color: var(--text-2); }
 .g-savebar__lead { font-weight: var(--weight-medium); color: var(--text-1); }
