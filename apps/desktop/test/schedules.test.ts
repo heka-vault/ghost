@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { MockSchedules } from "../src/design/mock/schedules";
-import { OUTCOME, cronWords, intervalWords, madeBy, untilWords, whenWords } from "../src/screens/watching/model";
+import { OUTCOME, cronWords, intervalWords, madeBy, runErrorWords, untilWords, whenWords } from "../src/screens/watching/model";
 
 describe("a schedule in the operator's words", () => {
   const now = Date.parse("2026-11-11T14:00:00Z");
@@ -108,5 +108,16 @@ describe("cronWords", () => {
     expect(cronWords("0 9 1-7 * 1")).toBeNull();
     expect(cronWords("0 9 * 6 *")).toBeNull();
     expect(cronWords("nonsense")).toBeNull();
+  });
+});
+
+describe("a run's failure in plain words", () => {
+  it("names the common causes and keeps the first sentence of the rest", () => {
+    expect(runErrorWords("HTTP 529: the model is overloaded")).toBe("the model was overloaded");
+    expect(runErrorWords("HTTP 429 Too Many Requests")).toBe("the model’s rate limit was reached");
+    expect(runErrorWords("it was still working after 10 minutes and was stopped")).toBe("it ran out of time");
+    expect(runErrorWords("the agent analytics is retired")).toBe("its agent is retired");
+    expect(runErrorWords("GitHub is not connected (signed out)")).toBe("an app it needed wasn’t connected");
+    expect(runErrorWords("Something odd happened. More detail here.")).toBe("Something odd happened");
   });
 });

@@ -8,6 +8,8 @@ export { joinSpoken, noCaptions, captionTurn, captionPhase, captionHeard, withou
 export type { Captions, Heard } from "./turns";
 export { createVoiceLevel } from "./voiceLevel";
 export type { VoiceLevel } from "./voiceLevel";
+export { createReachLive, REACH_KEPT } from "./reachLive";
+export type { ReachLive } from "./reachLive";
 export { createHearLive } from "./hearLive";
 export type { HearLevel, HearLive } from "./hearLive";
 export { splitSummary, neverHappened, didNotHappen, pastTense, shortTarget } from "./audit";

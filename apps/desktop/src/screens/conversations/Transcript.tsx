@@ -29,11 +29,14 @@ export interface TranscriptProps {
   limit: number;
   /** Every turn the line has (the detail's turn_count), for the cap note. */
   total: number;
+  /** Open where the page starts instead of at the last turn: the agent's page, whose brief
+   * leads. New turns still follow while the end is in view. */
+  openAtTop?: boolean;
 }
 
 const isLong = (turns: TurnView[], limit: number) => turns.length >= limit;
 
-export function Transcript({ turns, lineName, limit, total }: TranscriptProps) {
+export function Transcript({ turns, lineName, limit, total, openAtTop = false }: TranscriptProps) {
   const endRef = useRef<HTMLDivElement>(null);
   const opened = useRef(false);
   const [showFolded, setShowFolded] = useState(false);
@@ -47,7 +50,7 @@ export function Transcript({ turns, lineName, limit, total }: TranscriptProps) {
     const scroller = end.closest<HTMLElement>(".shell__main");
     const below = scroller ? end.getBoundingClientRect().top - scroller.getBoundingClientRect().bottom : 0;
     const first = !opened.current;
-    if (below > 0 && (first || below < 240)) {
+    if (below > 0 && ((first && !openAtTop) || (!first && below < 240))) {
       const id = requestAnimationFrame(() => {
         opened.current = true;
         scrollIntoPanel(end, { block: "panel-end", smooth: !first });

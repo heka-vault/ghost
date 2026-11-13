@@ -223,3 +223,20 @@ export async function openFile(path: string): Promise<{ ok: true } | { ok: false
     return { ok: false, path: shown };
   }
 }
+
+/**
+ * Why a run didn't finish, in plain words (the daemon's own message stays in the tooltip):
+ * the model overloaded or out of rate, the run out of time, a retired agent, an app away.
+ * Anything else is its first sentence, as the daemon wrote it.
+ */
+export function runErrorWords(error: string): string {
+  const e = error.toLowerCase();
+  if (/\b529\b|overloaded/.test(e)) return "the model was overloaded";
+  if (/\b429\b|rate limit/.test(e)) return "the model’s rate limit was reached";
+  if (/still working after|timed out|took too long/.test(e)) return "it ran out of time";
+  if (/is retired/.test(e)) return "its agent is retired";
+  if (/not connected|no longer connected/.test(e)) return "an app it needed wasn’t connected";
+  if (/\b401\b|unauthori[sz]ed|invalid api key|password/.test(e)) return "the model refused its password";
+  const first = error.split(/(?<=[.!?])\s/)[0].trim().replace(/[.!?]$/, "");
+  return first.length > 120 ? `${first.slice(0, 119)}…` : first;
+}

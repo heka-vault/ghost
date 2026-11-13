@@ -11,6 +11,7 @@ import { createContext, type ReactNode, useContext, useEffect, useMemo, useState
 import { type Activity, addActivity } from "./activity";
 import { createHearLive, type HearLive } from "./hearLive";
 import { createSaidWords, type SaidWords } from "./said";
+import { createReachLive, type ReachLive } from "./reachLive";
 import { type Captions, captionHeard, captionPhase, captionTurn, noCaptions } from "./turns";
 import { createVoiceLevel, type VoiceLevel } from "./voiceLevel";
 
@@ -42,6 +43,10 @@ export interface GhostState {
   hear: HearLive;
   /** Which words of Ghost's reply are heard now (ADR 0058), outside React state. Stable for the provider's life. */
   said: SaidWords;
+  /** Bumps whenever a run with nobody there starts or ends (ADR 0060); re-read GET /runs. */
+  runsVersion: number;
+  /** Each call an agent makes, as counts and sizes (ADR 0060), outside React state. Stable for the provider's life. */
+  reach: ReachLive;
 }
 
 const Ctx = createContext<GhostState | null>(null);
@@ -61,6 +66,8 @@ export function GhostProvider({ client, children }: { client: GhostClient; child
   const [voice] = useState(createVoiceLevel);
   const [hear] = useState(createHearLive);
   const [said] = useState(createSaidWords);
+  const [runsVersion, setRunsVersion] = useState(0);
+  const [reach] = useState(createReachLive);
 
   useEffect(() => {
     let stop: (() => void) | null = null;
@@ -94,6 +101,11 @@ export function GhostProvider({ client, children }: { client: GhostClient; child
           // About one a second while Ghost speaks: the words being heard (ADR 0058).
           if (m.type === "saying") {
             said.set(m.saying);
+            return;
+          }
+          // Every call an agent makes, as counts and sizes (ADR 0060): into its store.
+          if (m.type === "reach") {
+            reach.push(m.reach);
             return;
           }
           setLastEvent(m);
@@ -138,6 +150,9 @@ export function GhostProvider({ client, children }: { client: GhostClient; child
             case "apps":
               setAppsVersion((v) => v + 1);
               break;
+            case "run":
+              setRunsVersion((v) => v + 1);
+              break;
           }
         },
         () => {
@@ -170,11 +185,11 @@ export function GhostProvider({ client, children }: { client: GhostClient; child
       if (timer) clearTimeout(timer);
       stop?.();
     };
-  }, [client, voice, hear, said]);
+  }, [client, voice, hear, said, reach]);
 
   const value = useMemo(
-    () => ({ client, status, connected, turns: captions.shown, heldTurns: captions.held.length, pending, activity, logs, lastEvent, conversationsVersion, waitingVersion, appsVersion, voice, hear, said }),
-    [client, status, connected, captions, pending, activity, logs, lastEvent, conversationsVersion, waitingVersion, appsVersion, voice, hear, said],
+    () => ({ client, status, connected, turns: captions.shown, heldTurns: captions.held.length, pending, activity, logs, lastEvent, conversationsVersion, waitingVersion, appsVersion, voice, hear, said, runsVersion, reach }),
+    [client, status, connected, captions, pending, activity, logs, lastEvent, conversationsVersion, waitingVersion, appsVersion, voice, hear, said, runsVersion, reach],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
