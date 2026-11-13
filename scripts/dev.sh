@@ -56,7 +56,7 @@ DAEMON_PID='' DESKTOP_PID='' STOPPING=0
 
 # GHOST_LAUNCHER tells the daemon it was started here, so the desktop says make reload.
 start_daemon() {
-  setsid env GHOST_LAUNCHER=make-dev bash -c 'set -a; [[ -r "$1" ]] && . "$1"; set +a; exec "$2" run' _ "$ENV_FILE" "$GHOSTD" \
+  setsid env GHOST_LAUNCHER=make-dev GHOST_SETTINGS_LOADED=1 bash -c 'set -a; [[ -r "$1" ]] && . "$1"; set +a; exec "$2" run' _ "$ENV_FILE" "$GHOSTD" \
     </dev/null > >(prefix "ghostd " 36) 2>&1 &
   DAEMON_PID=$!
 }

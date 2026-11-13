@@ -78,7 +78,10 @@ impl System {
                 cmd.env_remove(&name);
             }
         }
+        // Loaded here, by the shell's own rule (the file over the login session's
+        // exports): the daemon does not read it again.
         cmd.env("GHOST_LAUNCHER", "desktop")
+            .env("GHOST_SETTINGS_LOADED", "1")
             .env("GHOST_PARENT_PID", std::process::id().to_string())
             .stdin(Stdio::null());
         cmd
@@ -400,7 +403,7 @@ mod tests {
         .unwrap();
         let ghostd = script(
             dir.path(),
-            r#"echo "args=$* launcher=$GHOST_LAUNCHER parent=$GHOST_PARENT_PID device=$GHOST_INPUT_DEVICE token=${ANTHROPIC_AUTH_TOKEN:-unset} pgid=$(ps -o pgid= -p $$ | tr -d ' ')"
+            r#"echo "args=$* launcher=$GHOST_LAUNCHER loaded=$GHOST_SETTINGS_LOADED parent=$GHOST_PARENT_PID device=$GHOST_INPUT_DEVICE token=${ANTHROPIC_AUTH_TOKEN:-unset} pgid=$(ps -o pgid= -p $$ | tr -d ' ')"
 echo "to stderr" >&2
 trap 'exit 0' TERM
 while :; do sleep 0.1; done"#,
@@ -421,6 +424,10 @@ while :; do sleep 0.1; done"#,
         let log = std::fs::read_to_string(dir.path().join("ghostd.log")).unwrap();
         assert!(log.contains("args=run "), "{log}");
         assert!(log.contains("launcher=desktop"), "{log}");
+        assert!(
+            log.contains("loaded=1"),
+            "the daemon does not load it again: {log}"
+        );
         assert!(
             log.contains(&format!("parent={}", std::process::id())),
             "{log}"

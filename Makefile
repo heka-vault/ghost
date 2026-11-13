@@ -38,8 +38,10 @@ export ENV_FILE UV
 GHOSTD := target/debug/ghostd
 DEV_GHOSTD := $(CURDIR)/target/debug/ghostd run$$
 
+# GHOST_SETTINGS_LOADED: ghostd reads settings.env itself when started by hand; the targets
+# load $(ENV_FILE) (which may be a ./.env in its place) and say so, so it is read once.
 define load_env
-set -a; [[ -r "$(ENV_FILE)" ]] && . "$(ENV_FILE)"; set +a;
+set -a; [[ -r "$(ENV_FILE)" ]] && . "$(ENV_FILE)"; set +a; export GHOST_SETTINGS_LOADED=1;
 endef
 
 define no_dev_daemon

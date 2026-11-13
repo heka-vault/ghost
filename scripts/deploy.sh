@@ -66,6 +66,7 @@ render_dropin() {
 ExecStartPre=
 EnvironmentFile=
 EnvironmentFile=-%h/.config/ghost/settings.env
+Environment=GHOST_SETTINGS_LOADED=1
 Environment=GHOST_INFRA_DIR=$cur/src/infra
 EOF
   if [[ -e "$dir/lib/$ORT_LIB" ]]; then
@@ -213,6 +214,7 @@ check() {
     set -a
     [[ -r "$HOME/.config/ghost/settings.env" ]] && . "$HOME/.config/ghost/settings.env"
     set +a
+    export GHOST_SETTINGS_LOADED=1
     export GHOST_INFRA_DIR="$dir/src/infra"
     [[ -e "$dir/lib/$ORT_LIB" ]] && export ORT_DYLIB_PATH="$dir/lib/$ORT_LIB"
     "$dir/bin/ghostd" check

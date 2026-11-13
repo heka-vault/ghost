@@ -28,7 +28,7 @@ use ghostd::check::check_command;
 use ghostd::config::runtime_dir;
 use ghostd::daemon::{Daemon, LogMirror, Ports, settings_from};
 use ghostd::latency::latency_command;
-use ghostd::mcp::{mcp_cli, serve_cli, settings_over};
+use ghostd::mcp::{mcp_cli, serve_cli};
 use ghostd::passwords::{Cli, Redacting, open_passwords, operator_keyring, passwords_cli};
 use ghostd::push::push_cli;
 use ghostd::{GhostdSettings, wake};
@@ -45,6 +45,9 @@ static PARENT_GONE: Notify = Notify::const_new();
 
 fn main() -> anyhow::Result<()> {
     use std::io::IsTerminal;
+    // `settings.env` first, so every command (and the log level) reads it however Ghost was
+    // started: a plain `ghostd run` from a shell, or a launcher that loaded it already.
+    let (settings_path, settings) = ghostd::config::load_settings_file();
     // No log line carries a password: every line is redacted against the vault's values
     // before it is written (ADR 0036), and so is what the mirror hands the desktop.
     let level = std::env::var("GHOST_LOG")
@@ -65,6 +68,7 @@ fn main() -> anyhow::Result<()> {
         .with(mirror.clone())
         .init();
 
+    log_settings_file(&settings_path, &settings);
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         None | Some("run") => run(mirror),
@@ -162,7 +166,7 @@ fn main() -> anyhow::Result<()> {
         }
         Some("llm") => std::process::exit(llm(&args[1..])),
         Some("mcp") => {
-            let cfg = settings_over(std::env::vars().collect())?;
+            let cfg = GhostdSettings::load()?;
             if args.get(1).map(String::as_str) == Some("serve") {
                 std::process::exit(mcp_serve(&args[2..], &cfg))
             }
@@ -186,6 +190,31 @@ fn main() -> anyhow::Result<()> {
         Some(other) => anyhow::bail!(
             "unknown command {other:?}; commands: run, status, wake, say, sleep, check, push, latency, llm, perf, restore-volumes, passwords, mcp, api-schema, version"
         ),
+    }
+}
+
+/// What `settings.env` gave this command: names only, never a value (ADR 0036). Quiet at
+/// info level unless something in it was not used.
+fn log_settings_file(path: &std::path::Path, s: &ghost_core::environment::SettingsFile) {
+    for name in &s.left_out {
+        warn!(
+            "settings.env: {name} is a password's name and is not read from it; passwords live in Ghost's vault (ghostd passwords set {name})"
+        );
+    }
+    if s.already_loaded {
+        tracing::debug!("settings.env: loaded by the launcher");
+    } else if !s.added.is_empty() || !s.overridden.is_empty() {
+        tracing::debug!(
+            "settings.env: {} setting(s) from {}",
+            s.added.len(),
+            path.display()
+        );
+    }
+    if !s.overridden.is_empty() {
+        info!(
+            "settings.env: the environment Ghost was started in sets {} over the file",
+            s.overridden.join(", ")
+        );
     }
 }
 
