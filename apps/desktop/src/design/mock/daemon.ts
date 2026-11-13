@@ -68,6 +68,7 @@ import { LONG_REPLY, type SessionFixture } from "./fixtures/session";
 import { sourceOf } from "./fixtures/sources";
 import { AUTONOMY, LISTS, conditionalFor, levelOf, parseRule, readPolicyText, ruleText, withRule } from "./permissions";
 import { type CatalogSkill, GHOST_SKILLS_DIR, SKILL_CATALOG, type SkillFixture, missingOf } from "./fixtures/skills";
+import { MockReach } from "./reach";
 import { hex, type Scenario, seeded } from "./scenarios";
 
 export { HttpError };
@@ -237,6 +238,9 @@ export class MockDaemon {
   private hear: MockHear;
   /** What the agents do on their own (ADR 0047): the schedules and their runs. */
   private schedules: MockSchedules;
+  /** Each call an agent made, as counts and sizes (ADR 0060). */
+  private reach: MockReach;
+  private reachTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(scenario: Scenario, f: Fixtures, options: MockOptions = {}) {
     this.scenario = scenario;
@@ -345,7 +349,11 @@ export class MockDaemon {
         this.waitingChanged();
       },
       later: (fn, ms) => this.later(ms, fn),
+      ran: (run, phase) => this.emit({ type: "run", run, phase }),
     });
+    // What the day's agents read (ADR 0060), made up from its runs and the session.
+    this.reach = new MockReach([...f.apps.filter((a) => a.view.state === "connected").map((a) => a.view.name), "ghost"]);
+    if (scenario.data !== "empty") this.reach.seed(this.schedules.allRuns(), { id: f.session.sessionId, agent: scenario.session ?? "ghost" });
     this.hear = new MockHear(
       f.hear,
       {
@@ -366,6 +374,7 @@ export class MockDaemon {
       for (const activity of this.activity) l({ type: "activity", activity });
     });
     this.startVoice();
+    this.startReach();
     if (!this.storyPlayed) {
       this.storyPlayed = true;
       this.playStory();
@@ -640,6 +649,16 @@ export class MockDaemon {
   private pushStatus(patch: Partial<Status> = {}) {
     this.status = { ...this.status, ...patch, pending: this.pending };
     this.emit({ type: "status", status: this.snapshot() });
+  }
+  /** While runs are going, each makes a call every second or two (ADR 0060). */
+  private startReach() {
+    if (this.reachTimer) return;
+    this.reachTimer = setInterval(() => {
+      for (const run of this.schedules.allRuns().filter((r) => r.status === "running")) {
+        if (rand() < 0.45) continue;
+        this.emit({ type: "reach", reach: this.reach.call(`run-${run.id}`, run.agent, new Date(), rand() > 0.12) });
+      }
+    }, 1400);
   }
   private later(ms: number, f: () => void) {
     const t = setTimeout(() => {
@@ -1487,8 +1506,17 @@ export class MockDaemon {
       if (r[2] === "cancel") return { ok: true };
       return { proposal_id: r[1], target: item.change!.target, status: "success", applied: [item.change!.summary], summary: `Applied on ${item.change!.target}.` } satisfies OutcomeView;
     }
+    if (method === "GET" && path === "/reach") {
+      const since = query.get("since");
+      if (!since) throw new HttpError(422, "since is required");
+      return this.reach.view(since, query.get("until"), (query.get("sessions") ?? "").split(",").filter(Boolean));
+    }
     if (method === "GET" && path === "/audit") {
       let items = this.audit;
+      // A stretch of time (ADR 0060).
+      const since = query.get("since"), until = query.get("until");
+      if (since) items = items.filter((e) => e.created_at >= since);
+      if (until) items = items.filter((e) => e.created_at < until);
       const source = query.get("source"), status = query.get("status"), sid = query.get("session_id");
       if (source) items = items.filter((e) => e.source === source);
       if (status) items = items.filter((e) => e.status === status);

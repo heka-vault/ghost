@@ -45,6 +45,7 @@ import { type Draft, type DraftKey, FIELD_WORDS, dirtyKeys, drafts, fromDetail, 
 import { useAutoRows } from "./autosize";
 import { aliasExample, MEMORY_EXAMPLE, PERSONA_EXAMPLE } from "./examples";
 import { LineStateText, lineState } from "./lineState";
+import { AgentBrief } from "./AgentBrief";
 import { History } from "./History";
 import { Notes } from "./Notes";
 import { personaCache } from "./personaCache";
@@ -962,7 +963,20 @@ export function AgentDetail({ slug }: { slug: string }) {
             </p>
           </>
         ) : tab === "transcript" ? (
-          <Transcript turns={live ? withoutHeld(turns, heldTurns) : turns} lineName={name} limit={TURN_LIMIT} total={detail.turn_count} />
+          <>
+            {!isGhost && (
+              <AgentBrief
+                slug={slug}
+                name={name}
+                detail={detail}
+                voiceTitle={voice ? voiceTitle(voice, voices) : "Ghost’s voice"}
+                onPersona={() => setTab("persona")}
+                onMemory={() => setTab("memory")}
+              />
+            )}
+            <h2 className="conv-section-title">The conversation</h2>
+          <Transcript turns={live ? withoutHeld(turns, heldTurns) : turns} lineName={name} limit={TURN_LIMIT} total={detail.turn_count} openAtTop={!isGhost} />
+          </>
         ) : (
           <History
             versions={versions}

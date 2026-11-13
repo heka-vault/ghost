@@ -205,3 +205,18 @@ Still to build: agent detail on the conversation screen's record (step 4, which 
 session owner's transcript component), Watching's warnings in one notice (they are amber, which
 the contract keeps for a waiting okay), the tray's native menu (Room, and Today's count: Rust in
 `src-tauri/src/tray.rs`), and the phone (step 8).
+
+## 5. Toward 9 (ADR 0060 and the screens after it)
+
+- The daemon now keeps how much Ghost read and did (ADR 0060): each call's counts and sizes, the
+  audit and runs by date, and `run` and `reach` events.
+- **Today**'s instruments became the telemetry (the signal concept's dense numbers and call
+  margin), a run in progress shows what it is touching, and the shell stopped polling.
+- **Agents**: an agent's page leads with the agent at work, its day, schedules, voice, memory
+  and reach. The roster and the bubble transcript are unchanged.
+- **Watching**: one danger notice for everything that can't run; failures in words.
+- **Apps**: what each app was used for today; amber gone.
+- **Conversation**: an opened call reads in words, the raw view one click away.
+- Still to build: onboarding as a real first run, Settings' sections to one standard, the
+  catalog and connecting as one flow, making a schedule or a watch without cron, and the agent's
+  conversation on the record.

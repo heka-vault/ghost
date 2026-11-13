@@ -13,12 +13,12 @@ import { useGhost } from "@ghost/ui";
 import { ChevronLeft, ChevronRight, Settings2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-import { hrefFor } from "../../app/router";
 import type { RouteProps } from "../../app/routes";
-import { loadDay, nameOf, useToday } from "../../app/today";
-import { Button, IconButton, Notice, Page, Skeleton, cx, errorText, useLive, useSetupPromptHere } from "../../ui";
+import { loadDay, useToday } from "../../app/today";
+import { Button, IconButton, Notice, Page, Skeleton, errorText, useLive, useSetupPromptHere } from "../../ui";
 import { type DayCounts, type Moment, cluster, countsOf, dayLabel, headline, isSameDay, momentsOf, shiftDay } from "./model";
 import { Now } from "./Needs";
+import { Signal } from "./Signal";
 import { TalkBar } from "./TalkBar";
 import { Timeline } from "./Timeline";
 import "./today.css";
@@ -97,26 +97,8 @@ export default function TodayScreen(_: RouteProps) {
           </p>
         )}
 
-        {/* The instruments appear once there is something true to say: a run, a change or an app. */}
-        {isToday && (working > 0 || counts.runs + counts.changes > 0 || today.reach.apps > 0) && (
-          <ul className="today-gauges" role="list" aria-label="Ghost right now">
-            <Gauge label="Working now" value={working ? `${working} ${working === 1 ? "agent" : "agents"}` : "Nobody"} live={working > 0} hint={working ? today.working.map((r) => nameOf(today.agents, r.agent)).join(", ") : "No run is going"} />
-            <Gauge label="Today" value={`${counts.toolCalls} tool ${counts.toolCalls === 1 ? "call" : "calls"}`} hint={`${counts.modelCalls} model ${counts.modelCalls === 1 ? "call" : "calls"} in ${counts.runs} ${counts.runs === 1 ? "run" : "runs"}`} />
-            <Gauge
-              label="In reach"
-              value={`${today.reach.apps} ${today.reach.apps === 1 ? "app" : "apps"}`}
-              hint={`${today.reach.tools} tools`}
-              trouble={today.reach.down ? `${today.reach.down} not connected` : undefined}
-              href="/settings/apps"
-            />
-            <Gauge
-              label="Replies start in"
-              value={today.speed ? today.speed.text : "Not checked"}
-              hint={today.speed ? today.speed.model : "Test it in Settings › Model"}
-              href="/settings/model"
-            />
-          </ul>
-        )}
+        {/* The telemetry appears once there is something true to say: a run, a change, a call or an app. */}
+        {isToday && (working > 0 || counts.runs + counts.changes > 0 || today.reach.apps > 0 || today.tally.calls > 0) && <Signal />}
       </header>
 
       {today.error && isToday && (
@@ -141,36 +123,6 @@ export default function TodayScreen(_: RouteProps) {
         <Timeline key={day.toDateString()} moments={moments} agents={today.agents} isToday={isToday} head={isToday ? <Now /> : null} />
       )}
     </Page>
-  );
-}
-
-/** One instrument: a true number about Ghost right now, linked to where it is set when it can be. */
-function Gauge({ label, value, hint, live, trouble, href }: { label: string; value: string; hint: string; live?: boolean; trouble?: string; href?: string }) {
-  const body = (
-    <>
-      <span className="today-gauge__label">
-        {live && <span className="today-gauge__live" aria-hidden />}
-        {label}
-      </span>
-      <span className="today-gauge__value t-num">{value}</span>
-      <span className="today-gauge__hint">
-        {hint}
-        {trouble && <span className="today-gauge__trouble"> · {trouble}</span>}
-      </span>
-    </>
-  );
-  return (
-    <li>
-      {href ? (
-        <a className="today-gauge is-link" href={hrefFor(href)} aria-label={`${label}: ${value}, ${hint}${trouble ? `, ${trouble}` : ""}`}>
-          {body}
-        </a>
-      ) : (
-        <div className="today-gauge" aria-label={`${label}: ${value}, ${hint}`} role="group">
-          {body}
-        </div>
-      )}
-    </li>
   );
 }
 

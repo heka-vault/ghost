@@ -71,7 +71,7 @@ export function Room() {
       <div className="room-layer__middle">
         <div className="room-layer__presence">
           <span className="room-layer__glow" aria-hidden />
-          <span className="room-layer__wisp" style={{ viewTransitionName: "ghost-presence" } as React.CSSProperties}>
+          <span className="room-layer__wisp">
             <Mascot size={200} mood={moodOf(connection === "online" ? phase : "offline", !!off)} idle title="" />
           </span>
           <h2 className="room-layer__word" aria-live="polite">
