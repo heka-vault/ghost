@@ -16,6 +16,16 @@
  * layout.ts, a pure function of the monitor and the operator's placement. No motion library.
  * The frame loop runs only while Ghost is forward, at 30 frames a second (60 for the arrival),
  * and stops dead at rest, so the line costs nothing.
+ *
+ * While the screen is shared it does what the operator chose (the shell's `share.rs`): nothing
+ * at all (the default), a small card asking Show or Hide, or Ghost in the share with a mark
+ * that says the screen is being shared.
+ *
+ * `stage`: the same room in an ordinary window on its own backdrop (`stage.html`, ADR 0059 as
+ * amended 2026-11-13), for showing Ghost to people. Opened on purpose and meant to be seen: it
+ * never hides from a share, Ghost waits in the middle of it rather than as a line, a session
+ * comes forward whichever window has the keyboard, there are no buttons but a yes's and a
+ * question's, and Ghost's own words are captioned, since the people watching may not hear it.
  */
 import type { PendingProposal, QuestionView, Turn } from "@ghost/client-ts";
 import { agentName, splitSaid, useGhost, youSpeaking } from "@ghost/ui";
@@ -28,7 +38,7 @@ import { createField, type Field, type FieldInputs } from "./field";
 import { layoutOf, type Layout } from "./layout";
 import { litOf, namesText, type Place, reachOf, returnOf, sizeOf, thisTurn } from "./reach";
 import { captionsShown, captionText, fpsOf, goneAfterGoodbye, isForward, labelOf, type Scene, sceneOf } from "./scene";
-import { hitRects, log, openApp, sendAway, setRegion, sound as readSound, type Sound, summon, useShellWord } from "./shell";
+import { answerShare, hitRects, log, openApp, sendAway, setRegion, sound as readSound, type Sound, summon, useShellWord } from "./shell";
 
 const params = new URLSearchParams(window.location.search);
 const reducedQuery = typeof matchMedia !== "undefined" ? matchMedia("(prefers-reduced-motion: reduce)") : null;
@@ -79,9 +89,12 @@ function useViewport(): { w: number; h: number } {
   return v;
 }
 
-export function FloatingRoom() {
+export function FloatingRoom({ stage = false }: { stage?: boolean } = {}) {
   const { client, status, connected, turns, pending, activity, voice } = useGhost();
-  const shell = useShellWord();
+  const word = useShellWord();
+  // The stage is its own window, meant to be seen: no share hides it, Ghost in the middle,
+  // Ghost's words captioned for the people watching.
+  const shell = stage ? { ...word, mainActive: false, capture: null, sharing: "none" as const, placement: "centre" as const, captions: "always" as const } : word;
   const view = useViewport();
   const session = status?.session_id ?? null;
   const deskSession = connected && !!session && status?.session_origin !== "phone";
@@ -116,12 +129,13 @@ export function FloatingRoom() {
     idleMs: 0,
     awayAfterMs: null,
     sessionIdleMs: null,
-    floating: shell.capture !== "yes",
+    floating: shell.sharing === "none" || shell.sharing === "shown",
     windowActive: shell.mainActive,
   }).posture;
   const ruled = sceneOf({
     posture,
     capture: shell.capture,
+    sharing: shell.sharing,
     phase: status?.phase ?? null,
     ending,
     youTalking: youSpeaking(activity),
@@ -150,11 +164,14 @@ export function FloatingRoom() {
   useEffect(() => {
     if (forwardWanted && !wasForward.current) {
       wasForward.current = true;
-      void summon().then((s) => {
-        setCovered(!!s.choice?.covered);
-        setSide(s.choice?.side ?? "centre");
-        log(`summon ${JSON.stringify(s)}`);
-      });
+      // The stage is its own window: nothing to move, Ghost in its middle.
+      if (!stage) {
+        void summon().then((s) => {
+          setCovered(!!s.choice?.covered);
+          setSide(s.choice?.side ?? "centre");
+          log(`summon ${JSON.stringify(s)}`);
+        });
+      }
       setLeaving(false);
       setArriving(!reduced());
       moved.current.arrive = performance.now();
@@ -418,14 +435,16 @@ export function FloatingRoom() {
     }
   }, [arriving, leaving]);
 
-  // The input region follows what can be clicked: nothing at rest, the buttons otherwise.
+  // The input region follows what can be clicked: nothing at rest, the buttons otherwise
+  // (the share card's too). The stage is an ordinary window and takes its own clicks.
+  const asking = !stage && shell.sharing === "asking";
   useEffect(() => {
-    if (!root.current) return;
-    const send = () => setRegion(forward ? hitRects(root.current!) : []);
+    if (!root.current || stage) return;
+    const send = () => setRegion(forward || asking ? hitRects(root.current!) : []);
     send();
     const id = window.setTimeout(send, 450); // after the arrival settles
     return () => window.clearTimeout(id);
-  }, [forward, scene, pending?.id, question?.key, layout]);
+  }, [forward, asking, scene, pending?.id, question?.key, layout]);
 
   // ---------------------------------------------------------------- answers
   const [busy, setBusy] = useState(false);
@@ -454,6 +473,8 @@ export function FloatingRoom() {
   const said = reply ? saying[reply.at] : undefined;
   const caption = captions && reply ? captionText(reply.text, said ? Math.max(said.chars, said.now?.end ?? 0) : null) : "";
   const s = layout.scale;
+  // Ghost is in a share by the operator's choice: say so, on the surface itself.
+  const sharedMark = !stage && shell.sharing === "shown" && scene !== "hidden";
 
   return (
     <div
@@ -463,6 +484,7 @@ export function FloatingRoom() {
       data-shown={shown ? "1" : "0"}
       data-mic={micOff ? "off" : "on"}
       data-placement={shell.placement}
+      data-stage={stage ? "1" : undefined}
       style={{ ["--flt-s" as string]: s.toFixed(3), ["--flt-wisp" as string]: `${layout.wisp}px` }}
     >
       <canvas ref={canvas} className="flt-field" aria-hidden />
@@ -477,6 +499,39 @@ export function FloatingRoom() {
         <div className="flt-line" aria-hidden data-hold={scene === "hold" ? "1" : undefined}>
           {micOff ? <MicOff /> : <span className="flt-line__light" />}
           {scene === "hold" && <span className="flt-line__hold">{label}</span>}
+          {sharedMark && !forward && <SharedMark />}
+        </div>
+      )}
+
+      {/* On stage, at rest: Ghost waits in the middle for its name, not as a line. */}
+      {stage && !shown && (
+        <div className="flt-rest" aria-hidden style={{ left: layout.core[0], top: layout.core[1] }}>
+          <div className="flt-rest__wisp">{DRAW_WISP && <Mascot size={Math.round(layout.wisp * 0.8)} mood={scene === "hold" ? "hold" : null} idle maxFps={30} />}</div>
+          <p className="flt-rest__say">{micOff ? "Mic off" : scene === "hold" ? "On hold · say “Ghost” to pick up" : "Say “Ghost”"}</p>
+        </div>
+      )}
+      {stage && (
+        <div className="flt-brand" aria-hidden>
+          <span className="flt-brand__dot" data-live={connected ? "1" : "0"} />
+          Ghost
+        </div>
+      )}
+
+      {/* A share started and the operator chose to be asked: two buttons, nothing of Ghost. */}
+      {asking && (
+        <div className="flt-sharecard" role="alertdialog" aria-label="Your screen is being shared. Show Ghost in it?">
+          <p className="flt-sharecard__q">
+            <span className="flt-shared__dot" />
+            Your screen is being shared. Show Ghost in it?
+          </p>
+          <div className="flt-ask__acts">
+            <button type="button" data-hit className="flt-word flt-word--yes" onClick={() => answerShare(true)}>
+              Show
+            </button>
+            <button type="button" data-hit className="flt-word" onClick={() => answerShare(false)}>
+              Hide
+            </button>
+          </div>
         </div>
       )}
 
@@ -486,12 +541,13 @@ export function FloatingRoom() {
             {DRAW_WISP && <Mascot size={layout.wisp} mood={leaving ? null : MOOD[scene]} trigger={trigger} level={voice} idle maxFps={fpsOf(scene, arriving) || 60} />}
           </div>
           <div className="flt-under">
+            {sharedMark && <SharedMark />}
             <p className="flt-label">
               <span className="flt-label__dot" />
               {label}
               {micOff && scene !== "listening" ? <span className="flt-label__mic"> · mic off</span> : null}
             </p>
-            {forward && (
+            {forward && !stage && (
               <p className="flt-acts">
                 <button type="button" data-hit className="flt-pill" onClick={openApp}>
                   Open in Ghost
@@ -565,6 +621,16 @@ export function FloatingRoom() {
         </p>
       )}
     </div>
+  );
+}
+
+/** The mark Ghost wears while it is in a share by the operator's choice. */
+function SharedMark() {
+  return (
+    <span className="flt-shared" role="note">
+      <span className="flt-shared__dot" />
+      Screen shared
+    </span>
   );
 }
 

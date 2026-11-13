@@ -3,7 +3,9 @@
 //! Ghost's microphone (ADR 0057): the item turns into Listen again, and the tray's icon
 //! is struck through in red, as a smart speaker's mic-off light, until it is turned back on.
 //! Float over the desktop turns the floating room on and off (ADR 0059): the quick way to hide
-//! it, where a screen share can't be seen.
+//! it, where a screen share can't be seen. During a share, Show Ghost in this share puts it in
+//! the share or takes it out, for that share only; Ghost on stage opens the stage window, the
+//! floating room drawn on its own backdrop for showing Ghost to people (ADR 0059, 2026-11-13).
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -27,8 +29,8 @@ pub struct ListenTray {
     shown: Mutex<Option<bool>>,
 }
 
-/// The floating room's item, where the desktop has it.
-pub struct FloatTray(CheckMenuItem<Wry>);
+/// The floating room's items, where the desktop has it: the switch, and the share's toggle.
+pub struct FloatTray(CheckMenuItem<Wry>, CheckMenuItem<Wry>);
 
 pub fn build(app: &App, floating: &crate::floating::Status) -> tauri::Result<()> {
     let show = MenuItem::with_id(app, "show", "Open Ghost", true, None::<&str>)?;
@@ -52,18 +54,30 @@ pub fn build(app: &App, floating: &crate::floating::Status) -> tauri::Result<()>
         floating.settings.on,
         None::<&str>,
     )?;
+    let (share_on, share_checked) = share_item(floating);
+    let share = CheckMenuItem::with_id(
+        app,
+        "share",
+        "Show Ghost in this share",
+        share_on,
+        share_checked,
+        None::<&str>,
+    )?;
+    let stage = MenuItem::with_id(app, "stage", "Ghost on stage", true, None::<&str>)?;
     let floats = !matches!(floating.support, crate::floating::Support::No { .. });
     let mut items: Vec<&dyn tauri::menu::IsMenuItem<Wry>> = vec![&show, &wake, &listen];
     if floats {
         items.push(&float);
+        items.push(&share);
     }
+    items.push(&stage);
     items.push(&sep);
     if autostart::managed() {
         items.push(&login);
     }
     items.push(&quit);
     let menu = Menu::with_items(app, &items)?;
-    app.manage(FloatTray(float.clone()));
+    app.manage(FloatTray(float.clone(), share.clone()));
     let icon = app.default_window_icon().unwrap().clone().to_owned();
     app.manage(ListenTray {
         item: listen,
@@ -97,6 +111,12 @@ pub fn build(app: &App, floating: &crate::floating::Status) -> tauri::Result<()>
                     h.set_on(on);
                 }
             }
+            "share" => {
+                if let Some(h) = app.try_state::<std::sync::Arc<crate::floating::Host>>() {
+                    h.share_toggle();
+                }
+            }
+            "stage" => crate::floating::stage::open(app),
             "login" => {
                 let on = login.is_checked().unwrap_or(true);
                 autostart::set(app, on);
@@ -162,10 +182,24 @@ pub fn struck(icon: &Image<'_>) -> Image<'static> {
     Image::new_owned(px, w as u32, h as u32)
 }
 
-/// The floating room's switch moved (from Settings or here): the item follows it.
-pub fn show_floating(app: &AppHandle, on: bool) {
+/// The share's item: usable only while the floating room is on and a share is seen, checked
+/// while Ghost is in it.
+fn share_item(s: &crate::floating::Status) -> (bool, bool) {
+    let during = s.settings.on && s.capture == crate::floating::capture::Capture::Yes;
+    (
+        during,
+        during && s.sharing == crate::floating::share::Sharing::Shown,
+    )
+}
+
+/// The floating room's switch moved (from Settings or here), or a share began or ended: the
+/// items follow it.
+pub fn show_floating(app: &AppHandle, s: &crate::floating::Status) {
     if let Some(item) = app.try_state::<FloatTray>() {
-        let _ = item.0.set_checked(on);
+        let _ = item.0.set_checked(s.settings.on);
+        let (on, checked) = share_item(s);
+        let _ = item.1.set_enabled(on);
+        let _ = item.1.set_checked(checked);
     }
 }
 
