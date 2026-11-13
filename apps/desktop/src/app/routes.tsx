@@ -25,7 +25,6 @@ import {
   Settings2,
   ShieldCheck,
   Smartphone,
-  Sparkles,
   Sun,
   Volume2,
 } from "lucide-react";
@@ -221,19 +220,20 @@ export const ROUTES: RouteDef[] = [
     accept: (p) => SETTINGS_SCREEN_PAGES.includes(p.page),
     component: lazy(() => import("../screens/settings")),
   },
-  // ------------------------------------------------------------- prototypes (dev + mock only)
   {
+    // The first run (2026-11-12): from nothing to a first spoken answer. Not on the rail; the
+    // shell's "Finish setup" and Settings › General lead here.
     id: "welcome",
     patterns: ["/welcome"],
     path: "/welcome",
     owner: "onboarding",
-    title: "Welcome",
-    kind: "prototype",
+    title: "Set up Ghost",
+    kind: "screen",
     chrome: "app",
     needsDaemon: false,
-    nav: { label: "Welcome", icon: Sparkles, group: "prototype" },
-    component: DEV ? lazy(() => import("../prototypes/onboarding")) : null,
+    component: lazy(() => import("../screens/onboarding")),
   },
+  // ------------------------------------------------------------- prototypes (dev + mock only)
   {
     id: "review",
     patterns: ["/review"],

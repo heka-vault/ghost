@@ -15,6 +15,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import { Badge, Button, Card, Disclosure, errorText, Field, Input, Notice, RadioGroup, Section, SegmentedControl, useConfirm, useToast } from "../../ui";
 import { openSignIn } from "../apps/signin";
+import { SLOW_FIRST_WORD_MS, verdictOf } from "./check";
 import {
   CONNECTION_KEYS,
   choiceOf,
@@ -278,7 +279,7 @@ export function ModelSection({ s, conn, values, online, mock, setValues, help, e
 
       <Section title={spec?.title ?? "Connection"} className="set-section">
         {conn && !conn.ready && !editing && (
-          <Notice tone="warn" title="Ghost can’t reach a model yet">
+          <Notice tone="info" title="Ghost can’t reach a model yet">
             {sentence(conn.problems[0] ?? "")}
           </Notice>
         )}
@@ -447,8 +448,6 @@ export function ModelSection({ s, conn, values, online, mock, setValues, help, e
   );
 }
 
-/** Past this a spoken reply's first word is late enough to be felt (`ghost_llm::check::SLOW_FIRST_WORD_SECS`, ADR 0056). */
-const SLOW_FIRST_WORD_MS = 1500;
 
 function CheckedAt({ r }: { r: ModelCheckView }) {
   const when = new Date(r.checked_at);
@@ -527,13 +526,12 @@ function CheckModel({ m }: { m: ModelCheckModel }) {
 }
 
 function CheckResult({ r }: { r: ModelCheckView }) {
+  const v = verdictOf(r);
   return (
     <Row className="set-model-check">
-      {r.advice && (
-        <Notice tone="danger" title="Too slow for a good spoken reply">
-          {r.advice}
-        </Notice>
-      )}
+      <Notice tone={v.tone} title={v.title}>
+        {v.help}
+      </Notice>
       {r.models.map((m) => (
         <CheckModel key={m.role} m={m} />
       ))}

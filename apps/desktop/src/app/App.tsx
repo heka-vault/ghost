@@ -41,12 +41,12 @@ export function App() {
   const claimSetupPrompt = useCallback((d: number) => setSetupClaims((n) => Math.max(0, n + d)), []);
   // A locked keyring (ADR 0036) is fixed on Passwords, by unlocking: nothing to set up.
   const passwordsPage = SETTINGS_PAGES.find((p) => p.id === "passwords") ?? SETTINGS_PAGES[0];
-  const setupHref = hrefFor(setup.locked ? passwordsPage.path : design ? "/welcome" : SETTINGS_PAGES[0].path);
+  const setupHref = hrefFor(setup.locked ? passwordsPage.path : "/welcome");
   const live = useMemo<LiveState>(
     () => ({ connection: state, phase, online: state === "online", loadingModels, setupNeeded, setupLocked: setup.locked, setupHref, claimSetupPrompt }),
     [state, phase, loadingModels, setupNeeded, setup.locked, setupHref, claimSetupPrompt],
   );
-  // The settings screen (General, Model, Passwords…) and the onboarding prototype are where
+  // The settings screen (General, Model, Passwords…) and the first run are where
   // setup happens: no banner pointing at itself.
   const setupHere = match?.route.id === "settings" || path === "/welcome" || setupClaims > 0;
   const main = useRef<HTMLElement | null>(null);

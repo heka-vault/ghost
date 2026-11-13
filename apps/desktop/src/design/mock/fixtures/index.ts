@@ -9,7 +9,6 @@ import conversations from "./conversations";
 import { outputs, rules, schedules, watching } from "./folder";
 import hear from "./hear";
 import mobile from "./mobile";
-import onboarding from "./onboarding";
 import policy from "./policy";
 import review from "./review";
 import session from "./session";
@@ -48,7 +47,6 @@ export function composeFixtures(s: Scenario) {
     hear: hear(s),
     /** Data with no API behind it yet, exposed to prototypes through useFixture(owner). */
     prototypes: {
-      onboarding: onboarding(s),
       review: review(s),
       tray: tray(s),
       mobile: mobile(s),
