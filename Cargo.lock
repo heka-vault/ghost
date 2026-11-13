@@ -2194,7 +2194,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-api"
-version = "2026.10.0"
+version = "2026.11.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2228,7 +2228,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-audio"
-version = "2026.10.0"
+version = "2026.11.0"
 dependencies = [
  "anyhow",
  "futures",
@@ -2248,7 +2248,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-core"
-version = "2026.10.0"
+version = "2026.11.0"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -2295,7 +2295,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-infer"
-version = "2026.10.0"
+version = "2026.11.0"
 dependencies = [
  "hound",
  "ort",
@@ -2310,7 +2310,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-llm"
-version = "2026.10.0"
+version = "2026.11.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2329,7 +2329,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-rtc"
-version = "2026.10.0"
+version = "2026.11.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2356,7 +2356,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-voice"
-version = "2026.10.0"
+version = "2026.11.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2391,7 +2391,7 @@ dependencies = [
 
 [[package]]
 name = "ghostd"
-version = "2026.10.0"
+version = "2026.11.0"
 dependencies = [
  "anyhow",
  "async-trait",
