@@ -44,6 +44,11 @@ struct State {
     pace_ms: u64,
     /// The last written turn (`conversation.item.create` of a message).
     asked: Option<String>,
+    /// Replies to speech it hears itself, as a provider's VAD would: after sound, a half
+    /// second of silence ends the turn and the next of these answers it.
+    on_speech: std::collections::VecDeque<Reply>,
+    loud: bool,
+    quiet_appends: usize,
 }
 
 enum Cmd {
@@ -135,6 +140,11 @@ impl FakeRealtime {
     /// Say `heard` where a relay's text has `word`.
     pub fn misread(&self, word: &str, heard: &str) {
         self.with(|s| s.misread = Some((word.to_string(), heard.to_string())));
+    }
+
+    /// Answer speech it hears with these, in order (the timing harness's tests).
+    pub fn answer_speech(&self, replies: Vec<Reply>) {
+        self.with(|s| s.on_speech.extend(replies));
     }
 
     /// Close the connection halfway through the next relay.
@@ -344,10 +354,36 @@ async fn serve(stream: tokio::net::TcpStream, state: Arc<Mutex<State>>, key: Str
         };
         match v["type"].as_str().unwrap_or("") {
             "input_audio_buffer.append" => {
-                let n = B64
+                let bytes = B64
                     .decode(v["audio"].as_str().unwrap_or(""))
-                    .map_or(0, |b| b.len());
-                state.lock().unwrap().audio_bytes += n;
+                    .unwrap_or_default();
+                let sound = bytes
+                    .chunks_exact(2)
+                    .any(|c| i16::from_le_bytes([c[0], c[1]]).abs() > 300);
+                let ended = {
+                    let mut s = state.lock().unwrap();
+                    s.audio_bytes += bytes.len();
+                    if sound {
+                        s.loud = true;
+                        s.quiet_appends = 0;
+                        false
+                    } else if s.loud && !s.on_speech.is_empty() {
+                        s.quiet_appends += 1;
+                        if s.quiet_appends >= 25 {
+                            s.loud = false;
+                            s.quiet_appends = 0;
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                };
+                if ended {
+                    let reply = state.lock().unwrap().on_speech.pop_front();
+                    me.heard(reply).await;
+                }
                 continue;
             }
             "session.update" => {

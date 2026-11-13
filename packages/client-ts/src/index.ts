@@ -65,6 +65,10 @@ export type ModelProviderView = Schemas["ModelProviderView"];
 export type ModelDraft = Schemas["ModelDraft"];
 export type ModelListView = Schemas["ModelListView"];
 export type ModelCheckView = Schemas["ModelCheckView"];
+export type RealtimeView = Schemas["RealtimeView"];
+export type RealtimeCheckView = Schemas["RealtimeCheckView"];
+export type RealtimeProviderView = Schemas["RealtimeProviderView"];
+export type RealtimeSpendView = Schemas["RealtimeSpendView"];
 export type ModelCheckModel = Schemas["ModelCheckModel"];
 export type ModelCheckVerdict = Schemas["ModelCheckVerdict"];
 export type ModelCheckLatest = Schemas["ModelCheckLatest"];
@@ -426,6 +430,17 @@ export class GhostClient {
   /** The latest kept check of the saved connection, if any. */
   modelCheckLatest() {
     return unwrap(this.api.GET("/model/check"));
+  }
+  // --- the realtime voice (ADR 0062) ---------------------------------------------------------
+  /** The voice mode (local by default), the realtime provider, what turning it on changes,
+   *  whether its password is set (never the key), today's spend and the latest check. Its
+   *  settings are saved like any other, through `updateSettings`. */
+  realtimeVoice() {
+    return unwrap(this.api.GET("/voice/realtime"));
+  }
+  /** Check the realtime connection with the saved settings: reachable, first audio, consult. */
+  checkRealtimeVoice() {
+    return unwrap(this.api.POST("/voice/realtime/check"));
   }
   /** Sign in to OpenRouter: open `url`; the key comes back to Ghost, never to the app. */
   modelSignIn() {

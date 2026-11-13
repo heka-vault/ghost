@@ -123,6 +123,7 @@ import {
   valueChanged,
 } from "./model";
 import { GhostVoice } from "./GhostVoice";
+import { RealtimeVoiceSection } from "./RealtimeVoice";
 import { MODEL_FORM_ID, ModelSection } from "./ModelSection";
 import { type BarState, CommandCopy, Row, SaveBar, SetupSection, type SetupStep, secretActionId } from "./parts";
 import { PasswordsSection } from "./Passwords";
@@ -1207,12 +1208,17 @@ export default function SettingsScreen({ params: route }: RouteProps) {
 
         {s && page === "sound" && (
           <>
+            <RealtimeVoiceSection onSettings={setS} />
             <WavePicker />
             {/* ------------------------------------------------------ Voice models */}
             <Section
               id={sectionDomId("models")}
               title={SECTION_TITLE.models}
-              description="Speech turns into text on this computer. Audio never leaves it."
+              description={
+                s.values.GHOST_VOICE_MODE === "realtime"
+                  ? "Speech turns into text on this computer, beside the realtime voice, which hears your voice during a session."
+                  : "Speech turns into text on this computer. Audio never leaves it."
+              }
               className="set-section"
             >
               <Card list>

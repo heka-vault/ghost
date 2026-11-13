@@ -124,7 +124,12 @@ fn main() -> anyhow::Result<()> {
         }
         // The provider comparison reads keys only from the variables named on its
         // command line (ADR 0056): the vault is not opened.
-        Some("perf") if args.get(1).map(String::as_str) == Some("providers") => {
+        Some("perf")
+            if matches!(
+                args.get(1).map(String::as_str),
+                Some("providers") | Some("realtime")
+            ) =>
+        {
             std::process::exit(ghost_voice::perf::cli::main(&args[1..]))
         }
         Some("perf") => {

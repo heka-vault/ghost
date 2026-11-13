@@ -68,6 +68,7 @@ import { LONG_REPLY, type SessionFixture } from "./fixtures/session";
 import { sourceOf } from "./fixtures/sources";
 import { AUTONOMY, LISTS, conditionalFor, levelOf, parseRule, readPolicyText, ruleText, withRule } from "./permissions";
 import { type CatalogSkill, GHOST_SKILLS_DIR, SKILL_CATALOG, type SkillFixture, missingOf } from "./fixtures/skills";
+import { MockRealtime } from "./realtime";
 import { hex, type Scenario, seeded } from "./scenarios";
 
 export { HttpError };
@@ -209,6 +210,12 @@ export class MockDaemon {
     (name) => this.keepPasswords([name], "Jev, and the model when it goes through OpenRouter"),
     () => this.passwords.vault.state === "open",
   );
+  /** The realtime voice (ADR 0062), resolved from the settings above. */
+  private realtime = new MockRealtime(
+    () => this.settings,
+    (name) => this.passwords.vault.state === "open" && !!this.passwords.passwords.find((x) => x.name === name)?.set,
+    false,
+  );
   private devices: DevicesView;
   private models: ModelsView;
   private voices: VoiceInfo[];
@@ -333,6 +340,18 @@ export class MockDaemon {
       } catch {
         /* the check needs nothing the mock lacks; never block the scenario on it */
       }
+    }
+    if (scenario.realtime) {
+      // ADR 0062: the operator chose the realtime voice; its key is in the vault.
+      this.settings.values.GHOST_VOICE_MODE = "realtime";
+      this.settings.values.GHOST_REALTIME_DAILY_CAP_USD = "2";
+      this.keepPasswords(["OPENAI_API_KEY"], "The realtime voice");
+      this.realtime = new MockRealtime(
+        () => this.settings,
+        (name) => this.passwords.vault.state === "open" && !!this.passwords.passwords.find((x) => x.name === name)?.set,
+        true,
+      );
+      this.realtime.check();
     }
     this.schedules = new MockSchedules(f.schedules, {
       agent: (slug) => {
@@ -1494,7 +1513,7 @@ export class MockDaemon {
       for (const [k, v] of Object.entries(u.values ?? {})) {
         if (v == null) delete this.settings.values[k];
         else this.settings.values[k] = v;
-        if (k.startsWith("GHOST_WAKE") || isConnectionKey(k)) applied.push(k);
+        if (k.startsWith("GHOST_WAKE") || isConnectionKey(k) || k === "GHOST_VOICE_MODE" || k.startsWith("GHOST_REALTIME_")) applied.push(k);
         else restart = true;
       }
       for (const [k, v] of Object.entries(u.secrets ?? {})) {
@@ -1522,6 +1541,8 @@ export class MockDaemon {
     if (method === "POST" && path === "/model/check") return await sleep(1400), this.model.check(b as ModelDraft);
     if (method === "GET" && path === "/model/check") return { check: this.model.last };
     if (method === "POST" && path === "/model/sign-in") return this.model.startSignIn();
+    if (method === "GET" && path === "/voice/realtime") return this.realtime.view();
+    if (method === "POST" && path === "/voice/realtime/check") return await sleep(1100), this.realtime.check();
     if (method === "GET" && path === "/devices") return this.devices;
     if (method === "POST" && path === "/setup/echo-cancel") {
       await sleep(700);
