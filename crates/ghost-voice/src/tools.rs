@@ -478,19 +478,16 @@ impl ToolDispatcher {
             }
             (self.record)(&tool.name, args);
             tried.push(other.name.clone());
-            match (tool.handler)(args.clone()).await {
-                Ok(mut found) => {
-                    found.insert(
-                        "read_through".into(),
-                        Value::String(format!(
-                            "{}: the first connection could not find it",
-                            other.name
-                        )),
-                    );
-                    return found;
-                }
-                // Not there either, or failing: the next twin, else the first answer.
-                Err(_) => {}
+            // Not there either, or failing: the next twin, else the first answer.
+            if let Ok(mut found) = (tool.handler)(args.clone()).await {
+                found.insert(
+                    "read_through".into(),
+                    Value::String(format!(
+                        "{}: the first connection could not find it",
+                        other.name
+                    )),
+                );
+                return found;
             }
         }
         let mut first = first;

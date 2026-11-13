@@ -1735,8 +1735,16 @@ mod tests {
         let mut later = ctx.clone();
         later.push(Message::user("What's waiting?"));
         later.push(Message::assistant("Two issues."));
-        assert_ne!(key, prefix_key("m-warm-test", &later, &tools, &Options::default()));
-        assert!(sent_now(prefix_key("m-warm-test", &later, &tools, &Options::default())));
+        assert_ne!(
+            key,
+            prefix_key("m-warm-test", &later, &tools, &Options::default())
+        );
+        assert!(sent_now(prefix_key(
+            "m-warm-test",
+            &later,
+            &tools,
+            &Options::default()
+        )));
         assert_ne!(
             key,
             prefix_key(

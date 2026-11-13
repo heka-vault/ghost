@@ -68,7 +68,8 @@ pub fn twins(apps: &[Seen]) -> HashMap<String, String> {
 /// Each app of a set of twins, with the others of its set in `apps` order: where a read it
 /// cannot find is tried next.
 pub fn sets(apps: &[Seen]) -> HashMap<String, Vec<String>> {
-    let mut groups: Vec<((&str, &BTreeSet<String>), Vec<&str>)> = Vec::new();
+    type Key<'a> = (&'a str, &'a BTreeSet<String>);
+    let mut groups: Vec<(Key, Vec<&str>)> = Vec::new();
     for app in apps {
         if app.service.is_empty() || app.tools.is_empty() {
             continue;
