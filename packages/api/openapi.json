@@ -6308,6 +6308,17 @@
               "null"
             ]
           },
+          "place": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/WaitingPlace",
+                "description": "Where in the app the operator deals with it: one of a closed set, given only to\nGhost's own notes (source `ghost`) from their key, never from an item's words or an\napp's text. None for everything else."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "question": {
             "oneOf": [
               {
@@ -6352,6 +6363,18 @@
           "age_secs"
         ],
         "type": "object"
+      },
+      "WaitingPlace": {
+        "description": "A place in the desktop app a waiting item can lead to. Closed: the app maps each to a\nroute of its own, and nothing an app or a model sends can name another.",
+        "enum": [
+          "model",
+          "sound",
+          "passwords",
+          "outside-tools",
+          "apps",
+          "watching"
+        ],
+        "type": "string"
       },
       "WaitingView": {
         "properties": {

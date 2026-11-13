@@ -298,7 +298,7 @@ not answer. Both listen addresses (home and tunnel) serve the same stream.
 ```
 
 `items` are the control API's `WaitingItemView`s, as `GET /waiting` gives them; `questions` as
-`GET /questions` gives them.
+`GET /questions` gives them. An item's `place` (a closed set: `model`, `sound`, `passwords`, `outside-tools`, `apps`, `watching`, only on Ghost's own notes) says where on the desktop it is dealt with; the phone may show it as words and never as a link.
 
 ```json
 {"type": "item", "change": "added", "key": "watch:ci:main", "item": {WaitingItemView},
