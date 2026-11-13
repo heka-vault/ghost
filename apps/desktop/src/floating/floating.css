@@ -105,7 +105,8 @@ body {
 }
 .flt-root[data-shown="1"] .flt-line { opacity: 0; }
 
-/* ---------------------------------------------------------------- Wisp and its label */
+/* ---------------------------------------------------------------- Wisp and the few words under it */
+.flt-root { --flt-s: 1; --flt-wisp: 176px; }
 .flt-stage {
   position: absolute;
   width: 0;
@@ -113,28 +114,33 @@ body {
 }
 .flt-wisp {
   position: absolute;
-  left: -100px;
-  top: -100px;
-  width: 200px;
-  height: 200px;
+  left: calc(var(--flt-wisp) * -0.57);
+  top: calc(var(--flt-wisp) * -0.57);
+  width: calc(var(--flt-wisp) * 1.14);
+  height: calc(var(--flt-wisp) * 1.14);
   display: grid;
   place-items: center;
   color: var(--flt-ink);
   scale: var(--flt-pulse, 1);
   will-change: transform;
 }
-.flt-label {
+.flt-under {
   position: absolute;
-  top: 112px;
+  top: calc(var(--flt-wisp) * 0.62);
   left: 0;
   transform: translateX(-50%);
+  display: grid;
+  justify-items: center;
+  gap: calc(10px * var(--flt-s));
+}
+.flt-label {
   margin: 0;
   white-space: nowrap;
-  font: 600 13px/16px var(--flt-mono);
+  font: 600 calc(13px * max(var(--flt-s), 0.85)) / 16px var(--flt-mono);
   letter-spacing: 0.32em;
   text-transform: uppercase;
   color: var(--flt-tint);
-  text-shadow: 0 0 12px var(--flt-tint), 0 1px 2px rgb(0 0 0 / 0.8);
+  text-shadow: 0 0 12px var(--flt-tint), 0 1px 2px rgb(0 0 0 / 0.9), 0 0 6px rgb(0 0 0 / 0.8);
   display: flex;
   align-items: center;
   gap: 10px;
@@ -148,110 +154,120 @@ body {
 }
 .flt-label__mic { color: var(--flt-red); text-shadow: 0 0 10px var(--flt-red); }
 
-/* ---------------------------------------------------------------- reach: the apps in use */
+/* Open in Ghost and Done: quiet until pointed at; the only clicks besides a card's. */
+.flt-acts { margin: 0; display: flex; gap: 8px; white-space: nowrap; animation: flt-arrive 500ms 300ms cubic-bezier(.16,.84,.24,1) both; }
+.flt-pill {
+  font: 600 11px/14px var(--flt-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgb(234 252 255 / 0.62);
+  background: rgb(3 5 9 / 0.62);
+  border: 1px solid rgb(234 252 255 / 0.2);
+  border-radius: 999px;
+  padding: 5px 11px;
+  cursor: pointer;
+}
+.flt-pill:hover { color: var(--flt-ink); border-color: var(--flt-ink); }
+
+/* ---------------------------------------------------------------- reach: where Ghost is looking */
 .flt-node {
   position: absolute;
   transform: translate(-50%, -50%);
   pointer-events: none;
   white-space: nowrap;
-  font: 800 22px/26px var(--flt-display);
-  letter-spacing: -0.01em;
-  color: var(--flt-dim-text);
-  text-shadow: 0 1px 3px rgb(0 0 0 / 0.9);
-  transition: color 200ms;
-}
-.flt-node[data-on="1"] { color: var(--flt-ink); text-shadow: 0 0 18px var(--flt-tint), 0 1px 3px rgb(0 0 0 / 0.9); }
-
-/* ---------------------------------------------------------------- the words */
-.flt-words {
-  position: absolute;
-  top: calc(30% + 168px);
-  left: var(--flt-x);
-  transform: translateX(-50%);
-  /* As wide as its words, so the scrim under it is under them. */
-  width: max-content;
-  max-width: min(1180px, 82vw);
   display: grid;
-  gap: 18px;
+  justify-items: center;
+  gap: 2px;
+  animation: flt-node-in 420ms cubic-bezier(.16,.84,.24,1) both;
 }
-/* A local scrim under the type: legible over a white window as over a dark one. */
-.flt-words::before {
+.flt-node__name {
+  font: 800 calc(20px * var(--flt-s)) / 1.15 var(--flt-display);
+  letter-spacing: -0.01em;
+  /* A trace: quiet, but legible over a white page (a dark halo under it). */
+  color: rgb(234 252 255 / 0.62);
+  text-shadow: 0 0 2px rgb(0 0 0 / 0.95), 0 1px 4px rgb(0 0 0 / 0.95), 0 0 14px rgb(0 0 0 / 0.85);
+  transition: color 250ms, text-shadow 250ms;
+}
+.flt-node__word {
+  font: 500 calc(11px * max(var(--flt-s), 0.9)) / 14px var(--flt-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgb(234 252 255 / 0.5);
+  text-shadow: 0 0 2px rgb(0 0 0 / 0.95), 0 0 10px rgb(0 0 0 / 0.85);
+  transition: color 250ms;
+}
+.flt-node[data-on="1"] .flt-node__name { color: var(--flt-ink); text-shadow: 0 0 18px var(--flt-tint), 0 1px 3px rgb(0 0 0 / 0.95); }
+.flt-node[data-on="1"] .flt-node__word { color: var(--flt-tint); }
+.flt-more {
+  position: absolute;
+  margin: 0;
+  transform: translate(-50%, -100%);
+  font: 500 11px/14px var(--flt-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--flt-dim-text);
+  text-shadow: 0 1px 2px rgb(0 0 0 / 0.95);
+}
+@keyframes flt-node-in {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.85); filter: blur(4px); }
+  to { opacity: 1; transform: translate(-50%, -50%); filter: none; }
+}
+
+/* ---------------------------------------------------------------- a yes or a question: a fixed box */
+.flt-card {
+  position: absolute;
+  overflow: hidden;
+  display: grid;
+  align-content: start;
+}
+.flt-card::before {
   content: "";
   position: absolute;
-  inset: -48px -72px;
+  inset: 0;
   z-index: -1;
-  background: radial-gradient(farthest-side, var(--flt-scrim) 55%, rgb(3 5 9 / 0.5) 80%, transparent);
-  filter: blur(8px);
-  pointer-events: none;
+  border-radius: 18px;
+  background: radial-gradient(farthest-side, var(--flt-scrim) 60%, rgb(3 5 9 / 0.55) 85%, transparent);
+  filter: blur(6px);
 }
-.flt-heard {
-  margin: 0;
-  font: 400 clamp(20px, 1.6vw, 28px) / 1.3 var(--flt-display);
-  color: var(--flt-dim-text);
-  text-wrap: balance;
-}
-/* The operator's words as the line, while Ghost works on them: large, light, grey. */
-.flt-heard--line {
-  font: 300 clamp(32px, 3.4vw, 72px) / 1.08 var(--flt-display);
-  letter-spacing: -0.02em;
-  color: rgb(234 252 255 / 0.72);
-}
-.flt-reply {
-  margin: 0;
-  font: 800 clamp(36px, 4.4vw, 96px) / 1.04 var(--flt-display);
-  letter-spacing: -0.03em;
-  text-wrap: balance;
-  overflow-wrap: anywhere;
-}
-.flt-reply__said {
-  color: var(--flt-ink);
-  text-shadow: -1px 0 0 rgb(255 60 120 / 0.35), 1px 0 0 rgb(60 220 255 / 0.45), 0 0 28px rgb(95 227 255 / 0.5);
-}
-.flt-reply__now {
-  color: var(--flt-ink);
-  text-decoration: underline 3px var(--flt-cyan);
-  text-underline-offset: 0.14em;
-  text-shadow: 0 0 28px rgb(95 227 255 / 0.6);
-}
-.flt-reply__rest { color: var(--flt-dim-text); }
-
 .flt-ask {
   display: grid;
-  gap: 16px;
+  gap: calc(14px * var(--flt-s));
   justify-items: center;
   text-align: center;
+  padding: calc(14px * var(--flt-s)) calc(18px * var(--flt-s));
   animation: flt-arrive 420ms cubic-bezier(.16,.84,.24,1) both;
 }
-.flt-ask__over {
-  margin: 0;
-  font: 600 13px/16px var(--flt-mono);
-  letter-spacing: 0.24em;
-  text-transform: uppercase;
-  color: var(--flt-tint);
-  text-shadow: 0 0 12px var(--flt-tint);
-}
-.flt-mono { font-family: var(--flt-mono); letter-spacing: 0.04em; text-transform: none; }
 .flt-ask__q {
   margin: 0;
-  font: 800 clamp(34px, 3.6vw, 72px) / 1.06 var(--flt-display);
-  letter-spacing: -0.025em;
+  font: 800 calc(30px * var(--flt-s)) / 1.12 var(--flt-display);
+  letter-spacing: -0.02em;
   text-wrap: balance;
   overflow-wrap: anywhere;
   color: var(--flt-ink);
+  text-shadow: 0 1px 3px rgb(0 0 0 / 0.9);
+  /* Three lines at most: the rest is in Ghost, and is said. */
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
-.flt-ask__acts { display: flex; flex-wrap: wrap; justify-content: center; align-items: baseline; gap: 12px 28px; margin-top: 8px; }
-.flt-ask__or { font: 500 14px/20px var(--flt-mono); color: var(--flt-dim-text); }
+.flt-ask__acts { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 10px 18px; }
+.flt-ask__or { font: 500 13px/18px var(--flt-mono); color: rgb(234 252 255 / 0.7); text-shadow: 0 0 2px #000, 0 0 8px rgb(0 0 0 / 0.9); }
 
-/* An answer is one word, said or pressed (the signal's "deciding is one word"). */
+/* An answer is one word, said or pressed. */
 .flt-word {
-  font: 800 clamp(32px, 3vw, 56px) / 1 var(--flt-display);
+  font: 800 calc(26px * var(--flt-s)) / 1 var(--flt-display);
   letter-spacing: -0.02em;
   color: var(--flt-ink);
-  background: rgb(3 5 9 / 0.7);
+  background: rgb(3 5 9 / 0.72);
   border: 2px solid rgb(234 252 255 / 0.35);
-  border-radius: 14px;
-  padding: 10px 26px 12px;
+  border-radius: 12px;
+  padding: 8px 20px 10px;
   cursor: pointer;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .flt-word:hover { border-color: var(--flt-ink); }
 .flt-word:focus-visible { outline: 3px solid var(--flt-tint); outline-offset: 4px; }
@@ -263,43 +279,22 @@ body {
   box-shadow: 0 0 28px 2px rgb(255 181 71 / 0.55);
 }
 
-/* ---------------------------------------------------------------- the margin: the work, true */
-.flt-margin {
+/* ---------------------------------------------------------------- captions (a setting, off by default) */
+.flt-captions {
   position: absolute;
-  right: 32px;
-  bottom: 40px;
-  width: 340px;
-  padding: 14px 16px;
-  border-left: 1px solid rgb(234 252 255 / 0.18);
-  background: linear-gradient(90deg, var(--flt-scrim), rgb(3 5 9 / 0.6));
-  font: 500 11px/17px var(--flt-mono);
-  letter-spacing: 0.04em;
-  color: var(--flt-dim-text);
-  display: grid;
-  gap: 8px;
-  animation: flt-arrive 500ms 200ms cubic-bezier(.16,.84,.24,1) both;
-}
-.flt-margin p { margin: 0; }
-.flt-margin__head { color: var(--flt-ink); letter-spacing: 0.24em; font-weight: 700; }
-.flt-margin__counts { display: flex; gap: 14px; flex-wrap: wrap; text-transform: uppercase; }
-.flt-margin__calls { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
-.flt-margin__calls li { display: grid; grid-template-columns: 64px 1fr auto; gap: 10px; }
-.flt-margin__calls li[data-open] { color: var(--flt-tint); }
-.flt-margin__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.flt-open {
-  justify-self: start;
-  margin-top: 4px;
-  font: 600 12px/16px var(--flt-mono);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  margin: 0;
+  padding: 8px 16px;
+  box-sizing: border-box;
+  text-align: center;
+  font: 600 calc(22px * max(var(--flt-s), 0.8)) / 1.3 var(--flt-display);
   color: var(--flt-ink);
-  background: transparent;
-  border: 1px solid rgb(234 252 255 / 0.35);
-  border-radius: 999px;
-  padding: 6px 12px;
-  cursor: pointer;
+  background: rgb(3 5 9 / 0.78);
+  border-radius: 12px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
-.flt-open:hover { border-color: var(--flt-ink); }
 
 @keyframes flt-arrive {
   from { opacity: 0; transform: translateY(18px) scale(0.98); filter: blur(6px); }
@@ -307,10 +302,10 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .flt-ask, .flt-margin { animation: none; }
+  .flt-ask, .flt-acts, .flt-node { animation: none; }
   .flt-line { transition: none; }
 }
 @media (forced-colors: active) {
-  .flt-reply__said, .flt-reply__now, .flt-ask__q, .flt-node, .flt-label { text-shadow: none; }
-  .flt-words::before, .flt-margin { background: Canvas; }
+  .flt-ask__q, .flt-node__name, .flt-node__word, .flt-label { text-shadow: none; }
+  .flt-card::before, .flt-captions, .flt-pill { background: Canvas; }
 }

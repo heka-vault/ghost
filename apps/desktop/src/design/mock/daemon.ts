@@ -503,7 +503,10 @@ export class MockDaemon {
   }
   /**
    * `?mock=floating`: a whole spoken session as the daemon sends it, for the floating room
-   * (ADR 0059), then rest, then again. Synthetic words only.
+   * (ADR 0059), then rest, then again, about 95 s a loop. Every state in order: the wake, your
+   * turn, one place (Memory), a slow model then three calls in flight and a long reply, six
+   * places and a reply with a list and numbers, a change waiting for a yes, an agent's
+   * question, the goodbye. Synthetic words only.
    */
   private floatingPlayed = false;
   private playFloating() {
@@ -515,31 +518,71 @@ export class MockDaemon {
         at += ms;
         this.later(at, f);
       };
+      const turn = (words: string, speakMs: number) => {
+        step(900, () => this.act("you_started"));
+        step(speakMs, () => {
+          this.act("you_stopped");
+          this.addTurn("user", words, "voice");
+          this.heard(words);
+          this.pushStatus({ phase: "thinking" });
+        });
+      };
+      const call = (name: string, id: string) => () => this.act("call", { name, id });
+      const done = (name: string, id: string) => () => this.act("result", { name, id });
+      let n = 0;
+      const ids = () => `fl${Date.now().toString(36)}${n++}`;
+
+      // 1. The wake and a turn with one place: Memory.
       step(2500, () => this.wake("ghost"));
-      step(900, () => this.act("you_started"));
-      step(2300, () => {
-        this.act("you_stopped");
-        const asked = "What needs me before the billing deploy?";
-        this.addTurn("user", asked, "voice");
-        this.heard(asked);
-        this.pushStatus({ phase: "thinking" });
-      });
-      const calls = [
-        { name: "github_issue_list", id: "f1" },
-        { name: "github_issue_read", id: "f2" },
-        { name: "github_actions_runs", id: "f3" },
-        { name: "ghost_recall", id: "f4" },
+      turn("What's on my plate this morning?", 2100);
+      const m1 = ids();
+      step(500, call("ghost_recall", m1));
+      step(1100, done("ghost_recall", m1));
+      step(500, () => this.reply("Three meetings, the billing deploy, and a review Dana asked for yesterday."));
+
+      // 2. A slow model, then three calls in flight at once, then a long reply.
+      step(5200, () => undefined);
+      turn("And what's blocking the billing deploy?", 2300);
+      const [g1, c1, s1] = [ids(), ids(), ids()];
+      step(5600, call("github_issue_list", g1)); // the model took 5.6 s to decide (a slow provider)
+      step(250, call("calendar_events_today", c1));
+      step(300, call("github-acme_actions_runs", s1));
+      step(1500, done("calendar_events_today", c1));
+      step(700, done("github_issue_list", g1));
+      step(900, done("github-acme_actions_runs", s1));
+      step(400, () =>
+        this.reply(
+          "The deploy is blocked on its migration step: the job that adds the invoice currency column timed out twice last night, both times after about twelve minutes, and the retry policy gave up. Issue 212 tracks it and nobody is assigned. The release window Dana booked is at three this afternoon, so there are about five hours. The quickest way through is to run the migration by hand with the longer timeout, then rerun the deploy; I can open a change for that if you want.",
+        ),
+      );
+
+      // 3. Six places at once, then a reply with a list and numbers.
+      step(30_500, () => undefined);
+      turn("Check everything for the launch.", 1800);
+      const six: [string, string][] = [
+        ["github_issue_list", ids()],
+        ["calendar_events_week", ids()],
+        ["ghost_recall", ids()],
+        ["github-acme_pull_requests", ids()],
+        ["mobbin_screens_search", ids()],
+        ["ghost_ask_agent", ids()],
       ];
-      step(400, () => this.act("call", calls[0]));
-      step(500, () => this.act("call", calls[2]));
-      step(600, () => this.act("result", calls[0]));
-      step(150, () => this.act("call", calls[1]));
-      step(700, () => this.act("result", calls[2]));
-      step(200, () => this.act("result", calls[1]));
-      step(100, () => this.act("call", calls[3]));
-      step(500, () => this.act("result", calls[3]));
-      step(300, () => this.reply("Two things. The billing deploy failed at its migration step, and app 151 looks like a duplicate of 148."));
-      step(8200, () => {
+      step(900, call(...six[0]));
+      step(200, call(...six[1]));
+      step(150, call(...six[2]));
+      step(250, call(...six[3]));
+      step(600, done(...six[2]));
+      step(200, call(...six[4]));
+      step(300, call(...six[5]));
+      step(700, done(...six[1]));
+      step(500, done(...six[0]));
+      step(600, done(...six[4]));
+      step(900, done(...six[3]));
+      step(1400, done(...six[5]));
+      step(400, () => this.reply("Four things for the launch: 3 issues still open, 2 pull requests waiting on review, 1 failing check, and Accounting wants the pricing page signed off by Friday."));
+
+      // 4. A change waiting for a yes.
+      step(10_500, () => {
         this.propose({
           source: "github",
           operation: "github_issue_write",
@@ -560,6 +603,8 @@ export class MockDaemon {
         this.heard("Yes.");
         this.confirm();
       });
+
+      // 5. An agent's question.
       step(4200, () => {
         const q: QuestionView = {
           key: `question:float-${Date.now()}`, kind: "question", source: "agent:accounting", asked_by: "Accounting", asked_at: now(),
@@ -580,6 +625,8 @@ export class MockDaemon {
         this.questions = this.questions.map((x) => (x.key === q.key ? answered : x));
         this.emit({ type: "question", question: answered });
       });
+
+      // 6. The goodbye.
       step(800, () => {
         this.pushStatus({ ending: true });
         this.reply("Okay. I'll tell Accounting to wait. Talk soon.", 3200);
