@@ -768,6 +768,20 @@ impl Jobs {
         )
     }
 
+    /// The runs scheduled in `[since, until)`, newest first (ADR 0060): one day of them,
+    /// whatever ran since.
+    pub fn runs_between(
+        &self,
+        since: DateTime<Utc>,
+        until: DateTime<Utc>,
+        limit: i64,
+    ) -> Result<Vec<Run>> {
+        self.runs_where(
+            "scheduled_for >= ? AND scheduled_for < ? ORDER BY scheduled_for DESC, rowid DESC LIMIT ?",
+            &[&iso(&since), &iso(&until), &limit.clamp(1, RUNS_KEPT)],
+        )
+    }
+
     /// The runs waiting for their agent, oldest first.
     pub fn queued(&self) -> Result<Vec<Run>> {
         self.runs_where("status = 'queued' ORDER BY scheduled_for, rowid", &[])

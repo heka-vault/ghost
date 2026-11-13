@@ -243,6 +243,26 @@ CREATE TABLE IF NOT EXISTS session_activity (
     secs        REAL
 );
 CREATE INDEX IF NOT EXISTS session_activity_session ON session_activity(session_id, id);
+-- How much Ghost read and did (ADR 0060): one row per tool call an agent made, in a session
+-- or a run (`run-<id>`). Counts and sizes only, never arguments, results or words. Kept
+-- for `reach::REACH_KEPT_DAYS`.
+CREATE TABLE IF NOT EXISTS reach (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    at          TEXT NOT NULL,
+    session_id  TEXT NOT NULL,
+    agent       TEXT NOT NULL,
+    app         TEXT NOT NULL,
+    tool        TEXT NOT NULL,
+    read        INTEGER NOT NULL,
+    ok          INTEGER NOT NULL,
+    items       INTEGER,
+    bytes       INTEGER NOT NULL,
+    ms          INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS reach_at ON reach(at);
+CREATE INDEX IF NOT EXISTS reach_session ON reach(session_id);
+-- The audit by date (ADR 0060): a past day is read by its range, not paged back to.
+CREATE INDEX IF NOT EXISTS proposals_created ON proposals(created_at);
 "#;
 
 /// One thing a session did, as kept (ADR 0058): names, ids and a duration, never words.
@@ -352,6 +372,10 @@ pub struct ProposalQuery<'a> {
     pub session_id: Option<&'a str>,
     pub conversation: Option<&'a str>,
     pub executed_only: bool,
+    /// Created at or after this (ADR 0060).
+    pub since: Option<DateTime<Utc>>,
+    /// Created before this.
+    pub until: Option<DateTime<Utc>>,
 }
 
 impl ProposalQuery<'_> {
@@ -578,6 +602,14 @@ impl Store {
         if let Some(c) = q.conversation {
             wheres.push("json_extract(body, '$.conversation') = ?".into());
             args.push(Value::String(c.into()));
+        }
+        if let Some(t) = q.since {
+            wheres.push("created_at >= ?".into());
+            args.push(Value::String(iso(&t)));
+        }
+        if let Some(t) = q.until {
+            wheres.push("created_at < ?".into());
+            args.push(Value::String(iso(&t)));
         }
         let clause = if wheres.is_empty() {
             String::new()
@@ -863,6 +895,75 @@ impl Store {
         }
         tx.commit()?;
         Ok(())
+    }
+
+    // --- how much Ghost read and did (ADR 0060) ----------------------------------------
+
+    pub fn add_reach(&self, r: &crate::reach::ReachRow) -> Result<()> {
+        self.conn().execute(
+            "INSERT INTO reach (at, session_id, agent, app, tool, read, ok, items, bytes, ms) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params![
+                iso(&r.at),
+                r.session_id,
+                r.agent,
+                r.app,
+                r.tool,
+                r.read,
+                r.ok,
+                r.items.map(|n| n as i64),
+                r.bytes as i64,
+                r.ms as i64
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// The calls made in `[since, until)`, oldest first; narrowed to some sessions (or
+    /// runs, `run-<id>`) when `sessions` is not empty.
+    pub fn reach_between(
+        &self,
+        since: DateTime<Utc>,
+        until: DateTime<Utc>,
+        sessions: &[String],
+    ) -> Result<Vec<crate::reach::ReachRow>> {
+        let conn = self.conn();
+        let mut sql = String::from(
+            "SELECT at, session_id, agent, app, tool, read, ok, items, bytes, ms FROM reach \
+             WHERE at >= ? AND at < ?",
+        );
+        let mut args: Vec<String> = vec![iso(&since), iso(&until)];
+        if !sessions.is_empty() {
+            sql.push_str(&format!(
+                " AND session_id IN ({})",
+                vec!["?"; sessions.len()].join(", ")
+            ));
+            args.extend(sessions.iter().cloned());
+        }
+        sql.push_str(" ORDER BY at, id");
+        let mut st = conn.prepare(&sql)?;
+        let rows = st.query_map(params_from_iter(args.iter()), |r| {
+            Ok(crate::reach::ReachRow {
+                at: parse_iso(&r.get::<_, String>(0)?).unwrap_or_else(utcnow),
+                session_id: r.get(1)?,
+                agent: r.get(2)?,
+                app: r.get(3)?,
+                tool: r.get(4)?,
+                read: r.get(5)?,
+                ok: r.get(6)?,
+                items: r.get::<_, Option<i64>>(7)?.map(|n| n.max(0) as u64),
+                bytes: r.get::<_, i64>(8)?.max(0) as u64,
+                ms: r.get::<_, i64>(9)?.max(0) as u64,
+            })
+        })?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// Forget the calls before `before`.
+    pub fn prune_reach(&self, before: DateTime<Utc>) -> Result<usize> {
+        Ok(self
+            .conn()
+            .execute("DELETE FROM reach WHERE at < ?", [iso(&before)])?)
     }
 
     // --- what a session did (ADR 0058) ------------------------------------------------
@@ -1727,6 +1828,72 @@ mod tests {
             "say [password: STORE_TOKEN]"
         );
         assert_eq!(events[1].detail, None);
+    }
+
+    #[test]
+    fn the_audit_reads_one_day_by_its_range() {
+        let store = Store::in_memory().unwrap();
+        let day = parse_iso("2026-11-11T05:00:00+00:00").unwrap();
+        for (i, hours) in [-1i64, 0, 5, 23, 24].iter().enumerate() {
+            let mut p = proposal(&format!("s{i}"));
+            p.created_at = day + Duration::hours(*hours) + Duration::milliseconds(250);
+            store.insert_proposal(&p).unwrap();
+        }
+        let (rows, total) = store
+            .list_proposals(&ProposalQuery {
+                since: Some(day),
+                until: Some(day + Duration::days(1)),
+                ..ProposalQuery::page(500, 0)
+            })
+            .unwrap();
+        assert_eq!(total, 3);
+        let mut sessions: Vec<_> = rows.iter().map(|p| p.session_id.as_str()).collect();
+        sessions.sort();
+        assert_eq!(sessions, vec!["s1", "s2", "s3"]);
+    }
+
+    #[test]
+    fn reach_is_kept_read_by_range_and_session_and_pruned() {
+        use crate::reach::ReachRow;
+        let store = Store::in_memory().unwrap();
+        let t0 = parse_iso("2026-11-11T10:00:00+00:00").unwrap();
+        let row = |session: &str, at: DateTime<Utc>, items: Option<u64>| ReachRow {
+            at,
+            session_id: session.into(),
+            agent: "ledger".into(),
+            app: "github".into(),
+            tool: "list_issues".into(),
+            read: true,
+            ok: true,
+            items,
+            bytes: 1200,
+            ms: 340,
+        };
+        store.add_reach(&row("run-1", t0, Some(12))).unwrap();
+        store
+            .add_reach(&row("s1", t0 + Duration::hours(2), None))
+            .unwrap();
+        store
+            .add_reach(&row("s1", t0 + Duration::days(2), Some(1)))
+            .unwrap();
+        let day = store
+            .reach_between(t0, t0 + Duration::days(1), &[])
+            .unwrap();
+        assert_eq!(day.len(), 2);
+        assert_eq!(day[0], row("run-1", t0, Some(12)));
+        assert_eq!(day[1].items, None);
+        let run = store
+            .reach_between(t0, t0 + Duration::days(3), &["run-1".into()])
+            .unwrap();
+        assert_eq!(run.len(), 1);
+        assert_eq!(store.prune_reach(t0 + Duration::days(1)).unwrap(), 2);
+        assert_eq!(
+            store
+                .reach_between(t0, t0 + Duration::days(3), &[])
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[test]

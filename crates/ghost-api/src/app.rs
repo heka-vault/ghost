@@ -279,12 +279,35 @@ pub fn audit_page(
     status: Option<&str>,
     session_id: Option<&str>,
 ) -> ApiResult<AuditPage> {
+    audit_page_between(
+        store,
+        limit,
+        offset,
+        source,
+        status,
+        session_id,
+        (None, None),
+    )
+}
+
+/// `audit_page` over a stretch of time: created in `[since, until)`.
+pub fn audit_page_between(
+    store: &Store,
+    limit: i64,
+    offset: i64,
+    source: Option<&str>,
+    status: Option<&str>,
+    session_id: Option<&str>,
+    (since, until): (Option<DateTime<Utc>>, Option<DateTime<Utc>>),
+) -> ApiResult<AuditPage> {
     let q = ProposalQuery {
         limit,
         offset,
         ability: source,
         status,
         session_id,
+        since,
+        until,
         ..Default::default()
     };
     let (rows, total) = store
@@ -615,11 +638,15 @@ pub struct AuditQuery {
     pub source: Option<String>,
     pub status: Option<String>,
     pub session_id: Option<String>,
+    /// Created at or after this (RFC 3339; ADR 0060).
+    pub since: Option<DateTime<Utc>>,
+    /// Created before this.
+    pub until: Option<DateTime<Utc>>,
 }
 
 /// Proposals, newest first; source narrows to one app or one of Ghost's own.
 #[utoipa::path(get, path = "/audit", operation_id = "audit_audit_get", tag = "writes", summary = "Audit",
-    description = "Proposals, newest first; source narrows to one app or one of Ghost's own.",
+    description = "Proposals, newest first; source narrows to one app or one of Ghost's own, since and until to a stretch of time (a day of the timeline, ADR 0060).",
     params(AuditQuery),
     responses((status = 200, description = "Successful Response", body = AuditPage),
               (status = 422, description = "Validation Error", body = HTTPValidationError)))]
@@ -631,13 +658,14 @@ async fn audit(
     let offset = q.offset.unwrap_or(0);
     crate::error::check_range(&["query", "limit"], limit, 1, 500)?;
     crate::error::check_range(&["query", "offset"], offset, 0, i64::MAX)?;
-    Ok(Json(audit_page(
+    Ok(Json(audit_page_between(
         &deps.store,
         limit,
         offset,
         q.source.as_deref(),
         q.status.as_deref(),
         q.session_id.as_deref(),
+        (q.since, q.until),
     )?))
 }
 
@@ -1563,6 +1591,7 @@ pub fn create_app(deps: SharedDeps) -> (axum::Router, utoipa::openapi::OpenApi) 
         .merge(crate::clients::router())
         .merge(crate::questions::router())
         .merge(crate::calls::router())
+        .merge(crate::reach::router())
         .routes(routes!(get_status))
         .routes(routes!(wake))
         .routes(routes!(sleep))

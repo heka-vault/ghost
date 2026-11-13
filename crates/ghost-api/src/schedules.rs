@@ -245,6 +245,10 @@ pub struct ScheduleRunsView {
 pub struct RunsQuery {
     #[param(minimum = 1, maximum = 200, default = 20)]
     pub limit: Option<i64>,
+    /// Scheduled at or after this (RFC 3339; ADR 0060). `/runs` only.
+    pub since: Option<DateTime<Utc>>,
+    /// Scheduled before this. `/runs` only.
+    pub until: Option<DateTime<Utc>>,
 }
 
 fn urgency(u: &str) -> Urgency {
@@ -561,7 +565,8 @@ async fn schedule_runs(
     }))
 }
 
-/// The runs of every schedule and of every watch that acted, newest first.
+/// The runs of every schedule and of every watch that acted, newest first; since and until
+/// narrow them to a stretch of time by when they were due (ADR 0060).
 #[utoipa::path(get, path = "/runs", operation_id = "runs_runs_get", tag = "schedules",
     summary = "Recent runs", params(RunsQuery),
     responses((status = 200, description = "Successful Response", body = ScheduleRunsView),
@@ -571,10 +576,16 @@ async fn runs(
     Qs(q): Qs<RunsQuery>,
 ) -> ApiResult<Json<ScheduleRunsView>> {
     let s = scheduler(&deps)?;
-    let runs = s
-        .jobs()
-        .recent_runs(q.limit.unwrap_or(20))
-        .map_err(refused)?;
+    let limit = q.limit.unwrap_or(20);
+    let runs = match (q.since, q.until) {
+        (None, None) => s.jobs().recent_runs(limit),
+        (since, until) => {
+            let until = until.unwrap_or_else(|| Utc::now() + chrono::Duration::days(1));
+            let since = since.unwrap_or(until - chrono::Duration::days(400));
+            s.jobs().runs_between(since, until, limit)
+        }
+    }
+    .map_err(refused)?;
     Ok(Json(ScheduleRunsView {
         runs: runs.iter().map(run_info).collect(),
     }))

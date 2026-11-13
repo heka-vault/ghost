@@ -122,7 +122,7 @@ export interface paths {
         };
         /**
          * Audit
-         * @description Proposals, newest first; source narrows to one app or one of Ghost's own.
+         * @description Proposals, newest first; source narrows to one app or one of Ghost's own, since and until to a stretch of time (a day of the timeline, ADR 0060).
          */
         get: operations["audit_audit_get"];
         put?: never;
@@ -1166,6 +1166,26 @@ export interface paths {
          * @description The operator will not answer it. A change waiting for a yes is cancelled.
          */
         post: operations["decline_questions_decline_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/reach": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Reach
+         * @description How much Ghost read and did between two times (at most 31 days): the calls agents made in sessions and runs, totalled, by app, by agent and by session or run (`run-<id>`). Counts and sizes only, never contents.
+         */
+        get: operations["reach_reach_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3078,6 +3098,82 @@ export interface components {
             /** @enum {string} */
             urgency: "digest" | "notify" | "call";
         };
+        /**
+         * @description One tool call as kept (ADR 0060): the app, the tool's name, whether it was a read and
+         *     worked, how many items came back and how many bytes (as the app sent them, before they
+         *     were fitted to the model's budget), and how long it took. Never contents.
+         */
+        ReachCall: {
+            agent: string;
+            app: string;
+            /** Format: date-time */
+            at: string;
+            /** Format: int64 */
+            bytes: number;
+            /** Format: int64 */
+            items?: number | null;
+            /** Format: int64 */
+            ms: number;
+            ok: boolean;
+            read: boolean;
+            /** @description The session, or `run-<id>` for a run with nobody there. */
+            session_id: string;
+            tool: string;
+        };
+        /** @description One tool call an agent made came back, as counts and sizes (ADR 0060). */
+        ReachEvent: {
+            reach: components["schemas"]["ReachCall"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "reach";
+        };
+        /** @description Totals over some calls, by one key: an app, an agent, a session or run, or `all`. */
+        ReachTotalView: {
+            /** @description The agent, for a session's or a run's total. */
+            agent?: string | null;
+            /** @description The apps called, by name. */
+            apps: string[];
+            /** Format: int64 */
+            bytes: number;
+            /** Format: int64 */
+            calls: number;
+            /** Format: int64 */
+            changes: number;
+            /** Format: int64 */
+            failed: number;
+            /** Format: date-time */
+            first?: string | null;
+            /** Format: int64 */
+            items: number;
+            key: string;
+            /** Format: date-time */
+            last?: string | null;
+            /**
+             * Format: int64
+             * @description The calls' time added up, in milliseconds.
+             */
+            ms: number;
+            /** Format: int64 */
+            reads: number;
+        };
+        /**
+         * @description How much Ghost read and did in a stretch of time (ADR 0060): everything, by app, by
+         *     agent, and by session or run (newest first). Counts and sizes only.
+         */
+        ReachView: {
+            by_agent: components["schemas"]["ReachTotalView"][];
+            by_app: components["schemas"]["ReachTotalView"][];
+            by_session: components["schemas"]["ReachTotalView"][];
+            /** @description The latest calls in the stretch, newest first, at most `REACH_RECENT`. */
+            recent: components["schemas"]["ReachCall"][];
+            /** Format: date-time */
+            since: string;
+            total: components["schemas"]["ReachTotalView"];
+            /** Format: date-time */
+            until: string;
+        };
         ReadToolInfo: {
             description: string;
             name: string;
@@ -3131,6 +3227,20 @@ export interface components {
             /** @description The file the operator opens. */
             path: string;
             text: string;
+        };
+        /** @description A run with nobody there started or has ended (ADR 0060), with its row as it is now. */
+        RunEvent: {
+            /**
+             * @description Where a run is (ADR 0060).
+             * @enum {string}
+             */
+            phase: "started" | "ended";
+            run: components["schemas"]["ScheduleRunInfo"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "run";
         };
         SampleRequest: {
             /** Format: double */
@@ -3819,11 +3929,16 @@ export type SchemaQuestionEvent = components['schemas']['QuestionEvent'];
 export type SchemaQuestionResult = components['schemas']['QuestionResult'];
 export type SchemaQuestionsView = components['schemas']['QuestionsView'];
 export type SchemaQuestionView = components['schemas']['QuestionView'];
+export type SchemaReachCall = components['schemas']['ReachCall'];
+export type SchemaReachEvent = components['schemas']['ReachEvent'];
+export type SchemaReachTotalView = components['schemas']['ReachTotalView'];
+export type SchemaReachView = components['schemas']['ReachView'];
 export type SchemaReadToolInfo = components['schemas']['ReadToolInfo'];
 export type SchemaRoutesView = components['schemas']['RoutesView'];
 export type SchemaRuleAdd = components['schemas']['RuleAdd'];
 export type SchemaRuleSet = components['schemas']['RuleSet'];
 export type SchemaRulesView = components['schemas']['RulesView'];
+export type SchemaRunEvent = components['schemas']['RunEvent'];
 export type SchemaSampleRequest = components['schemas']['SampleRequest'];
 export type SchemaSayingEvent = components['schemas']['SayingEvent'];
 export type SchemaSayingView = components['schemas']['SayingView'];
@@ -4090,8 +4205,12 @@ export interface operations {
                 limit?: number;
                 offset?: number;
                 session_id?: string;
+                /** @description Created at or after this (RFC 3339; ADR 0060). */
+                since?: string;
                 source?: string;
                 status?: string;
+                /** @description Created before this. */
+                until?: string;
             };
             header?: never;
             path?: never;
@@ -4749,7 +4868,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StatusEvent"] | components["schemas"]["TurnEvent"] | components["schemas"]["PendingEvent"] | components["schemas"]["OutcomeEvent"] | components["schemas"]["LogEvent"] | components["schemas"]["ConversationEvent"] | components["schemas"]["WaitingEvent"] | components["schemas"]["QuestionEvent"] | components["schemas"]["AppsEvent"] | components["schemas"]["VoiceEvent"] | components["schemas"]["ActivityEvent"] | components["schemas"]["HeardEvent"] | components["schemas"]["SayingEvent"] | components["schemas"]["HearEvent"] | components["schemas"]["ShowAppEvent"];
+                    "application/json": components["schemas"]["StatusEvent"] | components["schemas"]["TurnEvent"] | components["schemas"]["PendingEvent"] | components["schemas"]["OutcomeEvent"] | components["schemas"]["LogEvent"] | components["schemas"]["ConversationEvent"] | components["schemas"]["WaitingEvent"] | components["schemas"]["QuestionEvent"] | components["schemas"]["AppsEvent"] | components["schemas"]["VoiceEvent"] | components["schemas"]["ActivityEvent"] | components["schemas"]["HeardEvent"] | components["schemas"]["SayingEvent"] | components["schemas"]["HearEvent"] | components["schemas"]["RunEvent"] | components["schemas"]["ReachEvent"] | components["schemas"]["ShowAppEvent"];
                 };
             };
         };
@@ -6117,6 +6236,42 @@ export interface operations {
             };
         };
     };
+    reach_reach_get: {
+        parameters: {
+            query: {
+                /** @description Only these sessions or runs (`run-<id>`), comma separated, at most 40. */
+                sessions?: string;
+                /** @description From this time (RFC 3339), inclusive. */
+                since: string;
+                /** @description To this time, exclusive; now when left out. */
+                until?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReachView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_rules_rules_get: {
         parameters: {
             query?: never;
@@ -6174,6 +6329,10 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
+                /** @description Scheduled at or after this (RFC 3339; ADR 0060). `/runs` only. */
+                since?: string;
+                /** @description Scheduled before this. `/runs` only. */
+                until?: string;
             };
             header?: never;
             path?: never;
@@ -6497,6 +6656,10 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
+                /** @description Scheduled at or after this (RFC 3339; ADR 0060). `/runs` only. */
+                since?: string;
+                /** @description Scheduled before this. `/runs` only. */
+                until?: string;
             };
             header?: never;
             path: {
