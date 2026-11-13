@@ -1,5 +1,5 @@
 /**
- * Owner: apps. #/settings/apps/:name: one app (ADR 0034). Whether Ghost is connected to it, and each
+ * Owner: apps. #/apps/:name: one app (ADR 0034). Whether Ghost is connected to it, and each
  * of its tools with what Ghost may do: a change is Allow (it runs and Ghost says so), Ask
  * first or Block, with Quiet in the row's menu; a read is Allow or Block. A choice moves the
  * tool's own rule in the operator's permissions (`PUT /permissions`, `set`); choosing what
@@ -49,7 +49,7 @@ export function AppDetail({ name }: { name: string }) {
     void load();
   }, [load, appsVersion]);
 
-  const actions = useAppActions({ onChanged: () => void load(), onDisconnected: () => navigate("/settings/apps") });
+  const actions = useAppActions({ onChanged: () => void load(), onDisconnected: () => navigate("/apps") });
   const limits = useAppLimits(app, setApp);
 
   /** Move one rule, then read the app back: its levels are the gate's, not this screen's guess. */
@@ -90,7 +90,7 @@ export function AppDetail({ name }: { name: string }) {
           icon={<SearchX />}
           title={`There’s no app called ${quoted(name)}`}
           description="It may have been disconnected, or the link has a typo."
-          actions={<Button href={hrefFor("/settings/apps")}>See all apps</Button>}
+          actions={<Button href={hrefFor("/apps")}>See all apps</Button>}
         />
       </Page>
     );
@@ -111,7 +111,7 @@ export function AppDetail({ name }: { name: string }) {
       dock={limits.dock}
       leading={<AppIcon title={title} icon={app?.icon} size="lg" />}
       crumb={
-        <Link to="/settings/apps">
+        <Link to="/apps">
           <ChevronLeft size={14} aria-hidden />
           Apps
         </Link>

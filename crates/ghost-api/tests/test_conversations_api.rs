@@ -380,3 +380,61 @@ async fn retire_rehire_and_seed_from() {
         assert!(ops.contains(op), "{op}");
     }
 }
+
+#[tokio::test]
+async fn an_agent_has_a_look_chosen_when_hired_and_changed_after() {
+    let w = World::new();
+    let c = w.client();
+    // Hired with a shape and a colour: kept on the agent, in its folder.
+    let r = c
+        .post(
+            "/conversations",
+            Some(json!({"name": "Ledger", "look": "lantern:3"})),
+        )
+        .await;
+    assert_eq!(r.status, 200, "{}", r.text);
+    assert_eq!(r["look"], "lantern:3");
+    let file = std::fs::read_to_string(w.path().join("config/agents/ledger/agent.json")).unwrap();
+    assert!(file.contains("\"look\": \"lantern:3\""), "{file}");
+    // Changed, then back to the one picked from its slug.
+    let r = c
+        .patch("/conversations/ledger", json!({"look": "moth:6"}))
+        .await;
+    assert_eq!(r.status, 200, "{}", r.text);
+    assert_eq!(c.get("/conversations/ledger").await["look"], "moth:6");
+    assert_eq!(
+        c.patch("/conversations/ledger", json!({"look": ""}))
+            .await
+            .status,
+        200
+    );
+    assert_eq!(c.get("/conversations/ledger").await["look"], Value::Null);
+    // Not a shape, not a colour, or Ghost's: refused.
+    assert_eq!(
+        c.patch("/conversations/ledger", json!({"look": "dragon:1"}))
+            .await
+            .status,
+        422
+    );
+    assert_eq!(
+        c.patch("/conversations/ledger", json!({"look": "moth:9"}))
+            .await
+            .status,
+        422
+    );
+    assert_eq!(
+        c.patch("/conversations/ghost", json!({"look": "moth:1"}))
+            .await
+            .status,
+        422
+    );
+    // A look is a change through the gate like a rename: audited.
+    let audit = c.get("/audit?source=conversations").await;
+    assert!(
+        audit["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["operation"] == "rename")
+    );
+}

@@ -4,6 +4,8 @@
  * own words, and optionally a retired agent whose memory becomes its starting memory. It
  * speaks in Ghost's voice until given one of its own.
  */
+import { type AgentLook, lookOf, lookText } from "@ghost/ui";
+import { LookPicker, slugOf } from "./LookPicker";
 import type { ConversationDetail, ConversationView } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
 import { useEffect, useRef, useState } from "react";
@@ -33,6 +35,8 @@ export function NewAgentDialog({ open, onClose, taken, retired = [], seed = null
   const [name, setName] = useState("");
   const [aliases, setAliases] = useState("");
   const [job, setJob] = useState("");
+  // How it looks: what its name would give it until the operator picks.
+  const [look, setLook] = useState<AgentLook | null>(null);
   const [persona, setPersona] = useState("");
   const [seedFrom, setSeedFrom] = useState("");
   const [busy, setBusy] = useState(false);
@@ -44,6 +48,7 @@ export function NewAgentDialog({ open, onClose, taken, retired = [], seed = null
       setName("");
       setAliases("");
       setJob("");
+      setLook(null);
       setPersona("");
       setSeedFrom("");
       setError(null);
@@ -66,6 +71,7 @@ export function NewAgentDialog({ open, onClose, taken, retired = [], seed = null
   }, [open, seed, retired]);
 
   const trimmed = name.trim();
+  const shownLook = look ?? lookOf(slugOf(trimmed || "agent"));
   const clash = trimmed && taken.includes(trimmed.toLowerCase()) ? `There’s already an agent called ${trimmed}. Pick another name.` : null;
   const shown = clash ?? error;
 
@@ -82,6 +88,7 @@ export function NewAgentDialog({ open, onClose, taken, retired = [], seed = null
         speed: null,
         persona,
         seed_from: seedFrom || null,
+        look: lookText(shownLook),
       };
       onCreated(await client.createConversation(body));
     } catch (e) {
@@ -129,6 +136,11 @@ export function NewAgentDialog({ open, onClose, taken, retired = [], seed = null
         <Field label="Name" error={shown} help={<>You’ll say {quoted(`transfer me to ${spoken}`)}.</>}>
           <Input ref={nameRef} value={name} placeholder={example} maxLength={60} onChange={(e) => setName(e.target.value)} />
         </Field>
+        <div className="conv-look-field">
+          <p className="conv-look-field__label">How it looks</p>
+          <LookPicker value={shownLook} onChange={setLook} name={trimmed || "New agent"} />
+          <p className="conv-look-field__help">Its shape and colour wherever it appears. Change it any time.</p>
+        </div>
         <Field label="Job" optional help="What it is for, in a line: brand design, the Q3 audit, social media.">
           <Input value={job} placeholder="brand design" maxLength={200} onChange={(e) => setJob(e.target.value)} />
         </Field>

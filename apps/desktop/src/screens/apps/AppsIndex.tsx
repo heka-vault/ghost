@@ -1,5 +1,5 @@
 /**
- * Owner: apps. #/settings/apps: the apps Ghost is connected to, then the catalog to add more from.
+ * Owner: apps. #/apps: the apps Ghost is connected to, then the catalog to add more from.
  * Everything a connected app offers runs (ADR 0034); a change is announced. What to block or
  * have Ghost ask first is set on each app's page, or for everything on Permissions.
  */
@@ -180,7 +180,7 @@ function AppRow({ app: a, actions }: { app: AppView; actions: ReturnType<typeof 
 
   return (
     <ListRow
-      href={hrefFor(`/settings/apps/${encodeURIComponent(a.name)}`)}
+      href={hrefFor(`/apps/${encodeURIComponent(a.name)}`)}
       leading={<AppIcon title={a.title} icon={a.icon} />}
       title={a.title}
       description={line}

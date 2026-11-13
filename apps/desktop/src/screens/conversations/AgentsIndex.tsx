@@ -39,7 +39,7 @@ import { NewAgentDialog } from "./NewAgentDialog";
 import { RosterLine } from "./RosterLine";
 import { personaCache } from "./personaCache";
 import { isRetired, retiredAt } from "./threads";
-import { agentPath, designFail, designRetry, focusOnOpen, newAgentSeed, readParam, writeParam } from "./url";
+import { designFail, designRetry, focusOnOpen, newAgentSeed, readParam, writeParam } from "./url";
 import { parseVoice, voiceKind } from "./voices";
 import { GhostFolder } from "./GhostFolder";
 
@@ -155,7 +155,7 @@ export function AgentsIndex() {
     return (
       <ListRow
         key={l.slug}
-        href={hrefFor(agentPath(l.slug))}
+        href={hrefFor(`/settings/agents/${encodeURIComponent(l.slug)}`)}
         leading={<LineGlyph slug={l.slug} name={name} size="lg" />}
         title={name}
         description={
@@ -322,7 +322,7 @@ export function AgentsIndex() {
                   return (
                     <ListRow
                       key={l.slug}
-                      href={hrefFor(agentPath(l.slug))}
+                      href={hrefFor(`/settings/agents/${encodeURIComponent(l.slug)}`)}
                       leading={<LineGlyph slug={l.slug} name={name} size="lg" />}
                       title={name}
                       description={

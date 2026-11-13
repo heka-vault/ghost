@@ -217,6 +217,9 @@ the contract keeps for a waiting okay), the tray's native menu (Room, and Today'
 - **Watching**: one danger notice for everything that can't run; failures in words.
 - **Apps**: what each app was used for today; amber gone.
 - **Conversation**: an opened call reads in words, the raw view one click away.
+- After the owner used it live (ADR 0061): the rail lists the agents themselves with their live
+  state and + to hire; an agent's settings moved to Settings › Agents; each agent has a shape and
+  a colour of its own; Apps left Settings for a place of its own.
 - Still to build: onboarding as a real first run, Settings' sections to one standard, the
   catalog and connecting as one flow, making a schedule or a watch without cron, and the agent's
   conversation on the record.

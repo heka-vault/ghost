@@ -295,7 +295,7 @@ export function GitHubStep({ w }: { w: Wizard }) {
             />
           </Card>
           <div className="onb-links">
-            <Button size="sm" variant="secondary" href={hrefFor("/settings/apps")} trailingIcon={<ArrowRight />}>
+            <Button size="sm" variant="secondary" href={hrefFor("/apps")} trailingIcon={<ArrowRight />}>
               {connected ? "Open Apps" : "Connect GitHub in Apps"}
             </Button>
             <Button size="sm" variant="ghost" href={hrefFor("/settings/permissions")}>

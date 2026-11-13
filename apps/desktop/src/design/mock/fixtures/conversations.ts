@@ -24,6 +24,8 @@ interface Seed {
   /** Its own voice; absent: Ghost's (ADR 0035). */
   voice?: string;
   speed?: number;
+  /** Its look, `"<shape>:<colour>"`; absent: Wisp in the colour its slug picks. */
+  look?: string;
   persona: string;
   memory: string;
   notes: string[];
@@ -76,6 +78,7 @@ const GHOST: Seed = {
 /** The books, with its own voice. */
 const ACCOUNTING: Seed = {
   slug: "accounting",
+  look: "lantern:4",
   name: "Accounting",
   aliases: ["billing", "the books"],
   job: "the books, invoices and billing bugs",
@@ -111,6 +114,7 @@ const ACCOUNTING: Seed = {
 /** Hired for one job, with its own voice. */
 const Q3_AUDIT: Seed = {
   slug: "q3-audit",
+  look: "bell:1",
   name: "Q3 audit",
   aliases: ["the audit", "auditors"],
   job: "the auditors’ questions",
@@ -165,6 +169,7 @@ const Q3_CLOSE: Seed = {
 
 const INFRA: Seed = {
   slug: "infra",
+  look: "hood:6",
   name: "Infra",
   aliases: ["the infra repo", "ops"],
   job: "deploys, the ledger export, anything paging",
@@ -187,6 +192,7 @@ const INFRA: Seed = {
 
 const APP: Seed = {
   slug: "app",
+  look: "cloud:7",
   name: "App",
   aliases: ["the app repo", "frontend"],
   job: "the app repo",
@@ -210,6 +216,7 @@ const APP: Seed = {
 /** One job, in Ghost's voice. */
 const RELEASE_NOTES: Seed = {
   slug: "release-notes",
+  look: "star:2",
   name: "Release notes",
   aliases: ["the notes"],
   job: "release notes for each tag",
@@ -229,6 +236,7 @@ const RELEASE_NOTES: Seed = {
 /** A daily job, with its own voice and pace. */
 const STANDUP: Seed = {
   slug: "standup",
+  look: "drop:5",
   name: "Standup",
   aliases: ["daily", "morning update"],
   job: "the morning update",
@@ -249,6 +257,7 @@ const STANDUP: Seed = {
 
 const LEGAL: Seed = {
   slug: "legal",
+  look: "moth:3",
   name: "Legal",
   aliases: ["compliance", "counsel"],
   job: "licenses, DPAs, anything that could be a compliance problem",
@@ -281,6 +290,7 @@ const LEGAL_HISTORY = [
 /** Busy only: a second retired agent, so the group shows more than one. */
 const LAUNCH: Seed = {
   slug: "launch",
+  look: "star:4",
   name: "Launch",
   aliases: ["the launch"],
   job: "the September launch",
@@ -412,6 +422,7 @@ function build(seed: Seed, live: boolean, older = seed.compactions * 4): AgentRe
       retired_at: seed.retiredDaysAgo != null ? ago(60 * 24 * seed.retiredDaysAgo) : null,
       active: false,
       is_ghost: seed.slug === "ghost",
+      look: seed.look ?? null,
       turn_count: all.length,
       compactions: seed.compactions,
       dir: `${CONFIG_DIR}/agents/${seed.slug}`,
