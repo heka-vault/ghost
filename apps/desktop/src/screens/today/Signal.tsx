@@ -27,7 +27,7 @@ export function Signal() {
       <ul className="today-figures" role="list">
         <Figure label="items read" value={count(t.items)} hint={t.calls ? `in ${count(t.calls)} ${t.calls === 1 ? "call" : "calls"}` : "no calls yet"} />
         <Figure label="read" value={bytes(t.bytes)} hint={t.failed ? `${count(t.failed)} failed` : t.calls ? "as the apps sent it" : "—"} trouble={t.failed > 0} />
-        <Figure label="apps reached" value={`${t.apps.length}`} unit={`of ${today.reach.apps}`} hint={appsTitle} href="/settings/apps" trouble={today.reach.down > 0} troubleText={today.reach.down ? `${today.reach.down} not connected` : undefined} />
+        <Figure label="apps reached" value={`${t.apps.length}`} unit={`of ${today.reach.apps}`} hint={appsTitle} href="/apps" trouble={today.reach.down > 0} troubleText={today.reach.down ? `${today.reach.down} not connected` : undefined} />
         <Figure label="changes made" value={count(today.counts.changes)} hint={`${count(today.counts.runs)} ${today.counts.runs === 1 ? "run" : "runs"} · ${count(today.counts.modelCalls)} model calls`} trouble={today.counts.failedChanges > 0} troubleText={today.counts.failedChanges ? `${today.counts.failedChanges} failed` : undefined} />
         <Figure label="working now" value={`${working}`} hint={working ? today.working.filter((r) => r.status === "running").map((r) => nameOf(today.agents, r.agent)).join(", ") : "nobody"} live={working > 0} />
         <Figure label="first word" value={today.speed ? today.speed.text : "—"} hint={today.speed ? today.speed.model : "not checked yet"} href="/settings/model" />

@@ -99,6 +99,22 @@ pub fn slugify(name: &str) -> String {
     }
 }
 
+/// The shapes an agent may be drawn as: a family around Wisp, Ghost's own (docs/design-system.md,
+/// Agents' marks). Ghost itself is always Wisp in colour 0.
+pub const LOOK_SHAPES: [&str; 8] = [
+    "wisp", "drop", "bell", "hood", "cloud", "lantern", "star", "moth",
+];
+/// The agent colours (`--hue-0` to `--hue-7`).
+pub const LOOK_HUES: u8 = 8;
+
+/// A look as the operator chose it, `"<shape>:<colour>"`, or None when it isn't one.
+pub fn parse_look(text: &str) -> Option<String> {
+    let (shape, hue) = text.trim().split_once(':')?;
+    let hue: u8 = hue.trim().parse().ok()?;
+    (LOOK_SHAPES.contains(&shape.trim()) && hue < LOOK_HUES)
+        .then(|| format!("{}:{hue}", shape.trim()))
+}
+
 pub fn new_id() -> String {
     uuid::Uuid::new_v4().simple().to_string()
 }
@@ -114,6 +130,9 @@ pub struct Profile {
     /// None: Ghost's voice (ADR 0035).
     pub voice: Option<String>,
     pub speed: Option<f64>,
+    /// How it is drawn: one of `LOOK_SHAPES` and a colour 0 to 7, as `"<shape>:<colour>"`.
+    /// None: the shape and colour Ghost picks from its slug (ADR 0035: a field on the agent).
+    pub look: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub last_active_at: Option<DateTime<Utc>>,
@@ -133,6 +152,7 @@ impl Profile {
             job: String::new(),
             voice: None,
             speed: None,
+            look: None,
             created_at: now,
             updated_at: now,
             last_active_at: None,
@@ -171,6 +191,9 @@ impl Profile {
         }
         if let Some(s) = self.speed {
             out.insert("speed".into(), json!(s));
+        }
+        if let Some(l) = &self.look {
+            out.insert("look".into(), json!(l));
         }
         Value::Object(out)
     }
@@ -222,5 +245,22 @@ mod tests {
         assert_eq!(v["job"], "the books");
         assert!(v.get("aliases").is_none());
         assert!(v.get("created_at").is_none());
+    }
+}
+
+#[cfg(test)]
+mod look_tests {
+    use super::*;
+
+    #[test]
+    fn a_look_is_a_known_shape_and_a_colour() {
+        assert_eq!(parse_look(" lantern : 3 ").as_deref(), Some("lantern:3"));
+        assert_eq!(parse_look("wisp:0").as_deref(), Some("wisp:0"));
+        assert_eq!(parse_look("dragon:1"), None);
+        assert_eq!(parse_look("moth:8"), None);
+        assert_eq!(parse_look("moth"), None);
+        let mut p = Profile::new("ledger", "Ledger");
+        p.look = Some("moth:4".into());
+        assert_eq!(p.agent_json()["look"], "moth:4");
     }
 }
