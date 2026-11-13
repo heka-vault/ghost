@@ -160,19 +160,26 @@ pub(crate) fn realtime_for(
     })
 }
 
+/// Whether a session at the desk opens the microphone: never for a typed one (2026-11-13),
+/// never while listening is off (ADR 0057).
+pub fn opens_mic(typed: bool, not_listening: bool) -> bool {
+    !typed && !not_listening
+}
+
 pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
     let SessionStart {
         first_utterance,
         phone,
         start_in,
         raised,
+        typed,
+        end,
     } = start;
     // The wake said twice ("Hey ghost. Hey ghost.") leaves the name as the first
     // utterance: a bare wake, opened with the canned greeting (or what is waiting), not a
     // request for the model (2026-11-12: 1.5 to 2.8 s for a made-up opening).
-    let first_utterance = first_utterance.filter(|first| {
-        *lock(&d.first_via) == TurnVia::Text || !ghost_voice::intents::only_the_name(first)
-    });
+    let first_utterance =
+        first_utterance.filter(|first| typed || !ghost_voice::intents::only_the_name(first));
     let origin = if phone.is_some() {
         SessionOrigin::Phone
     } else {
@@ -187,14 +194,22 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
     let voice = {
         // The first sound waits on this connection's own first word (`acks::FirstSound`).
         let voice = d.voice();
-        if voice.first_sound_secs.is_none() {
+        if voice.first_sound_secs.is_none() || typed {
             let mut v = (*voice).clone();
-            v.first_word_secs = d.first_word_secs();
+            if v.first_sound_secs.is_none() {
+                v.first_word_secs = d.first_word_secs();
+            }
+            if typed {
+                // Read on screen, and heard: it ends a short while after the reply unless
+                // the operator types again.
+                v.idle_timeout_secs = v.typed_idle_secs;
+            }
             Arc::new(v)
         } else {
             voice
         }
     };
+    let mic = phone.is_none() && opens_mic(typed, d.mic.is_off());
     let ducker = lock(&d.ducker).clone();
     let already_chimed = d.chimed.swap(false, Ordering::SeqCst);
     let (media, phone) = match phone {
@@ -208,9 +223,10 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
             let opened = (d.ports.desk_media)(DeskMediaRequest {
                 audio: d.audio_settings(false), // ducked here, not by the devices
                 thinking_sound: voice.thinking_sound,
-                chime: cfg.chime && !already_chimed,
-                // ADR 0057: a typed turn while not listening; the speaker only
-                mic: !d.mic.is_off(),
+                // The chime says Ghost is listening: not for a typed session.
+                chime: cfg.chime && !already_chimed && !typed,
+                // A typed session, or listening off (ADR 0057): the speaker only.
+                mic,
             })
             .await;
             match opened {
@@ -324,6 +340,9 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
             let d = d.clone();
             Box::pin(async move {
                 if let Some(d) = d.upgrade() {
+                    if phase != SessionPhase::Speaking && d.state.phase() == Phase::Speaking {
+                        *lock(&d.spoke_at) = Some(Instant::now()); // Daemon::own_voice_now
+                    }
                     let id = d.state.session_id();
                     d.state.set_phase(phase_of(phase), id.as_deref(), None);
                     if phase == SessionPhase::Listening {
@@ -392,7 +411,7 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
     // Each read of the desk's microphone, as numbers (ADR 0064): a loud segment read as
     // nothing in a session is the symptom the passive check watches for. The phone's
     // audio is the phone's, not this microphone's.
-    let on_read: Option<ghost_voice::stt::OnRead> = (origin == SessionOrigin::Desk).then(|| {
+    let on_read: Option<ghost_voice::stt::OnRead> = mic.then(|| {
         let health = d.mic_health.clone();
         Arc::new(move |dbfs: f64, words: usize| {
             lock(&health).check(dbfs as f32, words, true, std::time::Instant::now());
@@ -482,7 +501,7 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
         greeting,
         first_utterance: first_utterance.clone(),
         // Typed in the desktop app (ADR 0052): the reply may be written.
-        first_typed: first_utterance.is_some() && *lock(&d.first_via) == TurnVia::Text,
+        first_typed: first_utterance.is_some() && typed,
         hooks: SessionHooks {
             on_turn: Some(on_turn),
             on_phase: Some(on_phase),
@@ -503,7 +522,7 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
         latency_log: Some(cfg.latency_path()),
         reach: d.reach(),
         context_note,
-        realtime: realtime_for(d, origin == SessionOrigin::Desk && !d.mic.is_off()),
+        realtime: realtime_for(d, mic),
     }));
     if let Some(p) = &phone {
         session.set_rtvi(Arc::new(PhoneRtvi(p.media.clone())));
@@ -515,25 +534,35 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
         *lock(&d.last_desk_session) = Some(Instant::now());
     }
     *lock(&d.origin) = Some(origin);
+    d.state.set_session_typed(typed);
     d.state
         .set_phase(Phase::Listening, Some(&session_id), Some(origin));
     d.state.set_conversation(Some(&start_in), None);
     if let Some(first) = &first_utterance {
-        let via = std::mem::replace(&mut *lock(&d.first_via), TurnVia::Voice);
+        let via = if typed { TurnVia::Text } else { TurnVia::Voice };
         d.state.add_turn(TurnRole::User, first, via);
     }
     *lock(&d.first_via) = TurnVia::Voice;
-    info!("session {session_id} start ({origin_name})");
+    let kind = if typed {
+        "typed, no microphone"
+    } else {
+        origin_name
+    };
+    info!("session {session_id} start ({kind})");
     let mut data = Map::new();
     data.insert("session_id".into(), json!(session_id));
     data.insert("origin".into(), json!(origin_name));
     events.emit(EventKind::SessionStart, data).await;
 
     let mut helpers: Vec<JoinHandle<()>> = Vec::new();
-    let mut waits: Vec<BoxFuture<'static, ()>> = vec![{
-        let stop = d.stop.clone();
-        Box::pin(async move { stop.cancelled().await })
-    }];
+    let mut waits: Vec<BoxFuture<'static, ()>> = vec![
+        {
+            let stop = d.stop.clone();
+            Box::pin(async move { stop.cancelled().await })
+        },
+        // Called by name during a typed session: the voice session takes over.
+        Box::pin(async move { end.cancelled().await }),
+    ];
     let peer_gone = Arc::new(Event::new());
     if let Some(p) = &phone {
         helpers = phone_helpers(d, &session, &p.media, peer_gone.clone());
@@ -631,7 +660,7 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
             *lock(&d.live_phone) = None;
         }
         None => {
-            if cfg.chime {
+            if cfg.chime && !typed {
                 let play = d.ports.play.clone();
                 if let Err(e) = play(
                     ghost_audio::chime(false),
@@ -659,6 +688,7 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
         d.refresh_waiting_now();
     }
     *lock(&d.session) = None;
+    d.state.set_session_typed(false);
     // ADR 0056: the operator's own turns say whether the connection is slow.
     d.refresh_slow_note();
     *lock(&d.heard) = None;

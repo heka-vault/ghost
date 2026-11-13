@@ -10,6 +10,7 @@ import { MockDaemon } from "../src/design/mock/daemon";
 import { composeFixtures } from "../src/design/mock/fixtures";
 import { scenarioByName } from "../src/design/mock/scenarios";
 import { startCopy } from "../src/screens/session";
+import { stageWords } from "../src/screens/session/Stage";
 
 type T = { role: string; text: string; via?: string; at: string };
 const at = (s: number) => `2026-11-12T10:00:${String(s).padStart(2, "0")}Z`;
@@ -117,5 +118,27 @@ describe("the start state with the mic closed (ADR 0057) never asks the operator
 
   it("still says the wake phrase when the mic is open", () => {
     expect(startCopy(base).title).toMatch(/Hey Ghost/);
+  });
+});
+
+describe("a typed session says typing, never listening (2026-11-13)", () => {
+  const base = { online: true, loading: false, needsSetup: false, locked: false, inSession: true, onPhone: false, recording: false };
+
+  it("the start state names it and how to talk instead", () => {
+    const c = startCopy({ ...base, typed: true });
+    expect(c.title).toBe("Typing with Ghost");
+    expect(c.text).toMatch(/mic stays closed/);
+    expect(c.text).toMatch(/Hey Ghost/);
+    expect(startCopy({ ...base, typed: false }).title).toBe("Go ahead");
+    // Not listening still wins: then the name can't be heard either.
+    expect(startCopy({ ...base, typed: true, micOff: "Mic off" }).title).toBe("Your mic is off");
+  });
+
+  it("the strip never asks the operator to talk over or go ahead", () => {
+    const waiting = stageWords("listening", "Ghost", [], null, true);
+    expect(waiting.title).toBe("Typing with Ghost");
+    expect(waiting.hint).not.toMatch(/go ahead/i);
+    expect(stageWords("speaking", "Ghost", [], null, true).hint).not.toMatch(/talk over/i);
+    expect(stageWords("listening", "Ghost", [], null, false).title).toBe("Listening");
   });
 });

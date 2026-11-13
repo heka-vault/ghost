@@ -274,6 +274,9 @@ pub struct Deps {
     /// The daemon's own environment, in memory, where the vault fills the keys (ADR
     /// 0036) and the model connection reads them (ADR 0037).
     pub environ: SharedEnviron,
+    /// The process environment the daemon was started in (the launcher loads
+    /// `settings.env` into it); `environ` goes over it (`ghost_core::environment`).
+    pub started_env: Arc<HashMap<String, String>>,
     pub conversations: Option<Arc<Conversations>>,
     pub apps: Option<Arc<dyn AppsPort>>,
     pub catalog: Option<Arc<Catalog>>,
@@ -334,6 +337,7 @@ impl Deps {
             output_device: None,
             stt_model: String::new(),
             environ: Arc::new(Mutex::new(HashMap::new())),
+            started_env: Arc::default(),
             conversations: None,
             apps: None,
             catalog: None,
@@ -367,6 +371,13 @@ impl Deps {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clone()
+    }
+
+    /// What Ghost's own settings read now, as the daemon resolves it for a session: the
+    /// environment it was started in, its own over it (ADR 0037).
+    pub fn ghost_env(&self) -> HashMap<String, String> {
+        let live = self.environ.lock().unwrap_or_else(|e| e.into_inner());
+        ghost_core::environment::resolve(&self.started_env, &live)
     }
 
     /// `settings.env`, read now; empty when there is no file.

@@ -122,13 +122,15 @@ export function fpsOf(s: Scene, arriving: boolean): number {
 /** The scene's word, in the label under Wisp. A few words: the beams say where. */
 export function labelOf(
   s: Scene,
-  o: { agent: string; using: string | null; asker: string | null; micOff: boolean; modelSecs?: number | null },
+  o: { agent: string; using: string | null; asker: string | null; micOff: boolean; modelSecs?: number | null; typed?: boolean },
 ): string {
   switch (s) {
     case "you":
       return "Listening to you";
     case "listening":
-      return o.micOff ? "Mic off · type in Ghost" : "Listening";
+      if (o.micOff) return "Mic off · type in Ghost";
+      // A typed session opened no microphone: it waits for the next line typed.
+      return o.typed ? `Typing with ${o.agent}` : "Listening";
     case "thinking":
       if (o.using) return `Looking in ${o.using}`;
       // Nothing out, no reply yet: the model is the wait, and says how long (a slow provider).

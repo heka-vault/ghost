@@ -8,7 +8,13 @@ microphone, is what makes it hear you reliably.
 ## What is kept
 
 Only when the trained detector (`GHOST_WAKE_MODE=onnx`) scores something as its name and the
-decision is made:
+decision is made. Transcript wake, which a fresh install uses, has no detector score and keeps
+no takes: Ghost keeps nothing it hears before its name. The first run and Settings › Sound say
+the keeping line, with its switch, only while the detector is the wake (the status's
+`wake_mode`, which turns to `transcript` when the detector cannot load); takes kept earlier stay
+there to delete.
+
+What is kept for each decided hit:
 
 | | Woke (accepted) | Turned down by Parakeet's check (refused) |
 |---|---|---|

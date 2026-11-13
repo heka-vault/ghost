@@ -13,9 +13,9 @@ import { ArrowRight, MicOff, MonitorDown } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { Button, LineGlyph, Mascot, VoiceWave, cx, formatShortcut, useLive } from "../ui";
-import { notListening, notListeningSub } from "./listening";
+import { notListening, notListeningSub, sessionWords, typedSession } from "./listening";
 import { usePosture } from "./PostureContext";
-import { moodOf } from "./Rail";
+import { moodOf } from "./mood";
 import { hrefFor } from "./router";
 import { nameOf, useToday } from "./today";
 import { clock, needLine } from "../screens/today/model";
@@ -44,8 +44,9 @@ export function Room() {
   const inSession = !!status?.session_id;
   const onPhone = inSession && status?.session_origin === "phone";
   const who = nameOf(today.agents, status?.conversation);
-  const word = stateWord({ connection, phase, off: !!off, inSession, loadingModels, pending: !!pending });
-  const sub = subLine({ connection, off, inSession, onPhone, who, loadingModels });
+  const typed = typedSession(status);
+  const word = stateWord({ connection, phase, off: !!off, inSession, loadingModels, pending: !!pending, typed });
+  const sub = subLine({ connection, off, inSession, onPhone, who, loadingModels, session: sessionWords(status, who) });
   const reply = inSession ? [...turns].reverse().find((t) => t.role === "assistant")?.text ?? null : null;
   const needs = [...today.needs.decide, ...today.needs.answer, ...today.needs.know];
   const shown = needs.slice(0, ROOM_NEEDS);
@@ -72,7 +73,7 @@ export function Room() {
         <div className="room-layer__presence">
           <span className="room-layer__glow" aria-hidden />
           <span className="room-layer__wisp">
-            <Mascot size={200} mood={moodOf(connection === "online" ? phase : "offline", !!off)} idle title="" />
+            <Mascot size={200} mood={moodOf(connection === "online" ? phase : "offline", !!off, typed)} idle title="" />
           </span>
           <h2 className="room-layer__word" aria-live="polite">
             {off && <MicOff aria-hidden className="room-layer__off" />}
@@ -179,7 +180,7 @@ function Stat({ n, one, many }: { n: number; one: string; many: string }) {
   );
 }
 
-function stateWord(s: { connection: string; phase: string; off: boolean; inSession: boolean; loadingModels: boolean; pending: boolean }): string {
+function stateWord(s: { connection: string; phase: string; off: boolean; inSession: boolean; loadingModels: boolean; pending: boolean; typed: boolean }): string {
   if (s.connection === "offline") return "Ghost isn’t running";
   if (s.connection !== "online") return "Reconnecting";
   if (s.off) return "Not listening";
@@ -188,16 +189,16 @@ function stateWord(s: { connection: string; phase: string; off: boolean; inSessi
     if (s.pending) return "Waiting for your okay";
     if (s.phase === "speaking") return "Speaking";
     if (s.phase === "thinking") return "Working";
-    return "Listening";
+    return s.typed ? "Typing" : "Listening";
   }
   return "Say “Ghost”";
 }
 
-function subLine(s: { connection: string; off: ReturnType<typeof notListening>; inSession: boolean; onPhone: boolean; who: string; loadingModels: boolean }): string | null {
+function subLine(s: { connection: string; off: ReturnType<typeof notListening>; inSession: boolean; onPhone: boolean; who: string; loadingModels: boolean; session: string | null }): string | null {
   if (s.connection === "offline") return "Start it from the desk, or run systemctl --user start ghostd.";
   if (s.connection !== "online") return "What you see may be out of date.";
   if (s.off) return `${notListeningSub(s.off)}. Typing still works.`;
   if (s.loadingModels) return "Loading its voice, usually under a minute.";
-  if (s.inSession) return s.onPhone ? `With ${s.who}, on your phone` : `With ${s.who}`;
+  if (s.inSession) return s.onPhone ? `With ${s.who}, on your phone` : (s.session ?? `With ${s.who}`);
   return "Nothing leaves this computer until you do.";
 }

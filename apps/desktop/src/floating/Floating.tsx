@@ -27,6 +27,7 @@
  * comes forward whichever window has the keyboard, there are no buttons but a yes's and a
  * question's, and Ghost's own words are captioned, since the people watching may not hear it.
  */
+import { typedSession } from "../app/listening";
 import type { PendingProposal, QuestionView, Turn } from "@ghost/client-ts";
 import { agentName, splitSaid, useGhost, youSpeaking } from "@ghost/ui";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -99,6 +100,8 @@ export function FloatingRoom({ stage = false }: { stage?: boolean } = {}) {
   const session = status?.session_id ?? null;
   const deskSession = connected && !!session && status?.session_origin !== "phone";
   const micOff = !!status?.not_listening;
+  // A typed session opened no microphone (2026-11-13): Wisp and the label say typing.
+  const typed = typedSession(status);
 
   // When this session started here: the questions asked since then are its own.
   const [since, setSince] = useState<string | null>(null);
@@ -239,7 +242,7 @@ export function FloatingRoom({ stage = false }: { stage?: boolean } = {}) {
     [view.w, view.h, shell.placement, side, places.length, card, captions],
   );
   const using = namesText(reach.places.filter((p) => p.open > 0).map((p) => p.name));
-  const label = labelOf(scene, { agent, using, asker: question?.asked_by ?? null, micOff, modelSecs: waitingOnModel ? modelSecs : null });
+  const label = labelOf(scene, { agent, using, asker: question?.asked_by ?? null, micOff, modelSecs: waitingOnModel ? modelSecs : null, typed });
 
   // ---------------------------------------------------------------- the frame loop
   const root = useRef<HTMLDivElement>(null);
@@ -538,7 +541,7 @@ export function FloatingRoom({ stage = false }: { stage?: boolean } = {}) {
       {shown && (
         <div className="flt-stage" style={{ left: layout.core[0], top: layout.core[1] }}>
           <div ref={wisp} className="flt-wisp" aria-hidden>
-            {DRAW_WISP && <Mascot size={layout.wisp} mood={leaving ? null : MOOD[scene]} trigger={trigger} level={voice} idle maxFps={fpsOf(scene, arriving) || 60} />}
+            {DRAW_WISP && <Mascot size={layout.wisp} mood={leaving ? null : scene === "listening" && typed ? "passive" : MOOD[scene]} trigger={trigger} level={voice} idle maxFps={fpsOf(scene, arriving) || 60} />}
           </div>
           <div className="flt-under">
             {sharedMark && <SharedMark />}

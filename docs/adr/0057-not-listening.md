@@ -90,3 +90,9 @@ says it to agents.
   ("Ghost isn't listening"), the strip over the composer with Listen again, the composer's
   voice control as the struck mic in red that turns listening on, and a typed session's
   stage ("Mic off · Type below. Ghost can't hear you.").
+- A typed turn opens no microphone whether or not Ghost is listening (2026-11-13): typed with
+  no session open it is a typed session, the same silent input, which ends 20 s after its
+  reply (`GHOST_TYPED_IDLE_SECS`) unless the operator types again. While listening is on, the
+  passive listener runs beside it, so the name still wakes Ghost and opens a voice session in
+  the same conversation; while it is off, nothing is opened. `Status.session_typed` says
+  which it is, and the desktop says "Typing with Ghost" rather than "Listening".

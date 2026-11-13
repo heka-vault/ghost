@@ -10,7 +10,7 @@ import { Play, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Badge, Button, Card, EmptyState, IconButton, Kbd, Notice, Skeleton, Switch, Tooltip, cx, errorText, relativeTime, useConfirm, useToast } from "../../ui";
-import { KEEP_NOTICE, LABEL_TEXT, afterDelete, bytesText, curvePath, keyAction, move, nextAfterLabel, outcomeText, tally } from "./wakeTakes";
+import { LABEL_TEXT, keeping, afterDelete, bytesText, curvePath, keyAction, move, nextAfterLabel, outcomeText, tally } from "./wakeTakes";
 
 const CURVE_W = 160;
 const CURVE_H = 28;
@@ -27,7 +27,7 @@ function Curve({ t }: { t: WakeTakeView }) {
 }
 
 export function WakeTakesTab() {
-  const { client } = useGhost();
+  const { client, status } = useGhost();
   const toast = useToast();
   const { confirm, dialog } = useConfirm();
   const [view, setView] = useState<WakeTakesView | null>(null);
@@ -139,14 +139,24 @@ export function WakeTakesTab() {
   if (!view) return <Skeleton height={240} />;
 
   const t = tally(takes, view.choice.unlabelled_accepted_are_me ?? false);
+  const said = keeping(status?.wake_mode, view.count);
+  if (!said.row) {
+    // Transcript wake keeps no takes (ADR 0065): there is nothing here, and nothing to turn off.
+    return (
+      <EmptyState
+        title="No wake takes"
+        description={`${said.notice} Takes are kept only while Ghost wakes with its trained detector, to learn your voice.`}
+      />
+    );
+  }
   return (
     <div className="wt">
       {dialog}
       <Card className="wt-head">
         <div className="wt-keep">
-          <Switch checked={view.choice.keep} onChange={(on) => void setKeep(on)} label="Keep wake takes" />
+          {said.controls && <Switch checked={view.choice.keep} onChange={(on) => void setKeep(on)} label="Keep wake takes" />}
           <p className="wt-notice">
-            {KEEP_NOTICE} Nothing is sent anywhere. {view.count} kept, {bytesText(view.bytes)} of {bytesText(view.max_bytes)}; the oldest go first.
+            {said.notice} Nothing is sent anywhere. {view.count} kept, {bytesText(view.bytes)} of {bytesText(view.max_bytes)}; the oldest go first.
           </p>
         </div>
         <div className="wt-actions">

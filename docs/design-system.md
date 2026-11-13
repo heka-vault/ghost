@@ -403,6 +403,7 @@ Development only. Add `?mock=<scenario>` before the hash: `http://localhost:1430
 | Scenario | What it is |
 |---|---|
 | `passive` | Idle, waiting for the wake word, normal history. Three skills: one of Ghost’s own that needs an app no scenario connects (`month-close` needs `quickbooks`, so it shows as missing), one of the operator’s read in place from `~/.agents/skills`, one ready. Seven agents and a retired Q3 close; Ghost’s rules (AGENTS.md) and two outputs; three watches (`ci`, `reviews`, and `failed-refunds`, which Ledger made) and two webhooks (`jobs`, `deploys`, three refused deliveries) with the listener on; two schedules, one of Ghost’s on a cron and one Accounting set up itself with a check and active hours. |
+| `typed` | A typed session: started by typing, the mic stays closed, "Typing with Ghost"; the name still wakes Ghost. |
 | `session` | Live session on the Accounting line, multi-turn transcript. |
 | `thread` | The conversation screen with everything in it: calls between turns (opened to each, each call opened to what it returned: a list, an issue, comments cut at 2,000 characters, a change with its audit line), a handover, a change Ghost made and announced, a nine-minute pause, a typed turn, and an agent's open question with its choices. Earlier sessions show their calls from stored activity. |
 | `you` | Mid-session, the operator is speaking: the band open, Wisp leaning in, rings flowing in, no words. |

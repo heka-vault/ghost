@@ -44,7 +44,11 @@ Turn retention on by default for now."
 - **Where it is said.** Because it is on without being asked, one plain line says so where a
   person sees it: the first run's wake step and Settings › Sound ("Ghost keeps the sound of
   each time it thinks it heard its name, on this computer, to learn your voice."), with Turn
-  off and Delete, and the privacy section of the README.
+  off and Delete, and the privacy section of the README. Only while the detector is the wake
+  (2026-11-13): under transcript wake, the default for a fresh install, nothing is kept, so the
+  first run says the line that is true there ("Ghost keeps nothing it hears before its name."),
+  Settings › Sound has no Wake takes row unless takes kept earlier are left to delete, and the
+  status's `wake_mode` turns to `transcript` when the detector cannot load.
 - **Who reaches it.** The operator, through the control API: the list (metadata, no audio),
   the switch, labels, delete one, delete all (the folder goes), and playing one take through
   Ghost's own speaker, as the Hearing test plays its takes. No audio crosses the API. The

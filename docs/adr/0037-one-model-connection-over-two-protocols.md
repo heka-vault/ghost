@@ -6,7 +6,8 @@
   working as the older form of the connection
 - **Builds on:** ADR 0036 (the connection's key is a password in Ghost's vault)
 - **Amended by:** ADR 0056 (Test connection is the provider check, kept per route; a field
-  a route refuses is left out of its requests; a failed turn is said)
+  a route refuses is left out of its requests; a failed turn is said); 2026-11-13 below (what
+  the desktop is told is the connection Ghost uses)
 
 Ghost reached its model through whatever `ANTHROPIC_BASE_URL` pointed at, or OpenRouter's
 Anthropic API with `GHOST_LLM_ENDPOINT=openrouter`. Only Anthropic's protocol was spoken, the
@@ -87,3 +88,19 @@ setup as the provider it resolves to and writes it out as that provider on its f
 - `ghostd perf run` and `perf llm` take `--endpoint current` (the default) or a provider id.
 - heka-vault's one-time import (ADR 0036) also fetches `ANTHROPIC_API_KEY` and
   `OPENAI_API_KEY`.
+
+## Amendment, 2026-11-13: the connection reported is the one in use
+
+A newcomer started Ghost from a shell with a provider's address and key exported: Ghost
+answered, while the first run, Today and Settings › Model said it needed a model. The
+sessions read the environment Ghost was started in with its own over it (the vault's values,
+the settings saved since); `GET /model` read the vault and `settings.env` only. Now both
+resolve one environment (`ghost_core::environment::resolve`: `Daemon::env` and
+`Deps::ghost_env`), so `ready`, the provider and whether the key is set are what a session
+uses. A setting cleared on the Model page is kept as "" over the start's value, so it stops
+counting without touching the process environment. `ModelConnectionView.from_environment`
+names the settings and the password the connection reads only from the environment Ghost was
+started in (not `settings.env`, not the vault): names, never a value. Settings › Model says so
+("From the environment Ghost was started in") with the way to keep them: save the page for the
+settings, add the password to the vault. Nothing is written to an env file by Ghost itself, and
+a value still never comes out (ADR 0036).

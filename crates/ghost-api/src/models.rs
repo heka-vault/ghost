@@ -194,6 +194,12 @@ pub struct Status {
     #[serde(default)]
     #[schema(inline)]
     pub session_origin: Option<SessionOrigin>,
+    /// The session is a typed one (2026-11-13): started by typing with no session open, it
+    /// opens no microphone, and Ghost still listens for its name beside it. False for a
+    /// session Ghost hears.
+    #[serde(default)]
+    #[schema(required)]
+    pub session_typed: bool,
     /// Ghost has decided to hang up: its goodbye may still be playing.
     #[serde(default)]
     #[schema(required)]
@@ -2208,6 +2214,12 @@ pub struct ModelConnectionView {
     /// The last sign-in didn't go through.
     #[serde(default)]
     pub sign_in_error: Option<String>,
+    /// The settings and the Password this connection reads now whose value comes only from
+    /// the environment Ghost was started in (a shell's export), not settings.env or the
+    /// vault: names, never a value. They last until Ghost is started another way.
+    #[serde(default)]
+    #[schema(required)]
+    pub from_environment: Vec<String>,
 }
 
 /// A connection being edited: GHOST_LLM_* values over the saved ones (None removes one),

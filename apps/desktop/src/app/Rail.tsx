@@ -14,10 +14,11 @@ import { AudioWaveform, Blocks, Eye, FlaskConical, MonitorUp, Plus, Settings2, S
 import { type ReactNode, Suspense, lazy, useRef, useState } from "react";
 
 import { useDesign } from "../design/context";
-import { type GhostPhase, IconButton, LineGlyph, Mascot, Tooltip, cx, formatShortcut, liveLabel, useLive, versionLine } from "../ui";
+import { IconButton, LineGlyph, Mascot, Tooltip, cx, formatShortcut, liveLabel, useLive, versionLine } from "../ui";
 import { type RailAgent, railAgents } from "./railAgents";
 import { ListeningSwitch, useListeningShortcut } from "./ListeningSwitch";
-import { notListening, notListeningSub } from "./listening";
+import { notListening, notListeningSub, sessionWords, typedSession } from "./listening";
+import { moodOf } from "./mood";
 import { usePostureControl } from "./PostureContext";
 import { hrefFor, navigate, usePath } from "./router";
 import { navMatch } from "./routes";
@@ -43,11 +44,6 @@ const MAIN: Item[] = [
 ];
 
 /** Wisp's pose for a voice phase (the mascot's own vocabulary). */
-export function moodOf(phase: GhostPhase, off: boolean): "listening" | "thinking" | "speaking" | "starting" | "offline" | "passive" | "hold" {
-  if (off) return "hold";
-  if (phase === "listening" || phase === "thinking" || phase === "speaking" || phase === "starting" || phase === "offline") return phase;
-  return "passive";
-}
 
 export function Rail() {
   const path = usePath();
@@ -63,7 +59,9 @@ export function Rail() {
   const off = connection === "online" && phase === "passive" ? notListening(status) : null;
   const live = liveLabel(connection, phase);
   const inSession = !!status?.session_id;
-  const state = off ? "Not listening" : connection !== "online" ? live.title : inSession ? (phase === "speaking" ? "Speaking" : phase === "thinking" ? "Working" : "Listening") : phase === "starting" ? "Starting" : "Ready";
+  // A typed session opened no microphone (2026-11-13): it says typing, never listening.
+  const typed = typedSession(status);
+  const state = off ? "Not listening" : connection !== "online" ? live.title : inSession ? (phase === "speaking" ? "Speaking" : phase === "thinking" ? "Working" : typed ? "Typing" : "Listening") : phase === "starting" ? "Starting" : "Ready";
   const sub = off
     ? notListeningSub(off)
     : connection === "offline"
@@ -73,7 +71,7 @@ export function Rail() {
         : inSession
           ? status?.session_origin === "phone"
             ? "On your phone"
-            : `With ${status?.conversation && status.conversation !== "ghost" ? nameOf(today.agents, status.conversation) : "Ghost"}`
+            : (sessionWords(status, status?.conversation && status.conversation !== "ghost" ? nameOf(today.agents, status.conversation) : "Ghost") ?? "With Ghost")
           : phase === "starting"
             ? "Loading voice models"
             : "Listening for its name";
@@ -121,7 +119,7 @@ export function Rail() {
           onPointerLeave={() => setHover(false)}
         >
           <span className="rail__wisp">
-            <Mascot size={36} mood={moodOf(phase, !!off)} hovered={hover} title="" />
+            <Mascot size={36} mood={moodOf(phase, !!off, typed)} hovered={hover} title="" />
           </span>
           <span className="rail__state">{state}</span>
         </a>

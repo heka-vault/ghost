@@ -156,7 +156,31 @@ pub struct SessionStart {
     pub phone: Option<PendingPhone>,
     pub start_in: String,
     pub raised: Option<Raised>,
+    /// Typed in the desktop app with no session open (2026-11-13): a typed session, which
+    /// opens no microphone and ends a short while after its reply; the passive listener
+    /// keeps running beside it.
+    pub typed: bool,
+    /// Ends the session from outside: the operator called Ghost by name during a typed one.
+    pub end: CancellationToken,
 }
+
+impl SessionStart {
+    /// A session at the desk or on the phone, as a wake, a call or Ghost raising starts it.
+    pub fn new(start_in: impl Into<String>) -> Self {
+        Self {
+            first_utterance: None,
+            phone: None,
+            start_in: start_in.into(),
+            raised: None,
+            typed: false,
+            end: CancellationToken::new(),
+        }
+    }
+}
+
+/// After Ghost's voice stops, how long a wake beside a typed session is still taken for its
+/// own voice coming back through the room (the canceller's tail).
+pub const OWN_VOICE_GRACE: Duration = Duration::from_millis(1500);
 
 /// Runs one session from wake to end: `session::conversation`, or a test's recorder.
 #[async_trait]
@@ -387,8 +411,12 @@ pub const REALTIME_NOTE_KEY: &str = "voice:realtime";
 pub struct Daemon {
     pub cfg: Mutex<GhostdSettings>,
     pub voice: Mutex<Arc<VoiceSettings>>,
-    /// The daemon's own environment: the vault's values over the process's (ADR 0036).
+    /// The daemon's own environment: the vault's values, and the settings saved since the
+    /// start, over the process's (ADR 0036, ADR 0037).
     pub environ: SharedEnviron,
+    /// The process environment the daemon was started in, read once (`env` resolves the
+    /// two with `ghost_core::environment`, and so does the control API).
+    pub started_env: Arc<HashMap<String, String>>,
     pub ports: Ports,
     pub rt: PathBuf,
     pub stop: CancellationToken,
@@ -417,6 +445,8 @@ pub struct Daemon {
     /// connected apps' asker before then (it declines until they are there).
     pub(crate) questions: Arc<OnceLock<Arc<Questions>>>,
     pub(crate) first_via: Mutex<TurnVia>,
+    /// When Ghost's voice last stopped in a session (`own_voice_now`).
+    pub(crate) spoke_at: Mutex<Option<Instant>>,
     pub(crate) heard: Mutex<Option<Heard>>,
     pub(crate) start_in: Mutex<String>,
     pub(crate) manual: Mutex<Option<Arc<FileWakeDetector>>>,
@@ -473,6 +503,7 @@ impl Daemon {
             cfg: Mutex::new(cfg),
             voice: Mutex::new(Arc::new(voice)),
             environ: Arc::new(Mutex::new(HashMap::new())),
+            started_env: Arc::new(std::env::vars().collect()),
             ports,
             rt: runtime_dir(),
             stop: CancellationToken::new(),
@@ -493,6 +524,7 @@ impl Daemon {
             phone_feed,
             questions: Arc::new(OnceLock::new()),
             first_via: Mutex::new(TurnVia::Voice),
+            spoke_at: Mutex::new(None),
             heard: Mutex::new(None),
             start_in: Mutex::new(GHOST.to_string()),
             manual: Mutex::new(None),
@@ -530,6 +562,12 @@ impl Daemon {
         self
     }
 
+    /// The environment the daemon was started in, for a test (the process's by default).
+    pub fn with_started_env(mut self, env: HashMap<String, String>) -> Self {
+        self.started_env = Arc::new(env);
+        self
+    }
+
     /// Where the wake file and the duck state live (`$XDG_RUNTIME_DIR/ghost`).
     pub fn with_runtime_dir(mut self, rt: impl Into<PathBuf>) -> Self {
         self.rt = rt.into();
@@ -559,11 +597,11 @@ impl Daemon {
         lock(&self.voice).clone()
     }
 
-    /// The environment Ghost's settings read: the process's, the vault's values over it.
+    /// The environment Ghost's settings read: the one it was started in, its own over it
+    /// (the vault's values, the settings saved since). The control API resolves the same
+    /// (`Deps::ghost_env`), so the desktop says what a session uses (ADR 0037).
     pub fn env(&self) -> HashMap<String, String> {
-        let mut env: HashMap<String, String> = std::env::vars().collect();
-        env.extend(lock(&self.environ).clone());
-        env
+        ghost_core::environment::resolve(&self.started_env, &lock(&self.environ))
     }
 
     pub fn passwords(&self) -> Option<Arc<Passwords>> {
@@ -946,14 +984,8 @@ impl Daemon {
         {
             let mut env = lock(&self.environ);
             for k in &keys {
-                match values.get(k).and_then(|v| v.as_deref()) {
-                    Some(v) if !v.is_empty() => {
-                        env.insert(k.clone(), v.to_string());
-                    }
-                    _ => {
-                        env.remove(k);
-                    }
-                }
+                let value = values.get(k).and_then(|v| v.as_deref());
+                ghost_core::environment::apply(&self.started_env, &mut env, k, value);
             }
         }
         let env = self.env();
@@ -1014,14 +1046,8 @@ impl Daemon {
         {
             let mut env = lock(&self.environ);
             for k in &keys {
-                match values.get(k).and_then(|v| v.as_deref()) {
-                    Some(v) if !v.is_empty() => {
-                        env.insert(k.clone(), v.to_string());
-                    }
-                    _ => {
-                        env.remove(k);
-                    }
-                }
+                let value = values.get(k).and_then(|v| v.as_deref());
+                ghost_core::environment::apply(&self.started_env, &mut env, k, value);
             }
         }
         let env = self.env();
@@ -1270,6 +1296,13 @@ impl Daemon {
         Arc::new(SpokenWakeDetector::new(listener, manual, None))
     }
 
+    /// The trained detector could not be used: Ghost listens by transcript, and says so in
+    /// its status (no wake takes are kept, ADR 0065).
+    pub(crate) fn listen_by_transcript(&self) {
+        lock(&self.cfg).wake_mode = "transcript".into();
+        self.state.set_wake_mode("transcript");
+    }
+
     /// The trained detectors (ADR 0025): "hey ghost", and "Ghost, …" when its model
     /// is there; no transcript fallback. Without the "hey ghost" model Ghost would be
     /// deaf, so it says so loudly and listens by transcript instead.
@@ -1298,7 +1331,7 @@ impl Daemon {
         }
         let fall_back = |why: String| {
             error!("wake: {why}; listening by transcript instead");
-            lock(&self.cfg).wake_mode = "transcript".into();
+            self.listen_by_transcript();
             self.transcript_wake(models, manual.clone())
         };
         if !path.exists() {
@@ -2374,10 +2407,8 @@ impl Daemon {
                     .run(
                         d.clone(),
                         SessionStart {
-                            first_utterance: None,
-                            phone: None,
-                            start_in: GHOST.into(),
                             raised: Some(raised),
+                            ..SessionStart::new(GHOST)
                         },
                     )
                     .await;
@@ -2391,10 +2422,8 @@ impl Daemon {
                     .run(
                         d.clone(),
                         SessionStart {
-                            first_utterance: None,
                             phone: Some(phone),
-                            start_in: line,
-                            raised: None,
+                            ..SessionStart::new(line)
                         },
                     )
                     .await;
@@ -2408,21 +2437,128 @@ impl Daemon {
                 d.restore_early_chime();
                 continue;
             }
-            d.events().emit(EventKind::Wake, Map::new()).await;
             let start_in = lock(&d.start_in).clone();
+            // Typed in the desktop app (`say`) rather than a wake or a Call: no microphone.
+            let typed = std::mem::replace(&mut *lock(&d.first_via), TurnVia::Voice)
+                == TurnVia::Text
+                && first.is_some();
+            if typed {
+                d.typed_session(&wake, first, start_in).await;
+                continue;
+            }
+            d.events().emit(EventKind::Wake, Map::new()).await;
             d.ports
                 .sessions
                 .run(
                     d.clone(),
                     SessionStart {
                         first_utterance: first,
-                        phone: None,
-                        start_in,
-                        raised: None,
+                        ..SessionStart::new(start_in)
                     },
                 )
                 .await;
         }
+    }
+
+    /// A typed turn with no session open (2026-11-13): a typed session, which opens no
+    /// microphone, with the passive listener running beside it unless listening is off
+    /// (ADR 0057). The operator's name heard there ends the typed session and opens a voice
+    /// session in the conversation the typed one is in; a wake while Ghost speaks, or just
+    /// after, is its own voice coming back and is let go.
+    pub(crate) async fn typed_session(
+        self: &Arc<Self>,
+        wake: &Arc<dyn WakeDetector>,
+        first: Option<String>,
+        start_in: String,
+    ) {
+        let d = self;
+        let end = CancellationToken::new();
+        let mut run = {
+            let d = d.clone();
+            let start = SessionStart {
+                first_utterance: first,
+                typed: true,
+                end: end.clone(),
+                ..SessionStart::new(start_in.clone())
+            };
+            tokio::spawn(async move { d.ports.sessions.run(d.clone(), start).await })
+        };
+        let mut ran = false;
+        let mut called: Option<Option<String>> = None;
+        if !d.mic.is_off() {
+            info!("passive: a typed session; still listening for the wake word");
+            let mut mic = d.mic.watch();
+            mic.borrow_and_update();
+            loop {
+                wake.arm();
+                let mut wait: JoinHandle<Option<String>> = {
+                    let w = wake.clone();
+                    tokio::spawn(async move { w.wait().await })
+                };
+                enum Beside {
+                    Ended,
+                    Wake(Option<String>),
+                    Mic,
+                    Stop,
+                }
+                let beside = tokio::select! {
+                    _ = &mut run => { ran = true; Beside::Ended }
+                    r = &mut wait => Beside::Wake(r.unwrap_or(None)),
+                    _ = mic.changed() => Beside::Mic,
+                    _ = d.stop.cancelled() => Beside::Stop,
+                };
+                if !matches!(beside, Beside::Wake(_)) {
+                    wait.abort();
+                    let _ = wait.await;
+                    wake.stop().await; // releases the mic
+                }
+                match beside {
+                    Beside::Ended | Beside::Stop => break,
+                    Beside::Mic if d.mic.is_off() => break, // the session goes on, unheard
+                    Beside::Mic => continue,
+                    Beside::Wake(_) if d.own_voice_now() => {
+                        info!("wake ignored: Ghost was speaking its typed reply");
+                        continue;
+                    }
+                    Beside::Wake(words) => {
+                        called = Some(words);
+                        break;
+                    }
+                }
+            }
+        }
+        // The conversation the typed session is in now (an agent may have taken it).
+        let line = d.state.conversation().unwrap_or(start_in);
+        if called.is_some() || d.stop.is_cancelled() {
+            end.cancel();
+        }
+        if !ran {
+            let _ = run.await;
+        }
+        let Some(words) = called else {
+            return;
+        };
+        if d.stop.is_cancelled() {
+            return;
+        }
+        info!("passive: called by name during a typed session; talking now");
+        d.events().emit(EventKind::Wake, Map::new()).await;
+        d.ports
+            .sessions
+            .run(
+                d.clone(),
+                SessionStart {
+                    first_utterance: words,
+                    ..SessionStart::new(line)
+                },
+            )
+            .await;
+    }
+
+    /// Ghost is speaking, or stopped a moment ago (`OWN_VOICE_GRACE`).
+    pub(crate) fn own_voice_now(&self) -> bool {
+        self.state.phase() == Phase::Speaking
+            || lock(&self.spoke_at).is_some_and(|t| t.elapsed() < OWN_VOICE_GRACE)
     }
 
     /// Once Kokoro is loaded, the operations validate voice ids against its list: the
@@ -2494,6 +2630,7 @@ impl Daemon {
             output_device: voice.output_device.clone(),
             stt_model: voice.stt_model.clone(),
             environ: self.environ.clone(),
+            started_env: self.started_env.clone(),
             conversations: Some(p.conversations),
             apps: Some(p.apps),
             catalog: Some(p.catalog),
@@ -3104,6 +3241,311 @@ pub(crate) mod tests {
         );
     }
 
+    // --- a typed turn (2026-11-13): no microphone, the passive listener beside it -----------
+
+    /// What a session was started with, as a typed test sees it.
+    #[derive(Debug, Clone, PartialEq)]
+    pub(crate) struct Started {
+        pub start_in: String,
+        pub typed: bool,
+        pub first: Option<String>,
+    }
+
+    /// Records each start; a typed session stays open until the loop ends it or `release`
+    /// is set (the session ending on its own), saying whether it was ended.
+    pub(crate) struct TypedRecorder {
+        pub starts: Mutex<Vec<Started>>,
+        pub release: Arc<Event>,
+        pub ended: AtomicUsize,
+        pub speaking: bool,
+        pub switch_to: Option<String>,
+    }
+
+    #[async_trait]
+    impl SessionRunner for TypedRecorder {
+        async fn run(&self, d: Arc<Daemon>, start: SessionStart) {
+            self.starts.lock().unwrap().push(Started {
+                start_in: start.start_in.clone(),
+                typed: start.typed,
+                first: start.first_utterance.clone(),
+            });
+            if !start.typed {
+                return;
+            }
+            d.state
+                .set_phase(Phase::Listening, Some("typed-1"), Some(SessionOrigin::Desk));
+            d.state.set_conversation(Some(&start.start_in), None);
+            if let Some(slug) = &self.switch_to {
+                d.state.set_conversation(Some(slug), None);
+            }
+            if self.speaking {
+                d.state
+                    .set_phase(Phase::Speaking, Some("typed-1"), Some(SessionOrigin::Desk));
+            }
+            tokio::select! {
+                _ = start.end.cancelled() => {
+                    self.ended.fetch_add(1, Ordering::SeqCst);
+                }
+                _ = self.release.wait() => {}
+            }
+        }
+    }
+
+    fn typed_recorder(
+        tmp: &Path,
+        speaking: bool,
+        switch_to: Option<&str>,
+    ) -> (Arc<Daemon>, Arc<TypedRecorder>, Arc<FileWakeDetector>) {
+        let recorder = Arc::new(TypedRecorder {
+            starts: Mutex::new(Vec::new()),
+            release: Arc::new(Event::new()),
+            ended: AtomicUsize::new(0),
+            speaking,
+            switch_to: switch_to.map(String::from),
+        });
+        let mut d = Arc::try_unwrap(daemon(tmp)).ok().expect("one reference");
+        d.ports.sessions = recorder.clone();
+        let d = Arc::new(d);
+        let manual = FileWakeDetector::new(tmp.join("rt/wake"));
+        *lock(&d.manual) = Some(manual.clone());
+        (d, recorder, manual)
+    }
+
+    #[tokio::test]
+    async fn a_typed_turn_is_a_typed_session_and_the_wake_still_works() {
+        // Typing opens no microphone: the session is typed, and the passive listener keeps
+        // running beside it, so "hey Ghost" ends it and opens a voice session in the same
+        // conversation.
+        let tmp = tempfile::tempdir().unwrap();
+        let (d, recorder, manual) = typed_recorder(tmp.path(), false, None);
+        let wake = Arc::new(Scripted {
+            waits: AtomicUsize::new(0),
+            on_wait: Box::new({
+                let d = d.clone();
+                let manual = manual.clone();
+                move |n| {
+                    let d = d.clone();
+                    let manual = manual.clone();
+                    Box::pin(async move {
+                        match n {
+                            1 => manual.wait().await,                       // the typed turn
+                            2 => Some("read me the first one".to_string()), // hey Ghost, …
+                            _ => {
+                                d.stop.cancel();
+                                std::future::pending().await
+                            }
+                        }
+                    })
+                }
+            }),
+        });
+        let typist = {
+            let d = d.clone();
+            tokio::spawn(async move {
+                use ghost_api::Controller;
+                while !d.waiting_flag.load(Ordering::SeqCst) {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+                assert!(d.say("what's on my list".into(), None).await);
+            })
+        };
+        tokio::time::timeout(Duration::from_secs(5), d.passive(wake.clone()))
+            .await
+            .unwrap();
+        typist.await.unwrap();
+        assert_eq!(
+            *recorder.starts.lock().unwrap(),
+            vec![
+                Started {
+                    start_in: GHOST.into(),
+                    typed: true,
+                    first: Some("what's on my list".into())
+                },
+                Started {
+                    start_in: GHOST.into(),
+                    typed: false,
+                    first: Some("read me the first one".into())
+                },
+            ]
+        );
+        assert_eq!(
+            recorder.ended.load(Ordering::SeqCst),
+            1,
+            "the wake ended it"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_wake_during_a_typed_session_opens_the_conversation_it_is_in() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (d, recorder, manual) = typed_recorder(tmp.path(), false, Some("legal"));
+        let wake = Arc::new(Scripted {
+            waits: AtomicUsize::new(0),
+            on_wait: Box::new({
+                let d = d.clone();
+                let manual = manual.clone();
+                move |n| {
+                    let d = d.clone();
+                    let manual = manual.clone();
+                    Box::pin(async move {
+                        match n {
+                            1 => manual.wait().await,
+                            2 => {
+                                // the typed session moved to another agent, then a bare "hey Ghost"
+                                while d.state.conversation().as_deref() != Some("legal") {
+                                    tokio::time::sleep(Duration::from_millis(5)).await;
+                                }
+                                None
+                            }
+                            _ => {
+                                d.stop.cancel();
+                                std::future::pending().await
+                            }
+                        }
+                    })
+                }
+            }),
+        });
+        *lock(&d.first_via) = TurnVia::Text;
+        manual.trigger(Some("draft the reply".into()));
+        tokio::time::timeout(Duration::from_secs(5), d.passive(wake))
+            .await
+            .unwrap();
+        let starts = recorder.starts.lock().unwrap().clone();
+        assert_eq!(starts.len(), 2, "{starts:?}");
+        assert_eq!(starts[1].start_in, "legal");
+        assert!(!starts[1].typed);
+    }
+
+    #[tokio::test]
+    async fn a_typed_session_ends_on_its_own_and_the_loop_goes_on() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (d, recorder, manual) = typed_recorder(tmp.path(), false, None);
+        let wake = Arc::new(Scripted {
+            waits: AtomicUsize::new(0),
+            on_wait: Box::new({
+                let d = d.clone();
+                let manual = manual.clone();
+                let release = recorder.release.clone();
+                move |n| {
+                    let d = d.clone();
+                    let manual = manual.clone();
+                    let release = release.clone();
+                    Box::pin(async move {
+                        match n {
+                            1 => manual.wait().await,
+                            2 => {
+                                release.set(); // the reply was read; the session ends
+                                std::future::pending().await
+                            }
+                            _ => {
+                                d.stop.cancel();
+                                std::future::pending().await
+                            }
+                        }
+                    })
+                }
+            }),
+        });
+        *lock(&d.first_via) = TurnVia::Text;
+        manual.trigger(Some("what time is it".into()));
+        tokio::time::timeout(Duration::from_secs(5), d.passive(wake.clone()))
+            .await
+            .unwrap();
+        assert_eq!(recorder.starts.lock().unwrap().len(), 1);
+        assert_eq!(recorder.ended.load(Ordering::SeqCst), 0);
+        assert_eq!(wake.waits.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn ghosts_own_voice_in_a_typed_session_does_not_wake_it() {
+        // The reply is spoken; the passive listener hearing "Ghost" in it is not the
+        // operator calling.
+        let tmp = tempfile::tempdir().unwrap();
+        let (d, recorder, manual) = typed_recorder(tmp.path(), true, None);
+        let wake = Arc::new(Scripted {
+            waits: AtomicUsize::new(0),
+            on_wait: Box::new({
+                let d = d.clone();
+                let manual = manual.clone();
+                let release = recorder.release.clone();
+                move |n| {
+                    let d = d.clone();
+                    let manual = manual.clone();
+                    let release = release.clone();
+                    Box::pin(async move {
+                        match n {
+                            1 => manual.wait().await,
+                            2 => Some("can help with that".to_string()), // its own reply
+                            3 => {
+                                release.set();
+                                std::future::pending().await
+                            }
+                            _ => {
+                                d.stop.cancel();
+                                std::future::pending().await
+                            }
+                        }
+                    })
+                }
+            }),
+        });
+        *lock(&d.first_via) = TurnVia::Text;
+        manual.trigger(Some("hello".into()));
+        tokio::time::timeout(Duration::from_secs(5), d.passive(wake.clone()))
+            .await
+            .unwrap();
+        assert_eq!(recorder.starts.lock().unwrap().len(), 1);
+        assert_eq!(recorder.ended.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn a_typed_session_while_not_listening_keeps_the_microphone_closed() {
+        // ADR 0057: no wake listener beside it either.
+        let tmp = tempfile::tempdir().unwrap();
+        let (d, recorder, manual) = typed_recorder(tmp.path(), false, None);
+        let _ = d.mic.off(None);
+        assert!(d.mic.is_off());
+        let wake = Arc::new(Scripted {
+            waits: AtomicUsize::new(0),
+            on_wait: Box::new(|_| Box::pin(std::future::pending())),
+        });
+        *lock(&d.first_via) = TurnVia::Text;
+        let release = recorder.release.clone();
+        let stopper = {
+            let d = d.clone();
+            let recorder = recorder.clone();
+            tokio::spawn(async move {
+                use ghost_api::Controller;
+                while !d.waiting_flag.load(Ordering::SeqCst) {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+                assert!(d.say("hello".into(), None).await);
+                while recorder.starts.lock().unwrap().is_empty() {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                release.set();
+                d.stop.cancel();
+            })
+        };
+        let _ = manual;
+        tokio::time::timeout(Duration::from_secs(5), d.passive(wake.clone()))
+            .await
+            .unwrap();
+        stopper.await.unwrap();
+        assert!(recorder.starts.lock().unwrap()[0].typed);
+        assert_eq!(wake.waits.load(Ordering::SeqCst), 0, "no wake listener");
+    }
+
+    #[test]
+    fn a_typed_session_opens_no_microphone() {
+        assert!(!crate::session::opens_mic(true, false));
+        assert!(!crate::session::opens_mic(false, true));
+        assert!(!crate::session::opens_mic(true, true));
+        assert!(crate::session::opens_mic(false, false));
+    }
+
     pub(crate) struct FakeDuck(pub Mutex<Vec<&'static str>>);
 
     impl Duck for FakeDuck {
@@ -3283,7 +3725,10 @@ pub(crate) mod tests {
     #[test]
     fn apply_model_takes_the_connection_keys_into_the_daemons_environment() {
         let tmp = tempfile::tempdir().unwrap();
-        let d = daemon(tmp.path());
+        let d = Arc::try_unwrap(daemon(tmp.path()))
+            .ok()
+            .unwrap()
+            .with_started_env(HashMap::new());
         let mut values = BTreeMap::new();
         values.insert("GHOST_LLM_PROVIDER".to_string(), Some("openai".to_string()));
         values.insert(
@@ -3301,6 +3746,50 @@ pub(crate) mod tests {
         values.insert("GHOST_LLM_PROVIDER".to_string(), None);
         assert_eq!(d.apply_model(&values), vec!["GHOST_LLM_PROVIDER"]);
         assert!(!lock(&d.environ).contains_key("GHOST_LLM_PROVIDER"));
+    }
+
+    #[test]
+    fn a_detector_that_falls_back_reports_transcript_wake() {
+        // ADR 0065: the desktop says wake takes are kept only under the detector, so the
+        // status must not keep saying onnx once Ghost listens by transcript instead.
+        let tmp = tempfile::tempdir().unwrap();
+        let d = daemon(tmp.path());
+        lock(&d.cfg).wake_mode = "onnx".into();
+        d.state.set_wake_mode("onnx");
+        d.listen_by_transcript();
+        assert_eq!(d.cfg().wake_mode, "transcript");
+        assert_eq!(d.state.wake_mode(), "transcript");
+    }
+
+    #[test]
+    fn the_session_and_the_api_read_one_environment() {
+        // ADR 0037: what the desktop is told is what a session uses. Started from a shell
+        // with a model setting exported, the daemon reads it; cleared on the Model page,
+        // it no longer counts for either.
+        let tmp = tempfile::tempdir().unwrap();
+        let started: HashMap<String, String> = [
+            ("GHOST_LLM_PROVIDER".to_string(), "openai".to_string()),
+            ("GHOST_LLM_MODEL".to_string(), "gpt-5-mini".to_string()),
+        ]
+        .into_iter()
+        .collect();
+        let d = Arc::try_unwrap(daemon(tmp.path()))
+            .ok()
+            .unwrap()
+            .with_started_env(started);
+        assert_eq!(d.env()["GHOST_LLM_MODEL"], "gpt-5-mini");
+        let deps = d.started_env.clone();
+        let live = lock(&d.environ).clone();
+        assert_eq!(
+            ghost_core::environment::resolve(&deps, &live),
+            d.env(),
+            "the API resolves what the daemon does"
+        );
+        let mut values = BTreeMap::new();
+        values.insert("GHOST_LLM_MODEL".to_string(), None);
+        assert_eq!(d.apply_model(&values), vec!["GHOST_LLM_MODEL"]);
+        assert_eq!(d.voice().llm_connection().model, "");
+        assert_eq!(d.voice().llm_connection().provider, "openai");
     }
 
     #[test]

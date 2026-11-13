@@ -34,6 +34,8 @@ export interface Scenario {
   pendingExpiresIn?: number;
   /** Where the live session started: the desk (default) or the paired phone (ADR 0016). */
   origin?: "desk" | "phone";
+  /** The live session was started by typing (2026-11-13): no microphone, "Typing with Ghost". */
+  typed?: boolean;
   /**
    * The phone listener: off (GHOST_PHONE_LISTEN unset), on with no phone, or a phone paired
    * (on the home network only); `tunnel` adds a tunnel address the phone last came in on, and
@@ -73,6 +75,7 @@ export interface Scenario {
 
 export const SCENARIOS: Scenario[] = [
   { name: "passive", label: "Passive", description: "Idle, waiting for the wake word. Normal history.", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: true, data: "normal" },
+  { name: "typed", label: "Typing with Ghost", description: "A typed session: started by typing, the mic stays closed, and the name still wakes Ghost.", daemon: true, phase: "listening", modelsReady: true, session: "ghost", pending: false, configured: true, data: "normal", typed: true },
   { name: "session", label: "In a session", description: "A live session on the Accounting line with a multi-turn transcript.", daemon: true, phase: "listening", modelsReady: true, session: "accounting", pending: false, configured: true, data: "normal" },
   { name: "pending", label: "Waiting for okay", description: "Ghost proposed closing an issue and is waiting for a yes.", daemon: true, phase: "listening", modelsReady: true, session: "ghost", pending: true, configured: true, data: "normal" },
   { name: "speaking", label: "Speaking", description: "Mid-session, Ghost is talking.", daemon: true, phase: "speaking", modelsReady: true, session: "ghost", pending: false, configured: true, data: "normal" },

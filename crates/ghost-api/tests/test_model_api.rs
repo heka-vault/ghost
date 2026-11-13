@@ -527,3 +527,82 @@ async fn a_locked_keyring_is_said_not_a_missing_key() {
 fn refused() -> Result<HashMap<String, String>, AppError> {
     Err(AppError::NeedsSignIn("the sign-in was replaced".into()))
 }
+
+// --- what Ghost really uses (ADR 0037): the environment it was started in counts ---------
+
+const SHELL_TOKEN: &str = "sk-shell-0123456789abcdef";
+
+#[tokio::test]
+async fn a_connection_from_the_environment_ghost_was_started_in_is_the_one_reported() {
+    // Started from a shell with a provider's address and key exported: Ghost answers with
+    // them, so the desktop must not say it needs a model.
+    let w = World::new();
+    w.set_started("ANTHROPIC_BASE_URL", "http://proxy.lan:8317");
+    w.set_started("ANTHROPIC_AUTH_TOKEN", SHELL_TOKEN);
+    let v = w.client().get("/model").await;
+    assert_eq!(v["ready"], true, "{}", v.text);
+    assert_eq!(v["password_set"], true);
+    assert_eq!(v["base_url"], "http://proxy.lan:8317");
+    // Named, never shown.
+    assert_eq!(
+        v["from_environment"],
+        json!(["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"])
+    );
+    assert!(!v.text.contains(SHELL_TOKEN));
+}
+
+#[tokio::test]
+async fn what_settings_env_or_the_vault_holds_is_not_from_the_environment() {
+    let w = World::new();
+    // The launcher loads settings.env into the environment Ghost starts in.
+    std::fs::write(
+        &w.settings_path,
+        "ANTHROPIC_BASE_URL=http://proxy.lan:8317\n",
+    )
+    .unwrap();
+    w.set_started("ANTHROPIC_BASE_URL", "http://proxy.lan:8317");
+    w.set_started("ANTHROPIC_AUTH_TOKEN", SHELL_TOKEN);
+    w.vault
+        .set("ANTHROPIC_AUTH_TOKEN", "sk-vault-0123456789")
+        .unwrap();
+    let v = w.client().get("/model").await;
+    assert_eq!(v["ready"], true, "{}", v.text);
+    assert_eq!(v["from_environment"], json!([]));
+}
+
+#[tokio::test]
+async fn a_setting_in_settings_env_that_ghost_is_not_using_is_not_reported() {
+    // settings.env edited by hand after the start: the daemon reads it at its next start,
+    // so the page says what Ghost uses now.
+    let w = World::new();
+    std::fs::write(&w.settings_path, "GHOST_LLM_PROVIDER=openai\n").unwrap();
+    let v = w.client().get("/model").await;
+    assert_eq!(v["provider"], "anthropic", "{}", v.text);
+}
+
+#[tokio::test]
+async fn a_setting_cleared_on_the_page_is_cleared_even_when_ghost_started_with_it() {
+    let w = World::new();
+    w.set_started("GHOST_LLM_PROVIDER", "openai");
+    w.set_started("GHOST_LLM_MODEL", "gpt-5-mini");
+    let c = w.client();
+    assert_eq!(c.get("/model").await["model"], "gpt-5-mini");
+    let r = c
+        .put("/settings", json!({"values": {"GHOST_LLM_MODEL": null}}))
+        .await;
+    assert_eq!(r.status, 200, "{}", r.text);
+    let v = c.get("/model").await;
+    assert_eq!(v["model"], "", "{}", v.text);
+    assert_eq!(v["from_environment"], json!(["GHOST_LLM_PROVIDER"]));
+}
+
+#[tokio::test]
+async fn an_older_setting_the_connection_does_not_read_is_not_named() {
+    // ANTHROPIC_BASE_URL is read only when no provider is named.
+    let w = World::new();
+    w.set_started("ANTHROPIC_BASE_URL", "http://proxy.lan:8317");
+    w.set_env("GHOST_LLM_PROVIDER", "openai");
+    let v = w.client().get("/model").await;
+    assert_eq!(v["provider"], "openai");
+    assert_eq!(v["from_environment"], json!([]));
+}
