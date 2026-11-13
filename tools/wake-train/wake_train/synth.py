@@ -12,6 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+
 from wake_train.data import RATE, read_wav, write_wav
 
 # The replay rig's voices (`.scratch/wake-review/corpus`): never used here.

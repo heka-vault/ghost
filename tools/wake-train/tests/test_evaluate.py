@@ -2,6 +2,7 @@
 and refused when no point keeps false wakes at the shipped detector's. Synthetic scores."""
 
 import numpy as np
+
 from wake_train import evaluate
 
 
