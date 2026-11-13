@@ -443,6 +443,19 @@ pub enum Event {
         level: f32,
         speaking: bool,
     },
+    /// A run with nobody there started or has ended (ADR 0060), with its row as it is now.
+    /// The desktop follows the work without asking every few seconds. Not sent to the
+    /// phone.
+    Run {
+        run: crate::schedules::ScheduleRunInfo,
+        phase: RunPhase,
+    },
+    /// One tool call an agent made came back, in a session or a run (`run-<id>`), as
+    /// counts and sizes (ADR 0060): never its arguments, its result or any words. Not sent
+    /// to the phone.
+    Reach {
+        reach: ReachCall,
+    },
     /// The operator asked by voice to see Ghost's window ("open the app", ADR 0059): the
     /// desktop brings its main window to the workspace they are on and to the front. Inside a
     /// session only; it carries nothing else and is not sent to the phone.
@@ -451,6 +464,109 @@ pub enum Event {
         session_id: String,
     },
 }
+
+/// Where a run is (ADR 0060).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum RunPhase {
+    Started,
+    Ended,
+}
+
+/// One tool call as kept (ADR 0060): the app, the tool's name, whether it was a read and
+/// worked, how many items came back and how many bytes (as the app sent them, before they
+/// were fitted to the model's budget), and how long it took. Never contents.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct ReachCall {
+    pub at: DateTime<Utc>,
+    /// The session, or `run-<id>` for a run with nobody there.
+    pub session_id: String,
+    pub agent: String,
+    pub app: String,
+    pub tool: String,
+    pub read: bool,
+    pub ok: bool,
+    #[serde(default)]
+    pub items: Option<u64>,
+    pub bytes: u64,
+    pub ms: u64,
+}
+
+impl From<&ghost_core::reach::ReachRow> for ReachCall {
+    fn from(r: &ghost_core::reach::ReachRow) -> Self {
+        Self {
+            at: r.at,
+            session_id: r.session_id.clone(),
+            agent: r.agent.clone(),
+            app: r.app.clone(),
+            tool: r.tool.clone(),
+            read: r.read,
+            ok: r.ok,
+            items: r.items,
+            bytes: r.bytes,
+            ms: r.ms,
+        }
+    }
+}
+
+/// Totals over some calls, by one key: an app, an agent, a session or run, or `all`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct ReachTotalView {
+    pub key: String,
+    /// The agent, for a session's or a run's total.
+    #[serde(default)]
+    pub agent: Option<String>,
+    pub calls: u64,
+    pub reads: u64,
+    pub changes: u64,
+    pub failed: u64,
+    pub items: u64,
+    pub bytes: u64,
+    /// The calls' time added up, in milliseconds.
+    pub ms: u64,
+    /// The apps called, by name.
+    pub apps: Vec<String>,
+    #[serde(default)]
+    pub first: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub last: Option<DateTime<Utc>>,
+}
+
+impl From<ghost_core::reach::ReachTotal> for ReachTotalView {
+    fn from(t: ghost_core::reach::ReachTotal) -> Self {
+        Self {
+            key: t.key,
+            agent: t.agent,
+            calls: t.calls,
+            reads: t.reads,
+            changes: t.changes,
+            failed: t.failed,
+            items: t.items,
+            bytes: t.bytes,
+            ms: t.ms,
+            apps: t.apps,
+            first: t.first,
+            last: t.last,
+        }
+    }
+}
+
+/// How much Ghost read and did in a stretch of time (ADR 0060): everything, by app, by
+/// agent, and by session or run (newest first). Counts and sizes only.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct ReachView {
+    pub since: DateTime<Utc>,
+    pub until: DateTime<Utc>,
+    pub total: ReachTotalView,
+    pub by_app: Vec<ReachTotalView>,
+    pub by_agent: Vec<ReachTotalView>,
+    pub by_session: Vec<ReachTotalView>,
+    /// The latest calls in the stretch, newest first, at most `REACH_RECENT`.
+    pub recent: Vec<ReachCall>,
+}
+
+/// How many of the latest calls `GET /reach` carries.
+pub const REACH_RECENT: usize = 24;
 
 // --- the waiting list (ADR 0029, ADR 0030) ----------------------------------------------
 

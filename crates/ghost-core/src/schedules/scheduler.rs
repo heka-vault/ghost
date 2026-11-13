@@ -69,7 +69,20 @@ pub struct Scheduler {
     /// The run each busy agent is on: one at a time per agent.
     going: Mutex<HashMap<String, Going>>,
     tasks: Mutex<Vec<JoinHandle<()>>>,
+    /// Told when a run starts and when it has ended (ADR 0060): the daemon's event.
+    on_run: Mutex<Option<OnRun>>,
 }
+
+/// Where a run is: just started (its row says `running`), or ended (its row has its
+/// outcome).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunPhase {
+    Started,
+    Ended,
+}
+
+/// Called with a run's id when it starts and when it has ended. Must not block.
+pub type OnRun = Arc<dyn Fn(&str, RunPhase) + Send + Sync>;
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
@@ -185,7 +198,20 @@ impl Scheduler {
             conversations: parts.conversations,
             going: Mutex::new(HashMap::new()),
             tasks: Mutex::new(Vec::new()),
+            on_run: Mutex::new(None),
         })
+    }
+
+    /// Who hears when a run starts and ends: the daemon, for its event stream.
+    pub fn on_run(&self, hook: OnRun) {
+        *lock(&self.on_run) = Some(hook);
+    }
+
+    fn told(&self, run_id: &str, phase: RunPhase) {
+        let hook = lock(&self.on_run).clone();
+        if let Some(h) = hook {
+            h(run_id, phase);
+        }
     }
 
     pub fn jobs(&self) -> &Arc<Jobs> {
@@ -297,10 +323,13 @@ impl Scheduler {
             }
             started += 1;
             let me = self.clone();
+            self.told(&run.id, RunPhase::Started);
             let task = tokio::spawn(async move {
                 let agent = run.agent.clone();
+                let id = run.id.clone();
                 me.execute(run, cancel).await;
                 lock(&me.going).remove(&agent);
+                me.told(&id, RunPhase::Ended);
                 // Free again: an ask waiting goes first, then the scheduler is woken for
                 // the next run waiting for this agent.
                 me.jobs.turns().release(&agent);

@@ -1256,6 +1256,15 @@ impl Daemon {
         let registered: Arc<Mutex<BTreeSet<String>>> = Arc::new(Mutex::new(
             apps.sources().into_iter().map(|s| s.name).collect(),
         ));
+        // Each call's counts and sizes, as kept (ADR 0060): the desktop's event.
+        gate.on_reach({
+            let weak = Arc::downgrade(d);
+            Arc::new(move |row| {
+                if let Some(d) = weak.upgrade() {
+                    d.state.publish_reach(row);
+                }
+            })
+        });
         d.late.store.set(store.clone()).ok();
         d.late.gate.set(gate.clone()).ok();
         d.late.apps.set(apps.clone()).ok();
@@ -1612,11 +1621,33 @@ impl Daemon {
             &skills,
             &watch_runner,
         );
+        // A run started or ended (ADR 0060): the desktop follows it without asking.
+        schedules.scheduler.on_run({
+            let weak = Arc::downgrade(d);
+            let jobs = schedules.scheduler.jobs().clone();
+            Arc::new(move |id, phase| {
+                let (Some(d), Ok(Some(run))) = (weak.upgrade(), jobs.run(id)) else {
+                    return;
+                };
+                d.state.publish_run(
+                    ghost_api::schedules::run_info(&run),
+                    match phase {
+                        ghost_core::schedules::RunPhase::Started => {
+                            ghost_api::models::RunPhase::Started
+                        }
+                        ghost_core::schedules::RunPhase::Ended => {
+                            ghost_api::models::RunPhase::Ended
+                        }
+                    },
+                );
+            })
+        });
         d.late.schedules.set(schedules.scheduler.clone()).ok();
         // ADR 0041: hidden turns past a week, and summarized ones past the window when the
         // operator set one, pruned now and then daily for as long as Ghost runs.
         tokio::spawn({
             let conversations = conversations.clone();
+            let store_for_prune = store.clone();
             let stop = d.stop.child_token();
             async move {
                 loop {
@@ -1624,6 +1655,12 @@ impl Daemon {
                         Ok(n) if n > 0 => info!("conversations: pruned {n} turns past retention"),
                         Ok(_) => {}
                         Err(e) => warn!("conversations: prune failed: {e}"),
+                    }
+                    // ADR 0060: the calls' counts and sizes, past their window.
+                    let before = ghost_core::time::utcnow()
+                        - chrono::Duration::days(ghost_core::reach::REACH_KEPT_DAYS);
+                    if let Err(e) = store_for_prune.prune_reach(before) {
+                        warn!("reach: prune failed: {e}");
                     }
                     tokio::select! {
                         () = stop.cancelled() => break,
