@@ -62,10 +62,11 @@ head beside the shipped classifier on the same frozen features (the openWakeWord
 embedding graphs), trained with numpy on the labelled takes, the recorded takes of
 2026-10-30, Kokoro voices the replay rig does not use, and music, with augmentation (level,
 noise, room, speed, compression). Whole recordings are held out for testing; the threshold
-and the floor come from the new detector's own curve on the training negatives: the lowest
-threshold at which it wakes no more often than the shipped one does at 0.6, and the lowest
-floor at which Parakeet would be asked no more often than at 0.3 (issue #13: false wakes
-are not traded away). It writes `hey_ghost.onnx` and a card with its hash and every number,
+and the floor come from the new detector's own curve under the daemon's rule (the first
+frame at the floor decides): of the points at which it wakes no more often and asks Parakeet
+no more often than the shipped detector at 0.6 and 0.3 on the training negatives (issue #13:
+false wakes are not traded away), the one that hears most of the training takes. When no
+point holds, it writes nothing installable. It writes `hey_ghost.onnx` and a card with its hash and every number,
 before and after, beside the shipped detector; nothing is installed.
 
 **Swapping it in** is the operator's: `ghostd wake use <name>` sets `GHOST_WAKE_DETECTOR`
