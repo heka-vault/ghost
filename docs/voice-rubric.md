@@ -40,9 +40,14 @@ a second, then go on. Pause music for parts B to E; part H brings it back.
 
 | | Do | Pass |
 |---|---|---|
-| A1 | Nothing. While Ghost listens: `pw-top -b -n 3 \| grep -E 'RATE\|ghost\|alsa_'` | The FORMAT column of every `ghost`/`alsa_` node ends in 16000, and the driver (`R` at the left, the microphone) runs at 16000. `ghost.mic`'s RATE column may say 48000: that is the quantum it asked for, not a resample. The checker reads this. |
+| A1 | Nothing. While Ghost listens: `pw-top -b -n 3 \| grep -E 'RATE\|ghost\|alsa_'` | The FORMAT column of every `ghost`/`alsa_` node ends in 16000, and the driver (`R` at the left, the microphone) runs at 16000. `ghost.mic`'s RATE column may say 48000: that is the quantum it asked for, not a resample. `ghost-wake-capture` is the wake's own stream (ADR 0064); on the array it carries both channels and Ghost keeps the first. The checker reads this. |
 | A2 | Play music through the speakers for a minute | No crackle, dropouts or pitch change. If there is, `~/.config/pipewire/pipewire.conf.d/50-ghost-allowed-rates.conf` is the first suspect. |
 | A3 | Open Slack or Meet | The microphone list is not empty. If it is, restart that app, not PipeWire (a Chromium thing). |
+| A4 | Nothing. `ghostd check \| grep microphone` (ADR 0064) | The case is the machine's (`on-chip` for the array that Ghost plays through), and the wake hears what you chose: on the array, `<array>#0`. The checker shows the daemon's `microphone:` line and `audio in: ... channel 0 of 2 alone` for the wake. No `fell back` line. |
+| A5 | Say "Hey Ghost" ten times at your normal voice, a few seconds apart, ending each session with "bye" | Ten wakes. The checker's wake counts: at most one hit checked by Parakeet and turned down. |
+| A6 | Ask for something long ("read me the three newest issues") and say nothing while Ghost reads | No `turn:` line, no barge-in and no wake from Ghost's own voice; the session ends as you end it. With the array as input, Ghost's voice is cancelled on its chip. |
+| A7 | "Hey Ghost, what's waiting for me?" in one breath | The first turn is "what's waiting for me" (`passive: woken by hey_ghost, heard ...` under debug audio): the words after the wake are read from the wake's own stream and not lost at the switch to the session's input. |
+| A8 | Nothing. The checker's `canceller` lines | On the on-chip path: `ghost-echo-cancel` inactive, no `ghost.mic` node. With the canceller in use: its xruns, and no `input:degraded` note on the waiting list. If there is one, Settings › Sound › Repair, then A5 again. |
 
 ## Part B: a pause mid-sentence stays one turn
 

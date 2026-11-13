@@ -40,7 +40,12 @@ else
 fi
 echo "allowed rates: $(pw-metadata -n settings 2>/dev/null | sed -n "s/.*clock.allowed-rates' value:'\([^']*\)'.*/\1/p")"
 echo "forced rate:   $(pw-metadata -n settings 2>/dev/null | sed -n "s/.*clock.force-rate' value:'\([^']*\)'.*/\1/p")"
-echo "daemon input:  $(grep -aoE 'audio in: [^ ]+ @ [0-9]+' "$LOG" | tail -1)"
+echo "daemon input:  $(grep -aoE 'audio in: [^ ]+ @ [0-9]+[^(]*' "$LOG" | tail -2 | tr '\n' ' ')"
+# ADR 0064: the machine's case, what the wake and a session hear, and the canceller's state.
+echo "microphone:    $(grep -aoE 'microphone: .*' "$LOG" | tail -1 | cut -c1-240)"
+grep -aoE 'microphone: (The .* is not there.*|repaired.*)' "$LOG" | tail -2 | sed 's/^/  /'
+echo "canceller:     $(systemctl --user is-active ghost-echo-cancel 2>/dev/null) ($(pactl list short sources 2>/dev/null | grep -c 'ghost\.mic') ghost.mic node)"
+echo "$top" | grep -E 'ghost-wake-capture|ghost-capture' | awk '{print "  xruns", $9, $NF}'
 
 h "Daemon"
 pid=$(pgrep -f 'target/debug/ghostd run$' || true)

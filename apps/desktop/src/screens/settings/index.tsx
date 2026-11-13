@@ -108,6 +108,9 @@ import {
   micDiffers,
   micInUse,
   micOptions,
+  MIC_CASE_LABEL,
+  installerNotNeeded,
+  wakeMicOptions,
   modelReady,
   parseFuzzy,
   micDismissedFor,
@@ -650,6 +653,21 @@ export default function SettingsScreen({ params: route }: RouteProps) {
     };
   }, [typedKey, confirm]);
 
+  /* ------------------------------------------------------- microphone repair (ADR 0064) */
+  const [repairBusy, setRepairBusy] = useState(false);
+  const repairMic = async () => {
+    setRepairBusy(true);
+    try {
+      const r = await client.repairMicrophone();
+      toast({ title: "Microphone repaired", description: r.message, tone: "ok" });
+    } catch (e) {
+      toast({ title: "Couldn’t repair the microphone", description: errorText(e), tone: "danger" });
+    } finally {
+      setRepairBusy(false);
+      void loadAux();
+    }
+  };
+
   /* ------------------------------------------------------- echo cancellation */
   const echo = async (uninstall: boolean) => {
     if (
@@ -667,7 +685,9 @@ export default function SettingsScreen({ params: route }: RouteProps) {
     let msg: NonNullable<typeof echoMsg>;
     try {
       const r = await client.setupEchoCancel(uninstall);
-      msg = r.ok
+      msg = r.ok && !uninstall && installerNotNeeded(r.detail)
+        ? { tone: "ok", title: "Echo cancellation isn’t needed here", text: "Your microphone cancels Ghost’s voice on its own chip, and Ghost plays through it, so Ghost listens to it directly. Nothing was installed." }
+        : r.ok
         ? uninstall
           ? { tone: "ok", title: "Echo cancellation removed", text: "Restart Ghost to apply.", offer: "default" }
           : { tone: "ok", title: "Echo cancellation installed", text: "Use ghost.mic as the microphone, save, and restart Ghost.", offer: "ghost.mic" }
@@ -819,6 +839,9 @@ export default function SettingsScreen({ params: route }: RouteProps) {
   const jev = v.GHOST_JEV || "auto";
   const jevStatus = jevNow(jev, s, draft.secrets);
   const mics = micOptions(devices, v.GHOST_INPUT_DEVICE ?? "");
+  const wakeMics = wakeMicOptions(devices, v.GHOST_WAKE_INPUT_DEVICE ?? "");
+  const micPath = devices?.microphone ?? null;
+  const suggested = (micPath?.suggest ?? []).filter((x) => (v[x.key] ?? "") !== x.value);
   // A password saved on its own row (Passwords.tsx): one Ghost reads joins the restart pill, and
   // the setup list and the model page read set-or-not again.
   const passwordRestart = (names: string[]) => {
@@ -1060,8 +1083,46 @@ export default function SettingsScreen({ params: route }: RouteProps) {
                       {devicesError}
                     </Notice>
                   )}
+                  {micPath?.problem && (
+                    <Notice
+                      tone="warn"
+                      title="The microphone isn’t hearing well"
+                      action={
+                        <Button size="sm" loading={repairBusy} disabled={!online || !micPath.can_repair} onClick={() => void repairMic()}>
+                          Repair
+                        </Button>
+                      }
+                    >
+                      {micPath.problem}
+                      {!micPath.can_repair ? " End the session (and turn listening on) to repair it." : ""}
+                    </Notice>
+                  )}
+                  {micPath?.fell_back && (
+                    <Notice tone="warn" title="Listening on another microphone">
+                      {micPath.fell_back}
+                    </Notice>
+                  )}
                   <Card list>
                     <ListeningRow />
+                    {micPath && (
+                      <ListRow
+                        title="How Ghost hears you"
+                        description={
+                          <>
+                            {micPath.summary}
+                            {micPath.advice ? ` ${micPath.advice}` : ""}
+                          </>
+                        }
+                        meta={<Badge size="sm" tone={micPath.case === "unprotected" ? "warn" : micPath.case === "unknown" ? undefined : "ok"}>{MIC_CASE_LABEL[micPath.case] ?? micPath.case}</Badge>}
+                        trailing={
+                          suggested.length ? (
+                            <Button size="sm" variant="secondary" onClick={() => setValues(Object.fromEntries(suggested.map((x) => [x.key, x.value])))}>
+                              Use the suggested {suggested.length === 1 ? "setting" : "settings"}
+                            </Button>
+                          ) : undefined
+                        }
+                      />
+                    )}
                     <Row>
                       <Field
                         layout="inline"
@@ -1087,6 +1148,44 @@ export default function SettingsScreen({ params: route }: RouteProps) {
                         ) : (
                           <Input value={v.GHOST_INPUT_DEVICE ?? ""} placeholder="ghost.mic" spellCheck={false} onChange={(e) => setValue("GHOST_INPUT_DEVICE", e.target.value)} />
                         )}
+                      </Field>
+                    </Row>
+                    <Row>
+                      <Field
+                        layout="inline"
+                        id={fieldId("GHOST_WAKE_INPUT_DEVICE")}
+                        label="Wake microphone"
+                        detail="GHOST_WAKE_INPUT_DEVICE"
+                        help={
+                          <>
+                            {restartSet.has("GHOST_WAKE_INPUT_DEVICE") && !dirtyKeys.includes("GHOST_WAKE_INPUT_DEVICE") && <span className="set-waits">Waits for a restart. </span>}
+                            What listens for “Hey Ghost” while no session is open.{micPath ? ` In use now: ${micPath.wake_input}.` : ""}
+                          </>
+                        }
+                      >
+                        {devices ? (
+                          <Select value={v.GHOST_WAKE_INPUT_DEVICE ?? ""} onChange={(e) => setValue("GHOST_WAKE_INPUT_DEVICE", e.target.value)} options={wakeMics} />
+                        ) : (
+                          <Input value={v.GHOST_WAKE_INPUT_DEVICE ?? ""} placeholder="Same as the microphone" spellCheck={false} onChange={(e) => setValue("GHOST_WAKE_INPUT_DEVICE", e.target.value)} />
+                        )}
+                      </Field>
+                    </Row>
+                    <Row>
+                      <Field
+                        layout="inline"
+                        id={fieldId("GHOST_INPUT_REPAIR")}
+                        label="When the microphone stops hearing well"
+                        detail="GHOST_INPUT_REPAIR"
+                        help="Ghost notices when loud speech keeps reading as nothing. It can leave a note with Repair, or repair it by itself while no session is open (at most once an hour)."
+                      >
+                        <Select
+                          value={v.GHOST_INPUT_REPAIR ?? ""}
+                          onChange={(e) => setValue("GHOST_INPUT_REPAIR", e.target.value)}
+                          options={[
+                            { value: "", label: "Leave a note with Repair" },
+                            { value: "auto", label: "Repair it by itself" },
+                          ]}
+                        />
                       </Field>
                     </Row>
                     <ListRow

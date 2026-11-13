@@ -74,6 +74,8 @@ export type ModelCheckVerdict = Schemas["ModelCheckVerdict"];
 export type ModelCheckLatest = Schemas["ModelCheckLatest"];
 export type ModelSignInResult = Schemas["ModelSignInResult"];
 export type DevicesView = Schemas["DevicesView"];
+/** The microphone path (ADR 0064): the machine's case, what Ghost listens on, its health. */
+export type MicrophoneView = Schemas["MicrophoneView"];
 export type ModelsView = Schemas["ModelsView"];
 export type Ack = Schemas["Ack"];
 /** An agent (ADR 0014, ADR 0035): a conversation with a persona and a job. The wire keeps the word conversation. */
@@ -406,6 +408,10 @@ export class GhostClient {
   }
   setupEchoCancel(uninstall = false) {
     return unwrap(this.api.POST("/setup/echo-cancel", { params: { query: { uninstall } } }));
+  }
+  /** Restart the echo canceller if it is in use and reopen the microphone (ADR 0064). */
+  repairMicrophone() {
+    return unwrap(this.api.POST("/microphone/repair"));
   }
   models() {
     return unwrap(this.api.GET("/setup/models"));
