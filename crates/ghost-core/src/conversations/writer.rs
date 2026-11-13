@@ -83,6 +83,7 @@ impl ConversationWriter {
                 p.job = c.job.clone();
                 p.voice = c.voice.clone();
                 p.speed = c.speed;
+                p.look = c.look.clone();
                 store.upsert_conversation(&p)?;
                 files.write_agent(slug, &agent_map(&p))?;
                 files.write(slug, PERSONA, &c.persona)?;
@@ -129,6 +130,9 @@ impl ConversationWriter {
                 q.aliases = c.aliases.clone();
                 if let Some(job) = &c.job {
                     q.job = job.clone();
+                }
+                if let Some(look) = &c.look {
+                    q.look = (!look.is_empty()).then(|| look.clone());
                 }
                 q.updated_at = utcnow();
                 self.save(&q)?;

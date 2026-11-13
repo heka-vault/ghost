@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS conversations (
     job             TEXT NOT NULL DEFAULT '',
     voice           TEXT,
     speed           REAL,
+    look            TEXT,
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL,
     last_active_at  TEXT,
@@ -300,7 +301,7 @@ const LINE_TABLES: [&str; 3] = ["conversations", "turns", "compactions"];
 
 const ITEM_COLS: &str = "key, source, title, link, fields, response, first_seen, last_seen, \
     changed_at, resolved_at, delivered_at, delivered_via, acknowledged_at, snoozed_until";
-const PROFILE_COLS: &str = "id, slug, name, aliases, job, voice, speed, created_at, updated_at, \
+const PROFILE_COLS: &str = "id, slug, name, aliases, job, voice, speed, look, created_at, updated_at, \
     last_active_at, retired_at, deleted_at";
 
 #[derive(Debug, thiserror::Error)]
@@ -1193,10 +1194,10 @@ impl Store {
 
     pub fn upsert_conversation(&self, p: &Profile) -> Result<()> {
         self.conn().execute(
-            "INSERT INTO conversations (id, slug, department, name, aliases, job, voice, speed, created_at, updated_at, \
-             last_active_at, retired_at, deleted_at) VALUES (?, ?, 'ghost', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
+            "INSERT INTO conversations (id, slug, department, name, aliases, job, voice, speed, look, created_at, updated_at, \
+             last_active_at, retired_at, deleted_at) VALUES (?, ?, 'ghost', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
              ON CONFLICT(id) DO UPDATE SET slug = excluded.slug, department = 'ghost', name = excluded.name, \
-             aliases = excluded.aliases, job = excluded.job, voice = excluded.voice, speed = excluded.speed, \
+             aliases = excluded.aliases, job = excluded.job, voice = excluded.voice, speed = excluded.speed, look = excluded.look, \
              updated_at = excluded.updated_at, last_active_at = excluded.last_active_at, \
              retired_at = excluded.retired_at, deleted_at = excluded.deleted_at",
             params![
@@ -1207,6 +1208,7 @@ impl Store {
                 p.job,
                 p.voice,
                 p.speed,
+                p.look,
                 iso(&p.created_at),
                 iso(&p.updated_at),
                 opt_iso(&p.last_active_at),
@@ -1509,11 +1511,12 @@ fn profile(r: &rusqlite::Row<'_>) -> Result<Profile> {
         job: r.get::<_, Option<String>>(4)?.unwrap_or_default(),
         voice: r.get(5)?,
         speed: r.get(6)?,
-        created_at: must_dt(r.get(7)?)?,
-        updated_at: must_dt(r.get(8)?)?,
-        last_active_at: col_dt(r.get(9)?),
-        retired_at: col_dt(r.get(10)?),
-        deleted_at: col_dt(r.get(11)?),
+        look: r.get(7)?,
+        created_at: must_dt(r.get(8)?)?,
+        updated_at: must_dt(r.get(9)?)?,
+        last_active_at: col_dt(r.get(10)?),
+        retired_at: col_dt(r.get(11)?),
+        deleted_at: col_dt(r.get(12)?),
     })
 }
 
@@ -1562,6 +1565,11 @@ fn retire_line_tables(conn: &Connection) -> Result<()> {
 }
 
 fn migrate(conn: &Connection) -> Result<()> {
+    // An agent's look (its shape and colour), a field on the agent like its voice.
+    let agents = columns(conn, "conversations")?;
+    if !agents.is_empty() && !agents.iter().any(|c| c == "look") {
+        conn.execute("ALTER TABLE conversations ADD COLUMN look TEXT", [])?;
+    }
     if !columns(conn, "operations")?
         .iter()
         .any(|c| c == "readback_version")
@@ -1828,6 +1836,34 @@ mod tests {
             "say [password: STORE_TOKEN]"
         );
         assert_eq!(events[1].detail, None);
+    }
+
+    #[test]
+    fn an_older_database_gains_the_agents_look() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("old.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE conversations (id TEXT PRIMARY KEY, slug TEXT NOT NULL UNIQUE, department TEXT NOT NULL, \
+                 name TEXT NOT NULL, aliases TEXT NOT NULL DEFAULT '[]', job TEXT NOT NULL DEFAULT '', voice TEXT, speed REAL, \
+                 created_at TEXT NOT NULL, updated_at TEXT NOT NULL, last_active_at TEXT, retired_at TEXT, deleted_at TEXT);",
+            )
+            .unwrap();
+        }
+        let store = Store::open(&path).unwrap();
+        let mut p = Profile::new("ledger", "Ledger");
+        p.look = Some("bell:2".into());
+        store.upsert_conversation(&p).unwrap();
+        assert_eq!(
+            store
+                .get_conversation("ledger", false)
+                .unwrap()
+                .unwrap()
+                .look
+                .as_deref(),
+            Some("bell:2")
+        );
     }
 
     #[test]

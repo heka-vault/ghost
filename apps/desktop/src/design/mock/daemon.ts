@@ -3,7 +3,7 @@
  * update this state and emit the same events the real daemon would, so screens behave
  * as they will against the real thing. Foundation-owned; data lives in fixtures/.
  */
-import { wordEnds } from "@ghost/ui";
+import { parseLook, wordEnds } from "@ghost/ui";
 
 import { speechEnvelope } from "../../ui/VoiceWave";
 import type {
@@ -810,8 +810,8 @@ export class MockDaemon {
 
   // ------------------------------------------------------------------ agents (ADR 0014, ADR 0035)
   private view(d: ConversationDetail): ConversationView {
-    const { id, slug, name, aliases, job, voice, speed, own_voice, created_at, last_active_at, retired_at, active, is_ghost } = d;
-    return { id, slug, name, aliases, job, voice, speed, own_voice, created_at, last_active_at, retired_at, active, is_ghost };
+    const { id, slug, name, aliases, job, voice, speed, own_voice, created_at, last_active_at, retired_at, active, is_ghost, look } = d;
+    return { id, slug, name, aliases, job, voice, speed, own_voice, created_at, last_active_at, retired_at, active, is_ghost, look };
   }
   private agent(slug: string): AgentRecord {
     const l = this.agents.get(slug);
@@ -1667,6 +1667,7 @@ export class MockDaemon {
         id: newId(), slug, name, aliases: (b.aliases as string[]) ?? [], job: String(b.job ?? ""),
         voice: own ? (b.voice as string) : this.ghostVoice(), speed: (b.speed as number) ?? 1, own_voice: own,
         persona: String(b.persona ?? ""), memory, notes: [], created_at: now(), last_active_at: null, retired_at: null, active: false, is_ghost: false,
+        look: typeof b.look === "string" && parseLook(b.look) ? b.look : null,
         turn_count: 0, compactions: memory ? 1 : 0, dir: `${CONFIG_DIR}/agents/${slug}`,
       };
       this.agents.set(slug, { detail, turns: [], compactions: memory ? [{ id: newId(), at: now(), source: "manual", summary: memory, through_turn_id: null }] : [] });
@@ -1686,6 +1687,12 @@ export class MockDaemon {
       if (method === "PATCH" && sub === "") {
         if (d.retired_at) throw new HttpError(409, `${d.name} is retired. Rehire it to change it.`);
         if (d.is_ghost && typeof b.name === "string" && slugOf(b.name) !== slug) throw new HttpError(409, "Ghost keeps its name");
+        // A look, as the daemon checks it: a known shape and colour, "" back to the slug's; never Ghost's.
+        if (typeof b.look === "string") {
+          if (d.is_ghost) throw new HttpError(422, "Ghost is always Wisp");
+          if (b.look && !parseLook(b.look)) throw new HttpError(422, "a shape (wisp, drop, bell, hood, cloud, lantern, star, moth), a colon and a colour 0 to 7");
+          d.look = b.look || null;
+        }
         for (const k of ["name", "aliases", "job", "speed", "persona", "memory", "notes"] as const) {
           if (b[k] != null) (d as unknown as Record<string, unknown>)[k] = b[k];
         }
