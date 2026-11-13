@@ -49,7 +49,8 @@ fn main() -> anyhow::Result<()> {
     // before it is written (ADR 0036), and so is what the mirror hands the desktop.
     let level = std::env::var("GHOST_LOG")
         .or_else(|_| std::env::var("GHOST_LOG_LEVEL").map(|l| l.to_lowercase()))
-        .unwrap_or_else(|_| "info".into());
+        // The protocol library's own INFO lines dump each in-process handshake whole.
+        .unwrap_or_else(|_| "info,rmcp=warn".into());
     let mirror = LogMirror::new();
     tracing_subscriber::registry()
         .with(EnvFilter::try_new(&level).unwrap_or_else(|_| EnvFilter::new("info")))

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { EMPTY, type Facts, firstSentence, parseSaved, progressOf, STEPS, taskNumber, TASKS, wakeHelp } from "../src/screens/onboarding/state";
+import { EMPTY, type Facts, firstSentence, parseSaved, inputName, progressOf, STEPS, taskNumber, TASKS, wakeHelp } from "../src/screens/onboarding/state";
 import { exchangeOf } from "../src/screens/onboarding/watch";
 
 
@@ -107,5 +107,14 @@ describe("a catalog entry's description", () => {
   it("keeps the maker's first sentence", () => {
     expect(firstSentence("Read and write issues on GitHub. Also pull requests.")).toBe("Read and write issues on GitHub.");
     expect(firstSentence("x".repeat(200)).endsWith("…")).toBe(true);
+  });
+});
+
+describe("an input's name", () => {
+  it("reads a PipeWire node as the device", () => {
+    expect(inputName("alsa_input.usb-Seeed_Studio_reSpeaker_XVF3800_4-Mic_Array_114993701262400500-00.iec958-stereo#0")).toBe("Seeed Studio reSpeaker XVF3800 4-Mic Array, channel 1");
+    expect(inputName("alsa_input.usb-Shure_MV7+-00.analog-stereo")).toBe("Shure MV7+");
+    expect(inputName("ghost.mic")).toBe("ghost.mic");
+    expect(inputName("default source")).toBe("default source");
   });
 });

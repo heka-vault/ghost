@@ -1,0 +1,22 @@
+/* Owner: apps. An app's tile, imported by AppIcon itself so it is styled wherever it is used
+   (2026-11-13: in the first run, with apps.css not loaded, a catalog icon drew at its own size). */
+.apps-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  color: var(--text-2);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
+}
+.apps-icon--sm { width: var(--control-xs); height: var(--control-xs); border-radius: var(--radius-sm); font-size: var(--text-xs); }
+.apps-icon--md { width: var(--control-md); height: var(--control-md); font-size: var(--text-sm); }
+.apps-icon--lg { width: var(--control-lg); height: var(--control-lg); font-size: var(--text-lg); }
+.apps-icon img { width: 62%; height: 62%; object-fit: contain; }
+/* A favicon is drawn for a light page: its tile stays light in both themes so a dark mark reads. */
+.apps-icon.has-img { background: light-dark(var(--bg-raised), var(--gray-12)); }
+.apps-icon__mono { line-height: 1; }

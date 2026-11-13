@@ -7,6 +7,7 @@ import { useContext, useState } from "react";
 
 import { GlyphSizeContext, cx } from "../../ui";
 import { monogram, safeIcon } from "./model";
+import "./AppIcon.css";
 
 export function AppIcon({ title, icon, size: own = "md", className }: { title: string; icon?: string | null; size?: "sm" | "md" | "lg"; className?: string }) {
   // In the compact page bar the header's leading tile shrinks with the title, as LineGlyph does.

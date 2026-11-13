@@ -40,7 +40,7 @@ import { CONNECTION_KEYS, micOptions, validateConnection } from "../settings/mod
 import { ModelSection } from "../settings/ModelSection";
 import { HeroPresence, StepFrame } from "./frame";
 import type { Wizard } from "./index";
-import { firstSentence, phraseCase, splitList, wakeHelp } from "./state";
+import { firstSentence, inputName, phraseCase, splitList, wakeHelp } from "./state";
 import { KEEP_NOTICE } from "../hear/wakeTakes";
 import { exchangeOf, isAwake, useWakeWatch } from "./watch";
 
@@ -319,7 +319,7 @@ export function HearStep({ w }: { w: Wizard }) {
     }
   };
 
-  const micLabel = value || (mp ? `Ghost’s choice: ${mp.session_input}` : "System default");
+  const micLabel = value || (mp ? `Ghost’s choice: ${inputName(mp.session_input)}` : "System default");
   return (
     <StepFrame
       id="hear"

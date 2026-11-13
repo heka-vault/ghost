@@ -1462,6 +1462,10 @@ impl Daemon {
         d.follow_mic();
         // ADR 0065: kept wake takes, on unless the operator turned them off.
         match d.wake_takes().attach(Items::new(store.clone())) {
+            Ok(c) if c.keep && cfg.wake_mode == "transcript" => {
+                // ADR 0065: only the trained detector's hits are takes; transcript wake has none.
+                info!("wake takes: on, but none are kept with transcript wake (no detector)")
+            }
             Ok(c) if c.keep => info!("wake takes: kept on this computer (Settings › Sound)"),
             Ok(_) => info!("wake takes: not kept, as the operator chose"),
             Err(e) => warn!("wake takes: the choice could not be read ({e})"),
@@ -2141,7 +2145,7 @@ impl Daemon {
         {
             error!("hooks: listener not started on {:?}: {e}", cfg.hooks_listen);
         }
-        info!("autonomy policy: {}", autonomy.source);
+        info!("permissions: {}", autonomy.source);
         info!("{}", describe_routes(&routes.policy()));
         info!(
             "llm: {}, thinking {}",

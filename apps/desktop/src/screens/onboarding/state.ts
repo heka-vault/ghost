@@ -228,3 +228,18 @@ export function firstSentence(t: string): string {
   const m = s.match(/^.{20,160}?[.!?](\s|$)/);
   return (m ? m[0] : s.length > 160 ? `${s.slice(0, 157)}…` : s).trim();
 }
+
+/**
+ * A PipeWire input's node as a person reads it: `alsa_input.usb-Seeed_Studio_reSpeaker_XVF3800_4-Mic_Array_1149…-00.iec958-stereo#0`
+ * is "Seeed Studio reSpeaker XVF3800 4-Mic Array, channel 1" (2026-11-13: the raw node ran six
+ * lines on the hear step). `ghost.mic` and anything not shaped like an ALSA node stay as they are.
+ */
+export function inputName(node: string): string {
+  const m = /^alsa_input\.(.+?)(?:#(\d+))?$/.exec(node.trim());
+  if (!m) return node;
+  let name = m[1].replace(/^(usb|pci|platform)-/, "");
+  name = name.split(".")[0]; // the profile: iec958-stereo, analog-stereo
+  name = name.replace(/_[0-9A-Fa-f]{8,}(-\d+)?$/, "").replace(/-\d+$/, ""); // the serial
+  name = name.replace(/_/g, " ").trim() || node;
+  return m[2] !== undefined ? `${name}, channel ${Number(m[2]) + 1}` : name;
+}
