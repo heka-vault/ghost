@@ -2,7 +2,7 @@
  * Owner: settings. What Settings › Model says when the connection Ghost uses comes from the
  * environment it was started in (ADR 0037). Pure; no React, no window.
  */
-import type { ModelConnectionView } from "@ghost/client-ts";
+import type { ModelConnectionView, PasswordInfo } from "@ghost/client-ts";
 
 export interface EnvironmentNote {
   title: string;
@@ -34,5 +34,25 @@ export function environmentNote(conn: Pick<ModelConnectionView, "from_environmen
     password,
     keepSettings: settings.length ? "Keep the settings: save this page, and they go in settings.env." : null,
     keepPassword: password ? `Keep the password: add ${password} to Ghost’s vault on its row here or on Settings › Passwords.` : null,
+  };
+}
+
+export interface PasswordEnvironmentNote {
+  /** In place of "Not set". */
+  badge: string;
+  /** The row's help line. */
+  text: string;
+}
+
+/**
+ * Settings › Passwords for a password Ghost is using from the environment it was started in
+ * rather than its vault (`PasswordInfo.from_environment`): the same as Settings › Model says,
+ * with the row's Add as the way to keep it. Names only (ADR 0036).
+ */
+export function passwordFromEnvironment(p: Pick<PasswordInfo, "name" | "set"> & { from_environment?: boolean }): PasswordEnvironmentNote | null {
+  if (p.set || !p.from_environment) return null;
+  return {
+    badge: "From the environment",
+    text: "Ghost is using it from the environment Ghost was started in, not its vault, until Ghost is started another way. Add it to keep it.",
   };
 }

@@ -15,7 +15,6 @@ use std::io::Write;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use ghost_core::envfile::read_env;
 use ghost_core::ghost_app::clients::{
     APPIMAGE_NOTE, Clients, DEFAULT_LISTEN, http_snippets, read_token, stable_ghostd,
     stdio_snippets,
@@ -45,16 +44,13 @@ pub const RETRY_FOR: Duration = Duration::from_secs(15);
 /// JSON-RPC's range for a server's own errors.
 const NOT_REACHABLE: i32 = -32001;
 
-/// The settings for `ghostd mcp`: the environment, and under it Ghost's `settings.env`.
-/// The daemon is handed that file by whatever starts it; a tool that starts
-/// `ghostd mcp serve` hands over nothing, and the listener's address may be set there.
+/// The settings for `ghostd mcp`: the environment, and under it Ghost's `settings.env`, by
+/// the one precedence every `ghostd` command loads it with (`config::settings_file_for`). A
+/// tool that starts `ghostd mcp serve` hands over nothing, and the listener's address may be
+/// set there.
 pub fn settings_over(mut env: HashMap<String, String>) -> Result<GhostdSettings, ConfigError> {
-    let base = GhostdSettings::from_env(&env)?;
-    if let Ok(file) = read_env(&base.settings_path) {
-        for (key, value) in file {
-            env.entry(key).or_insert(value);
-        }
-    }
+    let (_, file) = crate::config::settings_file_for(&env);
+    env.extend(file.added);
     GhostdSettings::from_env(&env)
 }
 

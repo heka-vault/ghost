@@ -447,11 +447,17 @@ fn print_list(view: &Value, out: &mut dyn Write) {
             }
             _ => String::new(),
         };
-        let _ = writeln!(
-            out,
-            "  {}: {mark} ({uses}{last})",
-            p["name"].as_str().unwrap_or("")
-        );
+        let name = p["name"].as_str().unwrap_or("");
+        if p["from_environment"].as_bool() == Some(true) {
+            // Ghost uses a value it was started with (a shell's export): it lasts until Ghost
+            // is started another way. The name only, never the value (ADR 0037).
+            let _ = writeln!(
+                out,
+                "  {name}: from the environment Ghost was started in, not the vault ({uses}; `ghostd passwords set {name}` keeps it)"
+            );
+            continue;
+        }
+        let _ = writeln!(out, "  {name}: {mark} ({uses}{last})");
     }
     for s in view["importable"].as_array().into_iter().flatten() {
         let _ = writeln!(out, "  to import: {}", s["path"].as_str().unwrap_or(""));
@@ -1212,6 +1218,35 @@ mod tests {
         let (code, printed, _) = run(&["unlock"], &cfg, ring.clone(), "");
         assert_eq!(code, 0);
         assert_eq!(printed, "vault: open\n");
+    }
+
+    #[test]
+    fn a_password_from_the_environment_ghost_was_started_in_says_so() {
+        // The page and the command line say the same (ADR 0037's amendment): the name and
+        // where its value comes from, never the value.
+        let view = json!({
+            "vault": {"path": "~/v", "state": "open", "problem": null},
+            "passwords": [
+                {"name": "ANTHROPIC_AUTH_TOKEN", "set": false, "from_environment": true,
+                 "used_by": ["The model connection"], "last_used": null},
+                {"name": "HF_TOKEN", "set": false, "from_environment": false,
+                 "used_by": ["Voice model downloads"], "last_used": null},
+            ],
+            "importable": [],
+        });
+        let mut out = Vec::new();
+        print_list(&view, &mut out);
+        let printed = String::from_utf8(out).unwrap();
+        assert!(
+            printed.contains(
+                "  ANTHROPIC_AUTH_TOKEN: from the environment Ghost was started in, not the vault (The model connection; `ghostd passwords set ANTHROPIC_AUTH_TOKEN` keeps it)\n"
+            ),
+            "{printed}"
+        );
+        assert!(
+            printed.contains("  HF_TOKEN: not set (Voice model downloads)\n"),
+            "{printed}"
+        );
     }
 
     #[test]

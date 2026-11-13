@@ -17,6 +17,8 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=%h
 EnvironmentFile=-%h/.config/ghost/settings.env
+# Loaded above: ghostd does not read it again (it does when started by hand).
+Environment=GHOST_SETTINGS_LOADED=1
 Environment=GHOST_INFRA_DIR=%h/.local/share/ghost/runtime/current/src/infra
 ExecStart=%h/.local/share/ghost/runtime/current/bin/ghostd run
 # Undo any music ducking left behind by a crash.

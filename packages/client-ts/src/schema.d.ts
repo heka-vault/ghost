@@ -3103,6 +3103,12 @@ export interface components {
         PasswordInfo: {
             /** Format: date-time */
             added?: string | null;
+            /**
+             * @description Not in the vault, and Ghost is using the value of the environment it was started in
+             *     (a shell's export): it lasts until Ghost is started another way, and adding it to the
+             *     vault keeps it (ADR 0037's amendment). The name only; never a value.
+             */
+            from_environment: boolean;
             /** @description One Ghost itself reads; a new value applies at its next start. */
             ghost: boolean;
             /**

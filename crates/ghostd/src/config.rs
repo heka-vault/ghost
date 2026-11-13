@@ -364,6 +364,35 @@ fn parse_bool(name: &str, v: &str) -> Result<bool, ConfigError> {
     }
 }
 
+/// `settings.env` for a `ghostd` command, read from where the process environment says it is
+/// (`GHOST_SETTINGS_PATH`, `~/.config/ghost/settings.env` without it), under that environment
+/// (`ghost_core::environment::settings_file_under` has the precedence and why). A missing or
+/// unreadable file is no settings; the path comes back for the log line.
+pub fn settings_file_for(
+    process: &HashMap<String, String>,
+) -> (PathBuf, ghost_core::environment::SettingsFile) {
+    let path = GhostdSettings::from_env(process)
+        .map(|s| s.settings_path)
+        .unwrap_or_else(|_| GhostdSettings::default().settings_path);
+    let file = ghost_core::envfile::read_env(&path).unwrap_or_default();
+    let loaded = ghost_core::environment::settings_file_under(process, &file);
+    (path, loaded)
+}
+
+/// Every `ghostd` command's first step, before any thread exists: `settings.env`'s settings
+/// into this process's environment, under what was exported (`settings_file_for`). The
+/// launchers that load it themselves set `GHOST_SETTINGS_LOADED`, so it is read once. What
+/// comes back is for the log, once logging is up: names, never a value.
+pub fn load_settings_file() -> (PathBuf, ghost_core::environment::SettingsFile) {
+    let (path, loaded) = settings_file_for(&std::env::vars().collect());
+    for (k, v) in &loaded.added {
+        // SAFETY: called first in `main`, before the runtime, the logger or any other thread
+        // exists; nothing reads the environment concurrently.
+        unsafe { std::env::set_var(k, v) };
+    }
+    (path, loaded)
+}
+
 impl GhostdSettings {
     /// The settings the process environment gives.
     pub fn load() -> Result<Self, ConfigError> {
