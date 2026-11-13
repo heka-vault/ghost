@@ -308,6 +308,21 @@ pub struct Plan {
     pub fell_back: Option<String>,
 }
 
+impl Plan {
+    /// Whether a desk session's echo filter keeps its warm-up rule
+    /// (`ghost_voice::echo::WARMUP_SECS`): a short segment begun right as Ghost's voice
+    /// starts is taken for its leak. Kept where a canceller can leak at the onset: Ghost's
+    /// own canceller (`ghost.mic`, about half a second, #42), even over a chip that
+    /// cancels; an unprotected microphone; a path Ghost could not read. Off where the
+    /// microphone is heard directly and either its chip cancels against what Ghost plays
+    /// (2026-11-13: nothing over the room's floor in the first half second of 122 onsets)
+    /// or Ghost's voice is in the operator's ears, since there the rule only costs the
+    /// operator's short words right as Ghost starts (#54).
+    pub fn echo_warmup(&self) -> bool {
+        self.session.is_canceller() || !matches!(self.case, Case::OnChip | Case::Headset)
+    }
+}
+
 /// The case's own choice of input, given the hardware.
 fn case_of(facts: &SoundFacts, mic: Option<&Node>, output: Option<&str>) -> Case {
     let sink = facts.sink(output);
@@ -1193,6 +1208,24 @@ mod tests {
             p.suggest,
             vec![("GHOST_INPUT_DEVICE".to_string(), "ghost.mic".to_string())]
         );
+    }
+
+    #[test]
+    fn the_echo_warm_up_guard_is_kept_only_where_a_canceller_can_leak_at_the_onset() {
+        // The array heard directly: its chip leaves nothing at Ghost's onset (2026-11-13).
+        assert!(!plan(None, None, None, Some(&array_desk(false))).echo_warmup());
+        // The same array under ghost.mic: the host canceller is what is heard, and it
+        // leaks its first half second (#42).
+        let p = plan(Some("ghost.mic"), None, None, Some(&array_desk(true)));
+        assert_eq!(p.case, Case::OnChip);
+        assert!(p.echo_warmup());
+        // Ghost's voice in the operator's ears: nothing plays into the room.
+        assert!(!plan(None, None, None, Some(&headset())).echo_warmup());
+        assert!(!plan(None, None, None, Some(&puck())).echo_warmup());
+        assert!(plan(None, None, None, Some(&laptop(true))).echo_warmup()); // host canceller
+        assert!(plan(None, None, None, Some(&laptop(false))).echo_warmup()); // unprotected
+        assert!(plan(None, None, None, Some(&webcam())).echo_warmup());
+        assert!(plan(None, None, None, None).echo_warmup()); // unknown: as before
     }
 
     #[test]

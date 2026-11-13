@@ -194,8 +194,15 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
     let voice = {
         // The first sound waits on this connection's own first word (`acks::FirstSound`).
         let voice = d.voice();
-        if voice.first_sound_secs.is_none() || typed {
+        // A desk session's echo filter keeps its warm-up rule only where the microphone's
+        // path leaks Ghost's onset (ADR 0064); the phone's own canceller leaks, so it keeps
+        // it there.
+        let warmup = voice
+            .echo_warmup
+            .or_else(|| phone.is_none().then(|| d.mic_plan().echo_warmup()));
+        if voice.first_sound_secs.is_none() || typed || warmup != voice.echo_warmup {
             let mut v = (*voice).clone();
+            v.echo_warmup = warmup;
             if v.first_sound_secs.is_none() {
                 v.first_word_secs = d.first_word_secs();
             }
