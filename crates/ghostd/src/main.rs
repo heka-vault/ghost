@@ -165,6 +165,13 @@ fn main() -> anyhow::Result<()> {
             std::process::exit(ghost_voice::perf::cli::main(&args[1..]))
         }
         Some("llm") => std::process::exit(llm(&args[1..])),
+        // ADR 0066: the speech models the bundle does not carry, for a desk with no display
+        Some("models") => std::process::exit(speech_models(&args[1..])),
+        // ADR 0064, ADR 0066: the echo canceller, from the checkout or the bundle
+        Some("echo-cancel") => {
+            let cfg = GhostdSettings::load()?;
+            std::process::exit(echo_cancel(&args[1..], &cfg.infra_dir))
+        }
         Some("mcp") => {
             let cfg = GhostdSettings::load()?;
             if args.get(1).map(String::as_str) == Some("serve") {
@@ -188,7 +195,7 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Some(other) => anyhow::bail!(
-            "unknown command {other:?}; commands: run, status, wake, say, sleep, check, push, latency, llm, perf, restore-volumes, passwords, mcp, api-schema, version"
+            "unknown command {other:?}; commands: run, status, wake, say, sleep, check, models, echo-cancel, push, latency, llm, perf, restore-volumes, passwords, mcp, api-schema, version"
         ),
     }
 }
@@ -301,6 +308,68 @@ async fn llm(args: &[String]) -> i32 {
         &mut std::io::stderr(),
     )
     .await
+}
+
+/// `ghostd models [list|fetch]`: the files the daemon's settings name, by the same pins
+/// the app's download uses (ADR 0066). No vault: nothing here needs a password.
+#[tokio::main]
+async fn speech_models(args: &[String]) -> i32 {
+    let env: HashMap<String, String> = std::env::vars().collect();
+    match settings_from(&env) {
+        Ok((_, voice)) => ghostd::speech_models::cli(args, &voice, &mut std::io::stdout()).await,
+        Err(e) => {
+            eprintln!("{e}");
+            2
+        }
+    }
+}
+
+/// `ghostd echo-cancel [on|off|status]`: Ghost's echo canceller set up, removed, or
+/// described, by the installer the checkout or the bundle carries (ADR 0066). No root.
+#[tokio::main]
+async fn echo_cancel(args: &[String], infra_dir: &std::path::Path) -> i32 {
+    let usage = "ghostd echo-cancel [on|off|status]";
+    match args.first().map(String::as_str) {
+        None | Some("status") => {
+            let running = ghost_api::deps::unit_active(ghostd::microphone::CANCELLER_UNIT);
+            let installer = ghost_api::echo_cancel::installer(infra_dir);
+            println!(
+                "echo canceller: {}",
+                if running {
+                    "running (ghost.mic)"
+                } else {
+                    "not running"
+                }
+            );
+            println!(
+                "installer: {}{}",
+                installer.display(),
+                if installer.is_file() {
+                    ""
+                } else {
+                    " (missing)"
+                }
+            );
+            if !running {
+                println!("ghostd echo-cancel on sets it up");
+            }
+            0
+        }
+        Some(word @ ("on" | "off")) => {
+            let server = if word == "off" {
+                ghost_api::echo_cancel::SoundServer::Unknown
+            } else {
+                ghost_api::echo_cancel::probe_sound_server()
+            };
+            let (ok, detail) = ghost_api::echo_cancel::run(infra_dir, word == "off", server).await;
+            println!("{detail}");
+            if ok { 0 } else { 1 }
+        }
+        Some(other) => {
+            eprintln!("unknown: ghostd echo-cancel {other}; {usage}");
+            2
+        }
+    }
 }
 
 /// `ghostd mcp serve`: a tool's stdin and stdout to the running daemon (ADR 0048).

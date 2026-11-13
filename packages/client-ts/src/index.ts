@@ -77,6 +77,7 @@ export type DevicesView = Schemas["DevicesView"];
 /** The microphone path (ADR 0064): the machine's case, what Ghost listens on, its health. */
 export type MicrophoneView = Schemas["MicrophoneView"];
 export type ModelsView = Schemas["ModelsView"];
+export type SpeechModelsView = Schemas["SpeechModelsView"];
 export type Ack = Schemas["Ack"];
 /** An agent (ADR 0014, ADR 0035): a conversation with a persona and a job. The wire keeps the word conversation. */
 export type ConversationView = Schemas["ConversationView"];
@@ -421,6 +422,14 @@ export class GhostClient {
   }
   models() {
     return unwrap(this.api.GET("/setup/models"));
+  }
+  /** The speech models the bundle does not carry, and their download (ADR 0066). */
+  speechModels() {
+    return unwrap(this.api.GET("/speech-models"));
+  }
+  /** Download what is missing; a download already running is left to run. */
+  fetchSpeechModels() {
+    return unwrap(this.api.POST("/speech-models/fetch"));
   }
 
   // --- the model connection (ADR 0037) -------------------------------------------------------

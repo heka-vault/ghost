@@ -348,6 +348,46 @@ pub struct Playback {
     rate: u32,
     ring_seconds: f32,
     sink: String,
+    stall: StallWatch,
+}
+
+/// How long a write waits for a stream that takes nothing before it gives up (#117).
+pub const STALL_AFTER: Duration = Duration::from_secs(3);
+
+/// Whether the stream is taking sound, from its callback count (issue #117). A running
+/// stream calls back every quantum even when it plays silence; one never linked to a sink
+/// never does. Once stalled, writes fail at once until the count moves again.
+#[derive(Debug, Clone, Copy)]
+pub struct StallWatch {
+    callbacks: u64,
+    since: Instant,
+    stalled: bool,
+}
+
+impl StallWatch {
+    pub fn new(callbacks: u64, now: Instant) -> Self {
+        Self {
+            callbacks,
+            since: now,
+            stalled: false,
+        }
+    }
+
+    /// The count now; true while the stream is stalled.
+    pub fn observe(&mut self, callbacks: u64, now: Instant) -> bool {
+        if callbacks != self.callbacks {
+            *self = Self::new(callbacks, now);
+            return false;
+        }
+        if now.saturating_duration_since(self.since) >= STALL_AFTER {
+            self.stalled = true;
+        }
+        self.stalled
+    }
+
+    pub fn stalled(&self) -> bool {
+        self.stalled
+    }
 }
 
 impl Playback {
@@ -393,6 +433,7 @@ impl Playback {
                 rate,
                 ring_seconds,
                 sink,
+                stall: StallWatch::new(0, Instant::now()),
             }),
             Ok(Err(e)) => {
                 let _ = thread.join();
@@ -474,8 +515,24 @@ impl Playback {
         written
     }
 
-    /// Write all of `samples`, waiting for room as the stream plays.
+    /// Write all of `samples`, waiting for room as the stream plays. Gives up with
+    /// [`AudioError::Stalled`] when the stream has taken nothing for [`STALL_AFTER`], and at
+    /// once after that until it plays again (#117): a turn never waits on a dead speaker.
     pub async fn write(&mut self, mut samples: &[i16]) -> Result<(), AudioError> {
+        let stalled = || AudioError::Stalled {
+            secs: STALL_AFTER.as_secs(),
+        };
+        let now = Instant::now();
+        let callbacks = self.shared.callbacks.load(Relaxed);
+        if self.stall.stalled() {
+            if self.stall.observe(callbacks, now) {
+                return Err(stalled());
+            }
+        } else {
+            // Measured from this write: a stream PipeWire suspended while idle resumes
+            // when sound arrives, and must not be judged by the quiet before.
+            self.stall = StallWatch::new(callbacks, now);
+        }
         while !samples.is_empty() {
             let n = self.try_write(samples);
             samples = &samples[n..];
@@ -485,9 +542,26 @@ impl Playback {
             if self.shared.stopped.load(Relaxed) {
                 return Err(AudioError::Closed);
             }
-            self.waiter.wait().await.map_err(|_| AudioError::Closed)?;
+            // Woken by the stream's callback, or every half second to look for a stall.
+            if let Ok(woken) =
+                tokio::time::timeout(Duration::from_millis(500), self.waiter.wait()).await
+            {
+                woken.map_err(|_| AudioError::Closed)?;
+            }
+            if self
+                .stall
+                .observe(self.shared.callbacks.load(Relaxed), Instant::now())
+            {
+                crate::health::set_output_problem(Some(crate::health::stalled_note(&self.sink)));
+                return Err(stalled());
+            }
         }
         Ok(())
+    }
+
+    /// The stream has taken nothing for [`STALL_AFTER`] (#117).
+    pub fn stalled(&self) -> bool {
+        self.stall.stalled()
     }
 
     /// `write`, and note when these samples were produced, so [`take_latencies`] can say
@@ -532,6 +606,11 @@ impl Playback {
     /// device's reported delay has passed. Gives up after the ring's length plus a second
     /// when the stream is not running.
     pub async fn drain(&mut self) -> Result<(), AudioError> {
+        if self.stall.stalled() {
+            return Err(AudioError::Stalled {
+                secs: STALL_AFTER.as_secs(),
+            });
+        }
         let target = self.written;
         self.shared.draining.store(true, Relaxed);
         let limit = Duration::from_secs_f32(self.ring_seconds + 1.0);
@@ -560,6 +639,10 @@ impl Playback {
         if self.shared.stopped.load(Relaxed) {
             Err(AudioError::Closed)
         } else {
+            // Played out: the output works (#117).
+            if handed_over.is_ok() {
+                crate::health::set_output_problem(None);
+            }
             Ok(())
         }
     }
@@ -586,5 +669,28 @@ impl Drop for Playback {
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
+    }
+}
+
+#[cfg(test)]
+mod stall_tests {
+    use super::*;
+
+    #[test]
+    fn a_stream_that_takes_nothing_stalls_and_recovers_when_it_plays() {
+        let t0 = Instant::now();
+        let mut w = StallWatch::new(10, t0);
+        assert!(!w.observe(10, t0 + Duration::from_secs(1)));
+        assert!(!w.observe(11, t0 + Duration::from_secs(2)), "it played");
+        assert!(!w.observe(11, t0 + Duration::from_secs(4)));
+        assert!(
+            w.observe(11, t0 + Duration::from_secs(5)),
+            "three seconds of nothing"
+        );
+        assert!(w.stalled());
+        // Stalled stays stalled until the count moves.
+        assert!(w.observe(11, t0 + Duration::from_secs(6)));
+        assert!(!w.observe(12, t0 + Duration::from_secs(7)));
+        assert!(!w.stalled());
     }
 }

@@ -6036,6 +6036,124 @@
         ],
         "type": "object"
       },
+      "SpeechModelFile": {
+        "description": "One file this computer does not have yet.",
+        "properties": {
+          "bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "model": {
+            "description": "`Parakeet` (hearing) or `Kokoro` (the voice).",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "name",
+          "bytes"
+        ],
+        "type": "object"
+      },
+      "SpeechModelsFetch": {
+        "description": "The download, as it goes.",
+        "properties": {
+          "done_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "error": {
+            "description": "In plain words, when it failed.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "file": {
+            "description": "The file being fetched.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "$ref": "#/components/schemas/SpeechModelsFetchState"
+          },
+          "total_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "state",
+          "done_bytes",
+          "total_bytes",
+          "file",
+          "error"
+        ],
+        "type": "object"
+      },
+      "SpeechModelsFetchState": {
+        "enum": [
+          "idle",
+          "fetching",
+          "failed",
+          "done"
+        ],
+        "type": "string"
+      },
+      "SpeechModelsView": {
+        "description": "What this computer has, and the download.",
+        "properties": {
+          "fetch": {
+            "$ref": "#/components/schemas/SpeechModelsFetch"
+          },
+          "folder": {
+            "description": "Where they go.",
+            "type": "string"
+          },
+          "free_bytes": {
+            "description": "Free space there, when it can be read.",
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "missing": {
+            "description": "The files that are not here yet; empty when nothing is missing.",
+            "items": {
+              "$ref": "#/components/schemas/SpeechModelFile"
+            },
+            "type": "array"
+          },
+          "missing_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "ready": {
+            "description": "The daemon has loaded its speech models: Ghost can hear and speak.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ready",
+          "missing",
+          "missing_bytes",
+          "folder",
+          "free_bytes",
+          "fetch"
+        ],
+        "type": "object"
+      },
       "Status": {
         "description": "`GET /status`.",
         "properties": {
@@ -6120,7 +6238,7 @@
             "type": "number"
           },
           "version": {
-            "description": "YYYY.M.N, the same in every copy (`scripts/version.py`).",
+            "description": "YYYY.M.N, the same in every copy (`tools/version.py`).",
             "type": "string"
           },
           "waiting": {
@@ -10958,6 +11076,51 @@
         "summary": "Sources",
         "tags": [
           "sources"
+        ]
+      }
+    },
+    "/speech-models": {
+      "get": {
+        "operationId": "speech_models_view_speech_models_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpeechModelsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "The speech models this computer has",
+        "tags": [
+          "speech-models"
+        ]
+      }
+    },
+    "/speech-models/fetch": {
+      "post": {
+        "operationId": "speech_models_fetch_speech_models_fetch_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpeechModelsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "description": "It cannot start"
+          }
+        },
+        "summary": "Download the speech models",
+        "tags": [
+          "speech-models"
         ]
       }
     },

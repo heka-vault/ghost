@@ -1638,6 +1638,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/speech-models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The speech models this computer has */
+        get: operations["speech_models_view_speech_models_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/speech-models/fetch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Download the speech models */
+        post: operations["speech_models_fetch_speech_models_fetch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/status": {
         parameters: {
             query?: never;
@@ -3908,6 +3942,45 @@ export interface components {
             operations: components["schemas"]["OperationInfo"][];
             read_tools: components["schemas"]["ReadToolInfo"][];
         };
+        /** @description One file this computer does not have yet. */
+        SpeechModelFile: {
+            /** Format: int64 */
+            bytes: number;
+            /** @description `Parakeet` (hearing) or `Kokoro` (the voice). */
+            model: string;
+            name: string;
+        };
+        /** @description The download, as it goes. */
+        SpeechModelsFetch: {
+            /** Format: int64 */
+            done_bytes: number;
+            /** @description In plain words, when it failed. */
+            error: string | null;
+            /** @description The file being fetched. */
+            file: string | null;
+            state: components["schemas"]["SpeechModelsFetchState"];
+            /** Format: int64 */
+            total_bytes: number;
+        };
+        /** @enum {string} */
+        SpeechModelsFetchState: "idle" | "fetching" | "failed" | "done";
+        /** @description What this computer has, and the download. */
+        SpeechModelsView: {
+            fetch: components["schemas"]["SpeechModelsFetch"];
+            /** @description Where they go. */
+            folder: string;
+            /**
+             * Format: int64
+             * @description Free space there, when it can be read.
+             */
+            free_bytes: number | null;
+            /** @description The files that are not here yet; empty when nothing is missing. */
+            missing: components["schemas"]["SpeechModelFile"][];
+            /** Format: int64 */
+            missing_bytes: number;
+            /** @description The daemon has loaded its speech models: Ghost can hear and speak. */
+            ready: boolean;
+        };
         /** @description `GET /status`. */
         Status: {
             api_version: string;
@@ -3932,7 +4005,7 @@ export interface components {
             session_typed: boolean;
             /** Format: double */
             uptime_secs: number;
-            /** @description YYYY.M.N, the same in every copy (`scripts/version.py`). */
+            /** @description YYYY.M.N, the same in every copy (`tools/version.py`). */
             version: string;
             /**
              * Format: int64
@@ -4370,6 +4443,10 @@ export type SchemaSkillSearchPage = components['schemas']['SkillSearchPage'];
 export type SchemaSkillUpdateView = components['schemas']['SkillUpdateView'];
 export type SchemaSnoozeRequest = components['schemas']['SnoozeRequest'];
 export type SchemaSourceInfo = components['schemas']['SourceInfo'];
+export type SchemaSpeechModelFile = components['schemas']['SpeechModelFile'];
+export type SchemaSpeechModelsFetch = components['schemas']['SpeechModelsFetch'];
+export type SchemaSpeechModelsFetchState = components['schemas']['SpeechModelsFetchState'];
+export type SchemaSpeechModelsView = components['schemas']['SpeechModelsView'];
 export type SchemaStatus = components['schemas']['Status'];
 export type SchemaStatusEvent = components['schemas']['StatusEvent'];
 export type SchemaTakeEnding = components['schemas']['TakeEnding'];
@@ -7591,6 +7668,53 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["SourceInfo"][];
                 };
+            };
+        };
+    };
+    speech_models_view_speech_models_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpeechModelsView"];
+                };
+            };
+        };
+    };
+    speech_models_fetch_speech_models_fetch_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpeechModelsView"];
+                };
+            };
+            /** @description It cannot start */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

@@ -57,10 +57,33 @@ highest `vYYYY.M.N` tag of this month, or `.0` when this month has none.
    ```
 
    The tag starts `.github/workflows/release.yml`. It checks the tag names the version the
-   files say, builds the bundle (below), installs the .deb into a clean Ubuntu 26.04 and
-   runs `ghostd version`, which must name the tagged commit, and `ghostd check`, which must
-   find the bundle's runtime and model files on its own, and attaches the .deb and the
-   AppImage to a GitHub release.
+   files say, builds the bundle (below) signed for the updater, checks each signature
+   against the public key the app carries, installs the .deb into clean Ubuntu 24.04 and
+   26.04 and runs `ghostd version`, which must name the tagged commit, and `ghostd check`,
+   which must find the bundle's runtime and model files on its own and name no script from
+   the checkout, checks the AppImage carries the same daemon, writes `latest.json` (the
+   update manifest, `tools/release_manifest.py`, with GitHub's generated notes), and
+   publishes the .deb, the AppImage, their `.sig` files and `latest.json` in one release.
+   Installed apps see it within a day (ADR 0066).
+
+3. **Check the published release before telling anyone.** On the release page: the four
+   files and `latest.json` are there; `latest.json` names this version, and its two URLs
+   open (`curl -sIL <url> | head -1`). Then, on a machine with the previous release
+   installed, Settings › General › Check now offers it, and Update and restart ends on the
+   new version with `ghostd version` saying the tagged commit.
+
+### A dry run
+
+`gh workflow run release.yml --ref <branch>` runs the whole workflow on any branch without
+publishing: the bundle, the signatures, the install test and `latest.json` (its URLs name the
+release the version would get) are kept as the run's artifact for 14 days
+(`gh run download <run id>`). Run it before the first tag of a month, or after changing the
+bundle. On 2026-11-13 it took 25 minutes with a cold cache (22 of them the signed bundle
+build) and 18 with a warm one.
+
+The release is built on GitHub's Ubuntu 24.04 runner on purpose: a bundle links the glibc of
+the machine that built it, so one built on 26.04 (glibc 2.43) refuses to start on 24.04
+(`GLIBC_2.43 not found`). A `make bundle` on a 26.04 workstation is for that workstation.
 
 If the month turns between the merge and the tag, `make release` refuses: the merged
 `2026.10.x` is no longer this month's. Bump again with `make version V=next` in a PR.
@@ -95,10 +118,13 @@ What `tauri build` does, in order (`apps/desktop/src-tauri/tauri.conf.json`):
    the four binaries in `/usr/bin`, the runtime's library in
    `/usr/lib/heka-ghost-desktop/onnxruntime/libonnxruntime.so.1.24.4`, the model files
    in `/usr/lib/heka-ghost-desktop/models/` and the build's record beside them,
-   `/usr/lib/heka-ghost-desktop/ghost-build.json` (`bundle.resources`); the AppImage
+   `/usr/lib/heka-ghost-desktop/ghost-build.json` (`bundle.resources`); the echo canceller's installer and its templates in
+   `/usr/lib/heka-ghost-desktop/pipewire/` (`ghostd echo-cancel`, ADR 0066); the AppImage
    carries them in its `usr/bin` and `usr/lib`. The .deb depends on
    `libespeak-ng1` (Kokoro's phonemizer; the one system library `ghostd` links that a bare
-   Ubuntu lacks) on top of the GTK and WebKit packages Tauri adds.
+   Ubuntu lacks) and `pulseaudio-utils` (`pactl`, which the echo canceller's installer and
+   Ghost's sound checks use; the tools only, not the PulseAudio server), recommends
+   `pipewire-bin`, on top of the GTK and WebKit packages Tauri adds.
 
 The shell's build script hides `externalBin` and `resources` from `tauri-build` (the
 sidecars are the workspace's own binaries, which `tauri-build` would otherwise copy over
@@ -141,8 +167,8 @@ large ones are not, and each gets to its place by a step run once on the machine
 | Model | Where `ghostd` reads it | How it gets there |
 |---|---|---|
 | Silero VAD (`silero_vad.onnx`), Smart Turn v3.2 (`smart-turn-v3.2-cpu.onnx`) and the wake front end (`melspectrogram.onnx`, `embedding_model.onnx`) | `GHOST_MODELS_DIR`, else the bundle's `/usr/lib/heka-ghost-desktop/models/`, else `~/.cache/ghost/models/` (`crates/ghost-infer/src/models.rs`; `GHOST_SILERO_MODEL` and `GHOST_SMART_TURN_MODEL` name a file of their own) | `scripts/models.sh` (`make models`; `make setup`, `make dev` and CI run it): each from its upstream release, pinned by SHA-256 to the bytes the Python wheels shipped (pipecat-ai 1.12.0, livekit-wakeword 0.3.0; every upstream file matched its wheel's on 2026-10-29). Silero from snakers4/silero-vad at v6.0 (MIT), Smart Turn from the pipecat-ai/smart-turn-v3 Hugging Face repository at `f766f81` (BSD-2-Clause), the two graphs from dscripka/openWakeWord's v0.5.1 release (Apache-2.0), each licence beside its file. `stage` copies them into the bundle; a file that doesn't match its pin is refused with both hashes printed |
-| Parakeet TDT 0.6B v3 at full precision (ADR 0004, ADR 0043) | `GHOST_STT_DIR`, else `~/.cache/ghost/models/parakeet-tdt-0.6b-v3/` (`GHOST_CACHE_DIR` moves the cache). `GHOST_STT_QUANTIZATION=int8` selects the quantized files instead, from the same folders or the Hugging Face cache's snapshot | `scripts/models.sh parakeet` (`make models`; `make dev` runs it): the five files of istupakov/parakeet-tdt-0.6b-v3-onnx at a pinned revision, 2.5 GB, copied from the oracle's snapshot when it has them. The int8 files come with the oracle's first use: `uv run --project tools/oracle python -I -c "import onnx_asr; onnx_asr.load_model('nemo-parakeet-tdt-0.6b-v3', quantization='int8')"` |
-| Kokoro v1.0 (ADR 0004) | `GHOST_TTS_MODEL_PATH` and `GHOST_TTS_VOICES_PATH`, else `~/.cache/ghost/kokoro/kokoro-v1.0.onnx` and `voices-v1.0.bin` | `scripts/models.sh kokoro` (`make models`; `make setup` and `make dev` run it): the two files of the `model-files-v1.0` release of thewh1teagle/kokoro-onnx, which the Python daemon fetched through Pipecat (about 340 MB together), each pinned by SHA-256; Apache-2.0. Not in the bundle |
+| Parakeet TDT 0.6B v3 at full precision (ADR 0004, ADR 0043) | `GHOST_STT_DIR`, else `~/.cache/ghost/models/parakeet-tdt-0.6b-v3/` (`GHOST_CACHE_DIR` moves the cache). `GHOST_STT_QUANTIZATION=int8` selects the quantized files instead, from the same folders or the Hugging Face cache's snapshot | Installed from a release: the app downloads it in the first run (or Settings › Sound, or `ghostd models fetch`; ADR 0066, `ghostd::speech_models`, the same pins). From a checkout: `scripts/models.sh parakeet` (`make models`; `make dev` runs it): the five files of istupakov/parakeet-tdt-0.6b-v3-onnx at a pinned revision, 2.5 GB, copied from the oracle's snapshot when it has them. The int8 files come with the oracle's first use: `uv run --project tools/oracle python -I -c "import onnx_asr; onnx_asr.load_model('nemo-parakeet-tdt-0.6b-v3', quantization='int8')"` |
+| Kokoro v1.0 (ADR 0004) | `GHOST_TTS_MODEL_PATH` and `GHOST_TTS_VOICES_PATH`, else `~/.cache/ghost/kokoro/kokoro-v1.0.onnx` and `voices-v1.0.bin` | Installed from a release: the app's download, with Parakeet's (ADR 0066). From a checkout: `scripts/models.sh kokoro` (`make models`; `make setup` and `make dev` run it): the two files of the `model-files-v1.0` release of thewh1teagle/kokoro-onnx, which the Python daemon fetched through Pipecat (about 340 MB together), each pinned by SHA-256; Apache-2.0. Not in the bundle |
 | Kokoro's two halves for the windowed voice (ADR 0053, `GHOST_TTS_STREAM=windowed`) | `GHOST_TTS_STREAM_DIR`, else `~/.cache/ghost/kokoro/windowed/kokoro-encoder.onnx` and `kokoro-decoder.onnx` | `scripts/models.sh kokoro-windowed`: cut from Kokoro v1.0 above (pinned by SHA-256) by `tools/voice-trial/voice_trial/split_kokoro.py` under `uv`, each half pinned by SHA-256 (325 MB together); Apache-2.0 as Kokoro is. Missing, Ghost speaks with the whole render and the waiting list says so |
 | The trained wake classifiers (ADR 0025, `GHOST_WAKE_MODE=onnx`) | `GHOST_WAKE_MODEL_PATH`, else `~/.cache/ghost/wake/hey_ghost.onnx`, and every `ghost_*.onnx` beside it for Ghost by name | The operator's own, trained and copied there as [wake-recording.md](wake-recording.md) says; nothing fetches them |
 
@@ -151,6 +177,44 @@ large ones are not, and each gets to its place by a step run once on the machine
 above as a problem; nothing panics for a missing file, and a daemon started without one
 says so and exits (or, for a classifier, listens by transcript instead). The parity suite
 reads the same files (`crates/ghost-infer/tests/parity.rs`).
+
+## Updates and the key
+
+An installed Ghost updates itself (ADR 0066): the app checks
+`https://github.com/heka-vault/ghost/releases/latest/download/latest.json` when it starts and
+once a day (Settings › General › Updates, "Check for updates", on by default), and the
+operator's **Update and restart** downloads the new .deb or AppImage, verifies its signature
+against the public key in `apps/desktop/src-tauri/tauri.conf.json` (`plugins.updater.pubkey`),
+waits for a session or a run to end, installs it (the .deb with `pkexec dpkg -i`, one password
+prompt; the AppImage in place), and restarts the app and the daemon it carries. `latest`
+skips drafts and pre-releases, so a pre-release reaches nobody's button.
+
+**The key.** One minisign key pair with no password. The private key is the repository secret
+`TAURI_SIGNING_PRIVATE_KEY` (Settings › Secrets and variables › Actions), read by the release
+workflow's build step only, with `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` set empty; it is never
+printed, committed or copied to a machine. The build step refuses to run without it, and the
+workflow checks every signature against the public key the app carries, so a secret that does
+not match the app is caught before anything is published. `make bundle` and CI's bundle build
+don't sign (the updater's artifacts are asked for only by `tauri.release.conf.json`, which the
+release workflow passes), so they need no key.
+
+**Rotating it** (lost or leaked):
+
+1. `pnpm tauri signer generate -w <file> -p "" --ci` on a trusted machine, outside the
+   checkout.
+2. Put the new public key (the `.pub` file's contents, base64 as it is) in `tauri.conf.json`
+   in a PR, and cut a release with it **while the secret is still the old key**: the apps out
+   there verify it with the old key and, once updated, trust the new one.
+3. Replace the secret with the new private key (`gh secret set TAURI_SIGNING_PRIVATE_KEY <
+   <file>`), delete the file, and cut the next release as usual.
+
+If the old key leaked, step 2 is still how the apps out there move on, since they trust only
+it; an app that never installs that bridge release has to be updated by hand (download the new
+.deb). If the old key is lost, there is no bridge: every installed app must be updated by hand
+once.
+
+**A build from the checkout never offers an update** (`make dev`, `cargo build`: debug
+assertions or no bundle type): Settings says it is a development build.
 
 ## What each build says it is
 

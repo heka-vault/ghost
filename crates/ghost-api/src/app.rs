@@ -1485,37 +1485,25 @@ async fn setup_echo_cancel(
     State(deps): State<SharedDeps>,
     Qs(q): Qs<EchoCancelQuery>,
 ) -> ApiResult<Json<Ack>> {
-    let script = deps.infra_dir.join("pipewire").join("install.sh");
-    if !script.exists() {
-        return Err(ApiError::internal(format!(
-            "installer not found at {}",
-            script.display()
-        )));
+    let uninstall = q.uninstall.unwrap_or(false);
+    // What the sound server is, from the devices port: the daemon's asks pactl, a test's
+    // says (ADR 0066). Removing never needs it.
+    let server = if uninstall {
+        crate::echo_cancel::SoundServer::Unknown
+    } else {
+        let devices = deps.devices.clone();
+        tokio::task::spawn_blocking(move || devices.sound_server())
+            .await
+            .unwrap_or(crate::echo_cancel::SoundServer::Unknown)
+    };
+    let (ok, detail) = crate::echo_cancel::run(&deps.infra_dir, uninstall, server).await;
+    // Ghost listens through it, or without it, now, not at its next start (ADR 0066). A
+    // session open or listening off keeps the change for later.
+    if ok {
+        deps.control.reopen_microphone().await;
     }
-    let mut cmd = tokio::process::Command::new(&script);
-    if q.uninstall.unwrap_or(false) {
-        cmd.arg("--uninstall");
-    }
-    cmd.env_clear()
-        .envs(ghost_core::redact::child_env(std::env::vars())) // never a password (ADR 0036)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-    let out = cmd
-        .output()
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-    let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
-    text.push_str(&String::from_utf8_lossy(&out.stderr));
-    let detail: String = text
-        .chars()
-        .rev()
-        .take(2000)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect();
     Ok(Json(Ack {
-        ok: out.status.success(),
+        ok,
         detail: Some(detail),
     }))
 }
@@ -1609,6 +1597,7 @@ pub fn create_app(deps: SharedDeps) -> (axum::Router, utoipa::openapi::OpenApi) 
         .merge(crate::conversations::router())
         .merge(crate::hear::router())
         .merge(crate::wake_takes::router())
+        .merge(crate::speech_models::router())
         .merge(crate::schedules::router())
         .merge(crate::clients::router())
         .merge(crate::questions::router())

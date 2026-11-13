@@ -482,5 +482,10 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
         })
         .build(context)
         .expect("error while building Ghost's floating room");
-    app.run(|_, _| {});
+    // Its own web-content process ended on the way out, as the shell's (#115).
+    app.run(|_, event| {
+        if let tauri::RunEvent::Exit = event {
+            crate::webkit_exit::end_web_processes();
+        }
+    });
 }

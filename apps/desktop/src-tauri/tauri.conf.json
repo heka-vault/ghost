@@ -32,14 +32,25 @@
     "resources": {
       "resources/onnxruntime/": "onnxruntime/",
       "resources/models/": "models/",
-      "resources/ghost-build.json": "ghost-build.json"
+      "resources/ghost-build.json": "ghost-build.json",
+      "../../../infra/pipewire/install.sh": "pipewire/install.sh",
+      "../../../infra/pipewire/ghost-echo-cancel.conf.in": "pipewire/ghost-echo-cancel.conf.in",
+      "../../../infra/pipewire/ghost-echo-cancel.service": "pipewire/ghost-echo-cancel.service"
     },
     "linux": {
       "deb": {
-        "depends": ["libespeak-ng1"],
+        "depends": ["libespeak-ng1", "pulseaudio-utils"],
+        "recommends": ["pipewire-bin"],
         "section": "utils",
         "desktopTemplate": "./ghost.desktop"
       }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEIxNUY1OUYxNzFFRDgzNzUKUldSMWcrMXg4Vmxmc2VxN0VtNkc0RHlHQXRoMEZKV1h1RnRMWEhEWlg1TFdPdHRvQU1jNkZpMW0K",
+      "endpoints": ["https://github.com/heka-vault/ghost/releases/latest/download/latest.json"],
+      "requireSignedVersion": true
     }
   }
 }

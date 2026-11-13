@@ -256,6 +256,12 @@ impl crate::microphone::Repairer for NoRepair {
     fn restart_canceller(&self) -> Result<(), String> {
         Err("no echo canceller here".into())
     }
+    fn install_canceller(&self, _: &std::path::Path) -> Result<String, String> {
+        Err("no echo canceller here".into())
+    }
+    fn canceller_running(&self) -> bool {
+        false
+    }
 }
 
 impl Ports {
@@ -400,6 +406,8 @@ pub struct Late {
     pub wake_takes: OnceLock<Arc<ghost_core::wake_takes::Takes>>,
     /// The outside tools and their listener (ADR 0048).
     pub outside: OnceLock<Arc<crate::outside::OutsideHost>>,
+    /// The speech models' download (ADR 0066).
+    pub speech_models: OnceLock<Arc<crate::speech_models::SpeechModelsDesk>>,
 }
 
 /// What a session with any agent reaches (ADR 0034, ADR 0035).
@@ -432,6 +440,8 @@ pub struct Daemon {
     /// The connection is too slow for a good spoken reply (ADR 0056); on the waiting list.
     pub(crate) model_slow: Mutex<Option<ghost_llm::check::Slow>>,
     models_retry: std::time::Duration,
+    /// A download of the speech models ended (ADR 0066): the load tries again at once.
+    models_kick: Arc<tokio::sync::Notify>,
     pub late: Late,
     /// The agents, with the voices once Kokoro is loaded.
     pub conversations: Mutex<Option<Arc<Conversations>>>,
@@ -488,6 +498,8 @@ const PLAN_FOR: Duration = Duration::from_secs(10);
 pub const MODELS_RETRY: std::time::Duration = std::time::Duration::from_secs(15);
 /// The waiting list's key for it.
 pub const MODELS_PROBLEM_KEY: &str = "models:missing";
+/// The waiting list's key while the sound output plays nothing (#117).
+pub const OUTPUT_PROBLEM_KEY: &str = "output:unavailable";
 
 impl Daemon {
     pub fn new(cfg: GhostdSettings, voice: VoiceSettings, ports: Ports) -> Self {
@@ -515,6 +527,7 @@ impl Daemon {
             realtime_check: Mutex::new(None),
             model_slow: Mutex::new(None),
             models_retry: MODELS_RETRY,
+            models_kick: Arc::new(tokio::sync::Notify::new()),
             late: Late::default(),
             conversations: Mutex::new(None),
             reach: Mutex::new(None),
@@ -1189,10 +1202,13 @@ impl Daemon {
         }
     }
 
-    /// Repair (ADR 0064): restart the echo canceller when it is in use, then reopen the
-    /// passive microphone. Refused while a session is open (its stream would go with it)
-    /// or while not listening (there is no microphone open to repair).
-    pub(crate) async fn repair_mic(&self) -> Result<String, String> {
+    /// Repair (ADR 0064): restart the echo canceller when it is in use, set it up when Ghost
+    /// should listen through it and it isn't running, or when nothing cancels Ghost's voice
+    /// here and the operator pressed Repair (`asked`; ADR 0066: from the bundle, no root);
+    /// then reopen the passive microphone. Never the canceller on a chip that cancels or a
+    /// headset. Refused while a session is open (its stream would go with it) or while not
+    /// listening (there is no microphone open to repair).
+    pub(crate) async fn repair_mic(&self, asked: bool) -> Result<String, String> {
         if self.in_session() {
             return Err("End the session first: Repair reopens the microphone.".into());
         }
@@ -1201,18 +1217,35 @@ impl Daemon {
         }
         *lock(&self.mic_plan) = None;
         let plan = self.mic_plan();
-        let mut done = Vec::new();
-        if plan.session.is_canceller() || plan.wake.is_canceller() {
-            let repairer = self.ports.repairer.clone();
-            tokio::task::spawn_blocking(move || repairer.restart_canceller())
+        let mut done: Vec<String> = Vec::new();
+        let repairer = self.ports.repairer.clone();
+        let running = {
+            let r = repairer.clone();
+            tokio::task::spawn_blocking(move || r.canceller_running())
                 .await
-                .map_err(|e| e.to_string())??;
-            done.push("restarted the echo canceller");
-            *lock(&self.mic_plan) = None;
+                .unwrap_or(false)
+        };
+        match crate::microphone::canceller_step(&plan, running, asked) {
+            crate::microphone::CancellerStep::Restart => {
+                tokio::task::spawn_blocking(move || repairer.restart_canceller())
+                    .await
+                    .map_err(|e| e.to_string())??;
+                done.push("restarted the echo canceller".into());
+                *lock(&self.mic_plan) = None;
+            }
+            crate::microphone::CancellerStep::Install => {
+                let infra = self.cfg().infra_dir.clone();
+                let what = tokio::task::spawn_blocking(move || repairer.install_canceller(&infra))
+                    .await
+                    .map_err(|e| e.to_string())??;
+                done.push(what);
+                *lock(&self.mic_plan) = None;
+            }
+            crate::microphone::CancellerStep::Leave => {}
         }
         if let Some(listener) = lock(&self.listener).clone() {
             listener.reopen();
-            done.push("reopened the microphone");
+            done.push("reopened the microphone".into());
         }
         lock(&self.mic_health).repaired(Instant::now());
         self.refresh_waiting_now();
@@ -1240,7 +1273,7 @@ impl Daemon {
             }
             let due = lock(&self.mic_health).auto_repair_due(Instant::now());
             if due && self.cfg().input_repair_auto && !self.in_session() && !self.mic.is_off() {
-                match self.repair_mic().await {
+                match self.repair_mic(false).await {
                     Ok(what) => info!("microphone: repaired by itself: {what}"),
                     Err(e) => {
                         warn!("microphone: the automatic repair failed: {e}");
@@ -1722,6 +1755,10 @@ impl Daemon {
                             if let Some(problem) = lock(&d.models_problem).clone() {
                                 out.push((MODELS_PROBLEM_KEY.to_string(), problem));
                             }
+                            // #117: the sound output stalled; replies still show on screen.
+                            if let Some(problem) = ghost_audio::health::output_problem() {
+                                out.push((OUTPUT_PROBLEM_KEY.to_string(), problem));
+                            }
                             if let Some(problem) = d.late.outside.get().and_then(|o| o.problem()) {
                                 out.push((crate::outside::PROBLEM_KEY.to_string(), problem));
                             }
@@ -2147,6 +2184,15 @@ impl Daemon {
         }
         d.set_waiting_count();
         let refresher = tokio::spawn(d.clone().refresh_waiting());
+        // #117: the sound output's note appears and clears at once, not at the next refresh.
+        ghost_audio::health::on_output_change({
+            let weak = Arc::downgrade(d);
+            Arc::new(move || {
+                if let Some(d) = weak.upgrade() {
+                    d.refresh_waiting_now();
+                }
+            })
+        });
         let mic_watch = tokio::spawn(d.clone().watch_mic());
         // ADR 0036: a locked keyring is waited for, not a failure.
         let vault_waiter =
@@ -2227,11 +2273,18 @@ impl Daemon {
                         "models: {e}; trying again in {} s (ghostd check says what is missing)",
                         d.models_retry.as_secs_f64()
                     );
-                    *lock(&d.models_problem) =
-                        Some(format!("Ghost's speech models are not loaded: {e}"));
+                    // ADR 0066: files that are simply not here yet are said as that, with
+                    // where to get them, not as the loader's error.
+                    let missing = crate::speech_models::missing(&d.voice());
+                    *lock(&d.models_problem) = Some(if missing.is_empty() {
+                        format!("Ghost's speech models are not loaded: {e}")
+                    } else {
+                        crate::speech_models::missing_note(&missing)
+                    });
                     d.refresh_waiting_now();
                     tokio::select! {
                         _ = tokio::time::sleep(d.models_retry) => {}
+                        _ = d.models_kick.notified() => {}
                         _ = d.stop.cancelled() => break None,
                     }
                 }
@@ -2597,6 +2650,19 @@ impl Daemon {
         }
     }
 
+    /// The speech models' download (ADR 0066), made once.
+    pub fn speech_models(self: &Arc<Self>) -> Arc<crate::speech_models::SpeechModelsDesk> {
+        self.late
+            .speech_models
+            .get_or_init(|| {
+                crate::speech_models::SpeechModelsDesk::new(
+                    Arc::downgrade(self),
+                    self.models_kick.clone(),
+                )
+            })
+            .clone()
+    }
+
     /// The recorder, made once, before the API that serves it.
     fn hear_desk(self: &Arc<Self>) -> Arc<dyn ghost_api::HearPort> {
         let cfg = self.cfg();
@@ -2655,6 +2721,7 @@ impl Daemon {
                 self.wake_takes(),
                 Arc::downgrade(self),
             )),
+            speech_models: Some(self.speech_models()),
             schedules: Some(p.schedules),
             clients: Some(p.clients),
             clients_listening: p.clients_listening,
@@ -2949,6 +3016,10 @@ impl AppReader for ReadFor {
 pub struct PwDevices;
 
 impl DevicesPort for PwDevices {
+    fn sound_server(&self) -> ghost_api::echo_cancel::SoundServer {
+        ghost_api::echo_cancel::probe_sound_server()
+    }
+
     fn devices(&self) -> Vec<ghost_api::models::DeviceInfo> {
         let nodes = ghost_audio::Session::connect("ghostd").and_then(|s| s.nodes());
         match nodes {

@@ -22,6 +22,7 @@ export const PLACES: Record<Place, { path: string; label: string }> = {
  */
 const SECTIONS: Record<string, string> = {
   "input:degraded": "/settings/sound/audio",
+  "output:unavailable": "/settings/sound/audio",
   "models:missing": "/settings/sound/models",
   "voice:realtime": "/settings/sound/voice-mode",
 };

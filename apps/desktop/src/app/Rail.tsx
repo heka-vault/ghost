@@ -10,7 +10,7 @@
  * the label and the count: “Today, 2 need you”.
  */
 import { useGhost } from "@ghost/ui";
-import { AudioWaveform, Blocks, Eye, FlaskConical, MonitorUp, Plus, Settings2, Sun } from "lucide-react";
+import { AudioWaveform, Blocks, CircleArrowUp, Eye, FlaskConical, MonitorUp, Plus, Settings2, Sun } from "lucide-react";
 import { type ReactNode, Suspense, lazy, useRef, useState } from "react";
 
 import { useDesign } from "../design/context";
@@ -23,7 +23,8 @@ import { usePostureControl } from "./PostureContext";
 import { hrefFor, navigate, usePath } from "./router";
 import { navMatch } from "./routes";
 import { nameOf, useToday } from "./today";
-import { difference } from "./version";
+import { availableLine, useUpdate } from "./update";
+import { DESKTOP_VERSION, difference } from "./version";
 
 /** Design-mode chrome, compiled only in development. */
 const DevMenu = import.meta.env.DEV ? lazy(() => import("../design/chrome").then((m) => ({ default: m.DevMenu }))) : null;
@@ -88,6 +89,9 @@ export function Rail() {
     navigate("/settings/agents");
   };
   const showSwitch = connection !== "offline" && connection !== "connecting";
+  // ADR 0066: a new version, said quietly; Settings › General has the button.
+  const [update] = useUpdate(DESKTOP_VERSION);
+  const updateLine = availableLine(update);
   const version = useRef<{ line: string; other: string | null } | null>(null);
   if (status?.version) version.current = { line: versionLine(status.version, status.build), other: difference(status)?.window ?? null };
 
@@ -165,6 +169,18 @@ export function Rail() {
               <span className="rail__label">Hearing</span>
             </a>
           </li>
+          {updateLine && (
+            <li>
+              <Tooltip side="right" content={updateLine} asChild>
+                <a className="rail__item rail__item--small rail__update" href={hrefFor("/settings/general/updates")} aria-label={updateLine}>
+                  <span className="rail__icon">
+                    <CircleArrowUp />
+                  </span>
+                  <span className="rail__label">Update</span>
+                </a>
+              </Tooltip>
+            </li>
+          )}
           <li>
             <a className={cx("rail__item rail__item--small", inSettings && "is-current")} href={hrefFor("/settings/general")} aria-current={inSettings ? "page" : undefined}>
               <span className="rail__icon">

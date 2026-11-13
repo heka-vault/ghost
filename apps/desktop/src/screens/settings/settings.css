@@ -241,3 +241,5 @@
 /* The room's choices (RoomSettings): one width, so the column of selects lines up. */
 .room-select { width: 13rem; }
 .room-select select { width: 100%; }
+/* The release notes (ADR 0066): plain text, its own lines kept. */
+.set-notes { white-space: pre-wrap; display: block; max-height: 16rem; overflow: auto; }

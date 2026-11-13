@@ -7,6 +7,7 @@ describe("where a waiting item leads", () => {
   it("leads each of Ghost's own notes to the section that fixes it", () => {
     for (const [key, place, section] of [
       ["input:degraded", "sound", "audio"],
+      ["output:unavailable", "sound", "audio"],
       ["models:missing", "sound", "models"],
       ["voice:realtime", "sound", "voice-mode"],
     ] as const) {

@@ -439,12 +439,28 @@ pub async fn desk_media(
     } else {
         None
     };
-    let mut playback = Playback::open(PlaybackConfig {
-        sink: settings.output_device.clone(),
-        sound,
-        sound_volume: settings.thinking_volume,
-        ..PlaybackConfig::default()
-    })?;
+    // The speaker the settings name; when it is gone, the system's default (as a missing
+    // microphone falls back); when no output opens at all, a silent one, so the session
+    // still answers on screen and the waiting list says why there is no sound (#117).
+    let open = |sink: Option<String>, sound| {
+        Playback::open(PlaybackConfig {
+            sink,
+            sound,
+            sound_volume: settings.thinking_volume,
+            ..PlaybackConfig::default()
+        })
+    };
+    let mut playback = match open(settings.output_device.clone(), sound.clone()) {
+        Ok(p) => p,
+        Err(e) if settings.output_device.is_some() => {
+            warn!("{e}; playing through the default output instead");
+            match open(None, sound) {
+                Ok(p) => p,
+                Err(e2) => return Ok(silent_output(input, &e2)),
+            }
+        }
+        Err(e) => return Ok(silent_output(input, &e)),
+    };
     let mixer = playback.mixer();
     let ducker = (!settings.duck_apps.is_empty()).then(|| {
         ghost_audio::Ducker::new(
@@ -460,9 +476,16 @@ pub async fn desk_media(
             Err(e) => warn!("duck: {e}"),
         }
     }
+    // A speaker that takes nothing (#117) does not stop the session: the chime is skipped,
+    // the replies show on screen, and the waiting list says why there is no sound.
     if chime {
-        playback.write(&ghost_audio::chime(true)).await?;
-        playback.drain().await?;
+        let played = match playback.write(&ghost_audio::chime(true)).await {
+            Ok(()) => playback.drain().await,
+            Err(e) => Err(e),
+        };
+        if let Err(e) = played {
+            warn!("audio out: the chime didn't play: {e}");
+        }
     }
     Ok(Media {
         input,
@@ -473,6 +496,21 @@ pub async fn desk_media(
         }),
         origin: "desk",
     })
+}
+
+/// A desk session with no sound output (#117): replies are written nowhere and shown on
+/// screen; the waiting list says why.
+fn silent_output(input: Box<dyn MediaIn>, why: &ghost_audio::AudioError) -> Media {
+    warn!("audio out: no output opened ({why}); the session answers on screen only");
+    ghost_audio::health::set_output_problem(Some(format!(
+        "Ghost can't play sound: no sound output opened ({why}). Its replies still show on \
+         screen. Settings › Sound shows the speaker it uses."
+    )));
+    Media {
+        input,
+        output: Box::new(Silent),
+        origin: "desk",
+    }
 }
 
 // --- the scripted devices ----------------------------------------------------------------

@@ -18,6 +18,7 @@ pub mod clients;
 pub mod controller;
 pub mod conversations;
 pub mod deps;
+pub mod echo_cancel;
 pub mod error;
 pub mod hear;
 pub mod model;
@@ -30,6 +31,7 @@ pub mod realtime;
 pub mod schedules;
 pub mod server;
 pub mod skill_catalog;
+pub mod speech_models;
 pub mod state;
 pub mod wake_takes;
 

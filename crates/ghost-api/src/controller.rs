@@ -134,6 +134,9 @@ pub trait Controller: Send + Sync {
     async fn repair_microphone(&self) -> Result<String, String> {
         Err("the daemon is not running".into())
     }
+    /// The echo canceller was installed or removed (ADR 0066): plan again and reopen the
+    /// passive microphone, never touching the canceller itself.
+    async fn reopen_microphone(&self) {}
 }
 
 /// A controller with nothing behind it: every call is refused, nothing is pending.
