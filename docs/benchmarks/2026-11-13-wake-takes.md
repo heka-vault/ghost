@@ -91,6 +91,21 @@ detector … 2 false wakes, against 0") and leaves the setting alone.
   wakes and Parakeet checks on the training negatives.
 - When no point keeps both, it writes nothing installable (`run2`).
 
+**Run `run2`, with the fixed rule** (the same head: the training is deterministic, and its
+SHA-256 matches run1's):
+- **The point it chose:** threshold 0.96, floor 0.95. On the training negatives that is
+  6 false wakes and 4 checks, against the shipped detector's 8 and 73: the synthetic
+  confusables give the shipped detector false wakes of its own, which leave room for a point.
+- **Your takes, cross-checked:** 18 + 1 of 21 on `ghost.mic` and 18 + 3 on the array (shipped:
+  3 + 7 and 8 + 8). Your negatives: no false wakes.
+- **But never-seen sets show the trade:** 4 and 5 false wakes in the take streams, and 28, 10
+  and 22 on the Kokoro room recordings (desk, music, far).
+- `ghostd detector use run2` refuses it ("1 false wakes, against 0" on the held-out
+  recording).
+
+The training negatives don't stand for the room. Kept takes labelled "not a wake" are what
+will.
+
 ## A rented GPU
 
 Not used. A GPU would shorten the fit, which already takes minutes, and would allow a full
