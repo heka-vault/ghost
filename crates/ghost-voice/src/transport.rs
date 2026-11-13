@@ -420,7 +420,10 @@ pub async fn desk_media(
     mic: bool,
 ) -> Result<Media, ghost_audio::AudioError> {
     let input: Box<dyn MediaIn> = if mic {
-        let capture = Capture::open(CaptureConfig::for_input(settings.input_device.clone()))?;
+        // `node` or `node#N` (ADR 0064): one channel of a device taken alone, never mixed;
+        // nothing named, `ghost.mic` when it is there, else the default source.
+        let spec = ghost_audio::InputSpec::parse(settings.input_device.as_deref());
+        let capture = Capture::open(CaptureConfig::for_spec(&spec))?;
         Box::new(DeskIn { capture })
     } else {
         Box::new(Silent)

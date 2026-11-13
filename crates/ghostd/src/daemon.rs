@@ -219,6 +219,19 @@ pub struct Ports {
     pub players: Arc<dyn crate::players::PlayersPort>,
     pub sessions: Arc<dyn SessionRunner>,
     pub devices: Arc<dyn DevicesPort>,
+    /// The sound devices as PipeWire has them (ADR 0064); None where it can't be read.
+    pub sound_facts: Arc<dyn Fn() -> Option<crate::microphone::SoundFacts> + Send + Sync>,
+    /// What Repair does to the sound stack (ADR 0064).
+    pub repairer: Arc<dyn crate::microphone::Repairer>,
+}
+
+/// No sound stack to repair: a test's.
+pub struct NoRepair;
+
+impl crate::microphone::Repairer for NoRepair {
+    fn restart_canceller(&self) -> Result<(), String> {
+        Err("no echo canceller here".into())
+    }
 }
 
 impl Ports {
@@ -263,6 +276,8 @@ impl Ports {
             sessions: Arc::new(LiveSessions),
             devices: Arc::new(PwDevices),
             players: Arc::new(crate::players::MprisPlayers::default()),
+            sound_facts: Arc::new(crate::microphone::live_facts),
+            repairer: Arc::new(crate::microphone::LiveRepairer),
         }
     }
 
@@ -286,6 +301,8 @@ impl Ports {
             sessions: Arc::new(LiveSessions),
             devices: Arc::new(ghost_api::deps::NoDevices),
             players: Arc::new(crate::players::NoPlayers),
+            sound_facts: Arc::new(|| None),
+            repairer: Arc::new(NoRepair),
         }
     }
 }
@@ -424,7 +441,14 @@ pub struct Daemon {
     log_mirror: LogMirror,
     /// Not listening (ADR 0057): the operator's switch for the microphone, kept in the store.
     pub mic: Arc<Mic>,
+    /// What the microphone path is and how it is doing (ADR 0064).
+    pub(crate) mic_health: Arc<Mutex<crate::microphone::Health>>,
+    /// The plan and when it was made: the facts are read again after `PLAN_FOR`.
+    mic_plan: Mutex<Option<(Instant, crate::microphone::Plan)>>,
 }
+
+/// How long a read of the sound devices is trusted.
+const PLAN_FOR: Duration = Duration::from_secs(10);
 
 /// A model that won't load is tried again this often (ADR 0038: under the app's
 /// supervisor a crash would be a restart loop with nothing to read; the waiting list
@@ -487,6 +511,8 @@ impl Daemon {
             route_names: Mutex::new(Vec::new()),
             log_mirror: LogMirror::default(),
             mic: Arc::new(Mic::new()),
+            mic_health: Arc::new(Mutex::new(crate::microphone::Health::default())),
+            mic_plan: Mutex::new(None),
         }
     }
 
@@ -1032,11 +1058,160 @@ impl Daemon {
         })
     }
 
-    fn passive_media(&self) -> MediaFactory {
-        self.ports
-            .passive_media
-            .clone()
-            .unwrap_or_else(|| desk_capture(self.voice().input_device.clone()))
+    /// The passive pipeline's input (ADR 0064): the wake's device from the plan, read
+    /// again at each build; its frames counted for the microphone's health.
+    fn passive_media(self: &Arc<Self>) -> MediaFactory {
+        let inner = self.ports.passive_media.clone().unwrap_or_else(|| {
+            let weak = Arc::downgrade(self);
+            desk_capture(Arc::new(move || {
+                weak.upgrade()
+                    .map(|d| d.mic_plan().wake)
+                    .unwrap_or_default()
+            }))
+        });
+        let health = self.mic_health.clone();
+        crate::wake::metered(
+            inner,
+            Arc::new(move |w| lock(&health).window(&w, Instant::now())),
+        )
+    }
+
+    // --- the microphone path (ADR 0064) -----------------------------------------------------
+
+    /// What Ghost listens on now: from the settings and the devices, read at most every
+    /// ten seconds.
+    pub fn mic_plan(&self) -> crate::microphone::Plan {
+        if let Some((at, plan)) = lock(&self.mic_plan).as_ref()
+            && at.elapsed() < PLAN_FOR
+        {
+            return plan.clone();
+        }
+        let voice = self.voice();
+        let facts = (self.ports.sound_facts)();
+        let plan = crate::microphone::plan(
+            voice.input_device.as_deref(),
+            voice.wake_input_device.as_deref(),
+            voice.output_device.as_deref(),
+            facts.as_ref(),
+        );
+        let changed = lock(&self.mic_plan)
+            .as_ref()
+            .is_none_or(|(_, p)| p.session != plan.session || p.wake != plan.wake);
+        if changed {
+            info!(
+                "microphone: {} ({}); a session hears {}, the wake hears {}",
+                plan.summary,
+                plan.case.as_str(),
+                plan.session,
+                plan.wake
+            );
+            if let Some(f) = &plan.fell_back {
+                warn!("microphone: {f}");
+            }
+        }
+        *lock(&self.mic_plan) = Some((Instant::now(), plan.clone()));
+        plan
+    }
+
+    /// The note for the waiting list, while the input has a problem.
+    pub(crate) fn mic_note(&self) -> Option<String> {
+        let problem = lock(&self.mic_health).problem(Instant::now())?;
+        let plan = lock(&self.mic_plan)
+            .as_ref()
+            .map(|(_, p)| p.clone())
+            .unwrap_or_else(|| self.mic_plan());
+        Some(crate::microphone::note(&problem, &plan))
+    }
+
+    /// The microphone, for Settings › Sound and the first run.
+    pub(crate) fn mic_view(&self) -> ghost_api::models::MicrophoneView {
+        let plan = self.mic_plan();
+        ghost_api::models::MicrophoneView {
+            case: plan.case.as_str().to_string(),
+            summary: plan.summary.clone(),
+            advice: plan.advice.clone(),
+            suggest: plan
+                .suggest
+                .iter()
+                .map(|(key, value)| ghost_api::models::SettingSuggestion {
+                    key: key.clone(),
+                    value: value.clone(),
+                })
+                .collect(),
+            fell_back: plan.fell_back.clone(),
+            session_input: plan.session.to_string(),
+            wake_input: plan.wake.to_string(),
+            problem: self.mic_note(),
+            can_repair: !self.in_session() && !self.mic.is_off(),
+            repair: if self.cfg().input_repair_auto {
+                "auto".into()
+            } else {
+                "ask".into()
+            },
+        }
+    }
+
+    /// Repair (ADR 0064): restart the echo canceller when it is in use, then reopen the
+    /// passive microphone. Refused while a session is open (its stream would go with it)
+    /// or while not listening (there is no microphone open to repair).
+    pub(crate) async fn repair_mic(&self) -> Result<String, String> {
+        if self.in_session() {
+            return Err("End the session first: Repair reopens the microphone.".into());
+        }
+        if self.mic.is_off() {
+            return Err("Ghost isn't listening; turn listening on first.".into());
+        }
+        *lock(&self.mic_plan) = None;
+        let plan = self.mic_plan();
+        let mut done = Vec::new();
+        if plan.session.is_canceller() || plan.wake.is_canceller() {
+            let repairer = self.ports.repairer.clone();
+            tokio::task::spawn_blocking(move || repairer.restart_canceller())
+                .await
+                .map_err(|e| e.to_string())??;
+            done.push("restarted the echo canceller");
+            *lock(&self.mic_plan) = None;
+        }
+        if let Some(listener) = lock(&self.listener).clone() {
+            listener.reopen();
+            done.push("reopened the microphone");
+        }
+        lock(&self.mic_health).repaired(Instant::now());
+        self.refresh_waiting_now();
+        info!("microphone: repaired ({})", done.join(", "));
+        Ok(if done.is_empty() {
+            "Nothing to repair: the microphone opens with the next wake.".into()
+        } else {
+            let mut s = done.join(" and ");
+            s.replace_range(0..1, &s[0..1].to_uppercase());
+            format!("{s}.")
+        })
+    }
+
+    /// Every minute: a note that appears or clears reaches the waiting list, and with
+    /// `GHOST_INPUT_REPAIR=auto` a deaf input is repaired while no session is open, at
+    /// most once an hour.
+    async fn watch_mic(self: Arc<Self>) {
+        let mut had = false;
+        loop {
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            let has = self.mic_note().is_some();
+            if has != had {
+                had = has;
+                self.refresh_waiting_now();
+            }
+            let due = lock(&self.mic_health).auto_repair_due(Instant::now());
+            if due && self.cfg().input_repair_auto && !self.in_session() && !self.mic.is_off() {
+                match self.repair_mic().await {
+                    Ok(what) => info!("microphone: repaired by itself: {what}"),
+                    Err(e) => {
+                        warn!("microphone: the automatic repair failed: {e}");
+                        // Not again within the hour.
+                        lock(&self.mic_health).repaired(Instant::now());
+                    }
+                }
+            }
+        }
     }
 
     pub(crate) fn build_wake(self: &Arc<Self>, models: &Arc<Models>) -> Arc<dyn WakeDetector> {
@@ -1163,6 +1338,12 @@ impl Daemon {
             Some(spec),
         ));
         *lock(&self.listener) = Some(listener.clone());
+        listener.set_on_check(Some({
+            let health = self.mic_health.clone();
+            Arc::new(move |level, words, final_| {
+                lock(&health).check(level, words, final_, Instant::now())
+            })
+        }));
         let on_heard: OnHeard = {
             let d = self.clone();
             Arc::new(move || {
@@ -1471,6 +1652,10 @@ impl Daemon {
                         // ADR 0063: why the realtime voice was not used, shown, never said.
                         if let Some(note) = lock(&d.realtime_note).clone() {
                             out.push((REALTIME_NOTE_KEY.to_string(), note));
+                        }
+                        // ADR 0064: the microphone stopped hearing well, shown, never said.
+                        if let Some(note) = d.mic_note() {
+                            out.push((crate::microphone::NOTE_KEY.to_string(), note));
                         }
                         out
                     }
@@ -1869,6 +2054,7 @@ impl Daemon {
         }
         d.set_waiting_count();
         let refresher = tokio::spawn(d.clone().refresh_waiting());
+        let mic_watch = tokio::spawn(d.clone().watch_mic());
         // ADR 0036: a locked keyring is waited for, not a failure.
         let vault_waiter =
             (!passwords.is_open()).then(|| tokio::spawn(d.clone().wait_for_vault(VAULT_RETRY)));
@@ -1997,6 +2183,7 @@ impl Daemon {
 
         // the wind-down, in the Python's order
         refresher.abort();
+        mic_watch.abort();
         if let Some(v) = vault_waiter {
             v.abort();
         }
@@ -2356,11 +2543,12 @@ impl Daemon {
         }
     }
 
-    pub(crate) fn audio_settings(&self, duck: bool) -> AudioSettings {
+    pub fn audio_settings(&self, duck: bool) -> AudioSettings {
         let voice = self.voice();
         let cfg = self.cfg();
         AudioSettings {
-            input_device: voice.input_device.clone(),
+            // ADR 0064: the plan's choice, a setting for a device that is gone falling back.
+            input_device: self.mic_plan().session.to_setting(),
             output_device: voice.output_device.clone(),
             duck_apps: if duck {
                 cfg.duck_apps.clone()

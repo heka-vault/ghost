@@ -38,13 +38,13 @@ use crate::error::{
 };
 use crate::models::{
     API_VERSION, Ack, AuditEntry, AuditEventView, AuditPage, Carry, DevicesView, HookInfo, ItemKey,
-    Level, ListeningRequest, ListeningView, Mode, ModelsView, NotListening, OperationInfo,
-    OutcomeStatus, OutcomeView, OutputInfo, PendingProposal, PermissionsView, PhonePairing,
-    PhoneView, PolicyResult, PolicyUpdate, PolicyView, ReadToolInfo, Response as WatchResponse,
-    RouteName, RoutesView, RuleAdd, RulesView, SayRequest, SecretState, SettingsResult,
-    SettingsUpdate, SettingsView, SkillAdd, SkillBody, SkillInfo, SnoozeRequest, SourceInfo,
-    Status, Turn, Urgency, Verify, WaitingItemView, WaitingState, WaitingView, WakeRequest,
-    WatchInfo, WatchingView,
+    Level, ListeningRequest, ListeningView, MicrophoneRepairView, Mode, ModelsView, NotListening,
+    OperationInfo, OutcomeStatus, OutcomeView, OutputInfo, PendingProposal, PermissionsView,
+    PhonePairing, PhoneView, PolicyResult, PolicyUpdate, PolicyView, ReadToolInfo,
+    Response as WatchResponse, RouteName, RoutesView, RuleAdd, RulesView, SayRequest, SecretState,
+    SettingsResult, SettingsUpdate, SettingsView, SkillAdd, SkillBody, SkillInfo, SnoozeRequest,
+    SourceInfo, Status, Turn, Urgency, Verify, WaitingItemView, WaitingState, WaitingView,
+    WakeRequest, WatchInfo, WatchingView,
 };
 use crate::passwords::{
     SECRET_KEYS_SET, password_check, referenced, revive_apps_using, save_passwords, secret_states,
@@ -1448,7 +1448,25 @@ async fn devices(State(deps): State<SharedDeps>) -> Json<DevicesView> {
         devices,
         input_device: deps.input_device.clone(),
         output_device: deps.output_device.clone(),
+        microphone: deps.control.microphone().await,
     })
+}
+
+/// Restart Ghost's echo canceller if it is in use and reopen the passive microphone
+/// (ADR 0064): the Repair on the microphone's note. Refused while a session is open.
+#[utoipa::path(post, path = "/microphone/repair", operation_id = "repair_microphone_microphone_repair_post", tag = "setup",
+    summary = "Repair the microphone",
+    responses((status = 200, description = "Successful Response", body = MicrophoneRepairView),
+              (status = 503, description = "Ghost could not repair it now")))]
+async fn repair_microphone(
+    State(deps): State<SharedDeps>,
+) -> ApiResult<Json<MicrophoneRepairView>> {
+    let message = deps
+        .control
+        .repair_microphone()
+        .await
+        .map_err(ApiError::unavailable)?;
+    Ok(Json(MicrophoneRepairView { message }))
 }
 
 #[derive(Debug, Deserialize, IntoParams)]
@@ -1623,6 +1641,7 @@ pub fn create_app(deps: SharedDeps) -> (axum::Router, utoipa::openapi::OpenApi) 
         .routes(routes!(get_policy, put_policy))
         .routes(routes!(get_settings, put_settings))
         .routes(routes!(devices))
+        .routes(routes!(repair_microphone))
         .routes(routes!(setup_echo_cancel))
         .routes(routes!(models))
         .routes(routes!(events_schema));

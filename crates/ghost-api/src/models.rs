@@ -642,7 +642,9 @@ pub fn waiting_place(source: &str, key: &str) -> Option<WaitingPlace> {
     let head = key.split(':').next().unwrap_or("");
     Some(match (head, key) {
         (_, "model:slow") => WaitingPlace::Model,
-        (_, "voice:realtime") | (_, "models:missing") => WaitingPlace::Sound,
+        (_, "voice:realtime") | (_, "models:missing") | (_, "input:degraded") => {
+            WaitingPlace::Sound
+        }
         (_, "ghost:outside-listener") => WaitingPlace::OutsideTools,
         ("passwords", _) => WaitingPlace::Passwords,
         ("app", _) => WaitingPlace::Apps,
@@ -1837,6 +1839,54 @@ pub struct DevicesView {
     pub output_device: Option<String>,
     pub echo_cancel_active: bool,
     pub echo_cancel_source_present: bool,
+    /// What Ghost listens on and why (ADR 0064); null when the daemon can't say.
+    #[serde(default)]
+    pub microphone: Option<MicrophoneView>,
+}
+
+/// A setting Ghost suggests for a better microphone path: the key and the value to save.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct SettingSuggestion {
+    pub key: String,
+    pub value: String,
+}
+
+/// The microphone path (ADR 0064): which case the machine is in, what Ghost did about it,
+/// and whether the input is still hearing.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct MicrophoneView {
+    /// `on-chip` (the device cancels echo itself and Ghost plays through it), `headset`,
+    /// `host-canceller` (ghost.mic), `unprotected` (nothing cancels Ghost's voice), or
+    /// `unknown` (the sound devices couldn't be read).
+    pub case: String,
+    /// The case and what Ghost did about it, in a sentence or two.
+    pub summary: String,
+    /// A better choice than the settings make, if there is one.
+    #[schema(required)]
+    pub advice: Option<String>,
+    /// The settings to save for that advice.
+    pub suggest: Vec<SettingSuggestion>,
+    /// A setting named a device that is not there, and Ghost listens elsewhere.
+    #[schema(required)]
+    pub fell_back: Option<String>,
+    /// What a session hears (`node`, `node#N` for one channel alone, or `default source`).
+    pub session_input: String,
+    /// What the wake detector hears.
+    pub wake_input: String,
+    /// What is wrong with the input now, in the words of the note on the waiting list.
+    #[schema(required)]
+    pub problem: Option<String>,
+    /// Repair can be pressed now (no session is open).
+    pub can_repair: bool,
+    /// `ask` (a note with Repair) or `auto` (repaired when no session is open), from
+    /// `GHOST_INPUT_REPAIR`.
+    pub repair: String,
+}
+
+/// What Repair did.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct MicrophoneRepairView {
+    pub message: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]

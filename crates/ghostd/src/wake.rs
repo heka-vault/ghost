@@ -28,7 +28,7 @@ use ghost_voice::frames::{Direction, Frame, Out, Stage};
 use ghost_voice::pipeline::Pipeline;
 use ghost_voice::transport::MediaIn;
 use ghost_voice::wakeword::{
-    DETECTOR_PHRASE, Detector, DetectorWakeProcessor, OnHeard, OnMatch, Recognize, Scorer,
+    DETECTOR_PHRASE, Detector, DetectorWakeProcessor, OnCheck, OnHeard, OnMatch, Recognize, Scorer,
 };
 use tokio::sync::{Notify, mpsc, watch};
 use tokio::task::JoinHandle;
@@ -293,7 +293,10 @@ impl Stage for PassiveInput {
         if matches!(frame, Frame::End | Frame::Cancel)
             && let Some(t) = self.task.take()
         {
+            // Awaited, so the capture is closed (dropped with the task) before the
+            // pipeline says it is done and a session opens its own input (ADR 0064).
             t.abort();
+            let _ = t.await;
         }
         out.forward(frame, direction).await;
     }
@@ -301,6 +304,7 @@ impl Stage for PassiveInput {
     async fn stopped(&mut self) {
         if let Some(t) = self.task.take() {
             t.abort();
+            let _ = t.await;
         }
     }
 }
@@ -473,9 +477,14 @@ pub struct WakeListener {
     fuzzy: Mutex<f64>,
     detector: Option<DetectorSpec>,
     on_heard: Mutex<Option<OnHeard>>,
+    /// Each check of a hit, as numbers (the microphone's health, ADR 0064).
+    on_check: Mutex<Option<OnCheck>>,
     running: Mutex<Option<Running>>,
     builds: AtomicUsize,
     backoff: Duration,
+    /// Set by `reopen`: the pipeline that ends next was stopped on purpose; rebuild it at
+    /// once (a fresh capture) rather than after a failure's backoff.
+    reopening: AtomicBool,
 }
 
 impl WakeListener {
@@ -505,9 +514,26 @@ impl WakeListener {
             fuzzy: Mutex::new(fuzzy),
             detector,
             on_heard: Mutex::new(None),
+            on_check: Mutex::new(None),
             running: Mutex::new(None),
             builds: AtomicUsize::new(0),
             backoff: BACKOFF,
+            reopening: AtomicBool::new(false),
+        }
+    }
+
+    /// Report each check of a detector hit (level, words, final) to `on_check`.
+    pub fn set_on_check(&self, on_check: Option<OnCheck>) {
+        *lock(&self.on_check) = on_check;
+    }
+
+    /// Close the microphone and open it again (the Repair, ADR 0064): the running
+    /// pipeline is stopped and `wait` builds a fresh one at once, with a new capture.
+    pub fn reopen(&self) {
+        let running = lock(&self.running).as_ref().map(|r| r.token.clone());
+        if let Some(token) = running {
+            self.reopening.store(true, Ordering::SeqCst);
+            token.cancel();
         }
     }
 
@@ -579,13 +605,16 @@ impl WakeListener {
             Box::new(VadStage::new((self.vad_factory)(vad_params), vad_params)),
         ];
         match &self.detector {
-            Some(spec) => stages.push(Box::new(DetectorWakeProcessor::new(
-                spec.detector(),
-                on_match,
-                lock(&self.on_heard).clone(),
-                self.fuzzy(),
-                (f64::from(s.wake_vad_stop_secs) - f64::from(stop)).max(0.0),
-            ))),
+            Some(spec) => stages.push(Box::new(
+                DetectorWakeProcessor::new(
+                    spec.detector(),
+                    on_match,
+                    lock(&self.on_heard).clone(),
+                    self.fuzzy(),
+                    (f64::from(s.wake_vad_stop_secs) - f64::from(stop)).max(0.0),
+                )
+                .with_on_check(lock(&self.on_check).clone()),
+            )),
             None => {
                 stages.push((self.stt_factory)(vad_params));
                 stages.push(Box::new(WakeMatchStage::new(
@@ -652,6 +681,11 @@ impl WakeListener {
             self.stop().await;
             if let Some(m) = matched {
                 return m;
+            }
+            if self.reopening.swap(false, Ordering::SeqCst) {
+                info!("passive listener: reopening the microphone");
+                backoff = self.backoff;
+                continue;
             }
             // The pipeline ended on its own (device gone, stage failure). Rebuild it
             // rather than sit in "passive" with nobody reading the microphone.
@@ -746,14 +780,58 @@ impl MediaIn for CaptureIn {
     }
 }
 
-/// `GHOST_INPUT_DEVICE`, else `ghost.mic` when there, else the default source, through
-/// `ghost_audio`, opened per pipeline.
-pub fn desk_capture(input_device: Option<String>) -> MediaFactory {
+/// The wake's input through `ghost_audio`, opened per pipeline (ADR 0064): `input()` is
+/// asked each time, so a changed device or a repair is picked up at the next build. One
+/// channel of the device is taken alone when the input names one (`node#N`); nothing named,
+/// `ghost.mic` when it is there, else the default source.
+pub fn desk_capture(input: Arc<dyn Fn() -> ghost_audio::InputSpec + Send + Sync>) -> MediaFactory {
     Arc::new(move || {
-        let capture =
-            ghost_audio::Capture::open(ghost_audio::CaptureConfig::for_input(input_device.clone()))
-                .map_err(|e| e.to_string())?;
+        let spec = input();
+        let capture = ghost_audio::Capture::open(ghost_audio::CaptureConfig {
+            name: "ghost-wake-capture".into(),
+            description: "Ghost (listening for the wake)".into(),
+            ..ghost_audio::CaptureConfig::for_spec(&spec)
+        })
+        .map_err(|e| e.to_string())?;
         Ok(Box::new(CaptureIn(capture)) as Box<dyn MediaIn>)
+    })
+}
+
+/// A passive input whose frames are counted as they pass (ADR 0064): every window's
+/// numbers go to `on_window`; the audio goes on untouched and nothing of it is kept.
+pub struct MeteredIn {
+    pub inner: Box<dyn MediaIn>,
+    pub meter: crate::microphone::Meter,
+    pub on_window: Arc<dyn Fn(crate::microphone::Window) + Send + Sync>,
+}
+
+#[async_trait]
+impl MediaIn for MeteredIn {
+    async fn next_frame(&mut self) -> Option<ghost_voice::frames::Audio> {
+        let f = self.inner.next_frame().await?;
+        if let Some(w) = self.meter.push(&f.samples) {
+            (self.on_window)(w);
+        }
+        Some(f)
+    }
+
+    fn close(&mut self) {
+        self.inner.close();
+    }
+}
+
+/// Wrap a media factory so each input it opens is metered.
+pub fn metered(
+    inner: MediaFactory,
+    on_window: Arc<dyn Fn(crate::microphone::Window) + Send + Sync>,
+) -> MediaFactory {
+    Arc::new(move || {
+        let media = inner()?;
+        Ok(Box::new(MeteredIn {
+            inner: media,
+            meter: crate::microphone::Meter::new(ghost_audio::CAPTURE_RATE),
+            on_window: on_window.clone(),
+        }) as Box<dyn MediaIn>)
     })
 }
 
