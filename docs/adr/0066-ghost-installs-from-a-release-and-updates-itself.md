@@ -66,7 +66,10 @@ the window's storage, exits on its own.
 stream has taken nothing for three seconds (`ghost_audio::playback::StallWatch`) and at once
 after that until it plays again, a session goes on without its chime, the reply shows on
 screen, and the waiting list says once that sound is unavailable (`output:unavailable`, its
-place Settings › Sound), clearing when sound plays out again.
+place Settings › Sound), clearing when sound plays out again. A speaker the settings name
+that is gone falls back to the system's default output, as a missing microphone does; when
+no output opens at all, the session runs with a silent one, answers on screen, and the same
+note says why.
 
 **The app updates itself, on the operator's button only** (`updater.rs` in the shell,
 `tauri-plugin-updater` 2.14.1). The installed app checks
