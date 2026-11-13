@@ -25,6 +25,7 @@ import type {
   GhostEvent,
   ModelDraft,
   ModelsView,
+  SpeechModelsView,
   OutcomeView,
   OutputInfo,
   PendingProposal,
@@ -220,6 +221,8 @@ export class MockDaemon {
   );
   private devices: DevicesView;
   private models: ModelsView;
+  /** When the mock's speech download began (ADR 0066): it takes eight seconds. */
+  private speechStarted: number | null = null;
   private voices: VoiceInfo[];
   private phone: PhoneView;
   private pairing: PhonePairing | null = null;
@@ -702,6 +705,30 @@ export class MockDaemon {
   }
   private conversationEvent(changed: string | null) {
     this.emit({ type: "conversation", active: this.status.session_id ? (this.status.conversation ?? null) : null, changed });
+  }
+
+  /**
+   * The speech models (ADR 0066): every file here (loaded or loading) unless the address says
+   * `&speech=missing`, a fresh install's 2.9 GB, which Download fetches in eight seconds.
+   */
+  private speech(): SpeechModelsView {
+    const total = 2_903_552_740;
+    const base = { folder: "/home/you/.cache/ghost/models/parakeet-tdt-0.6b-v3", free_bytes: 120e9 };
+    const fresh = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("speech") === "missing";
+    if (this.models.ready || (!fresh && this.speechStarted === null)) return { ...base, ready: this.models.ready, missing: [], missing_bytes: 0, fetch: { state: "idle", done_bytes: 0, total_bytes: 0, file: null, error: null } };
+    const missing = [
+      { model: "Parakeet", name: "encoder-model.onnx.data", bytes: 2_435_420_160 },
+      { model: "Kokoro", name: "kokoro-v1.0.onnx", bytes: 325_532_387 },
+    ];
+    if (this.speechStarted === null) return { ...base, ready: false, missing, missing_bytes: total, fetch: { state: "idle", done_bytes: 0, total_bytes: 0, file: null, error: null } };
+    const share = Math.min(1, (Date.now() - this.speechStarted) / 8000);
+    if (share >= 1) {
+      this.models = { ...this.models, ready: true, kokoro_present: true };
+      this.status = { ...this.status, models_ready: true };
+      return { ...base, ready: true, missing: [], missing_bytes: 0, fetch: { state: "done", done_bytes: total, total_bytes: total, file: null, error: null } };
+    }
+    const done = Math.round(total * share);
+    return { ...base, ready: false, missing, missing_bytes: total - done, fetch: { state: "fetching", done_bytes: done, total_bytes: total, file: share < 0.85 ? "encoder-model.onnx.data" : "kokoro-v1.0.onnx", error: null } };
   }
 
   // ------------------------------------------------------------------ session
@@ -1637,6 +1664,8 @@ export class MockDaemon {
       return { ok: true, detail: uninstall ? "Removed the ghost.mic echo-cancel source." : "Installed ghost.mic." };
     }
     if (method === "GET" && path === "/setup/models") return this.models;
+    if (method === "GET" && path === "/speech-models") return this.speech();
+    if (method === "POST" && path === "/speech-models/fetch") return (this.speechStarted ??= Date.now()), this.speech();
     if (method === "GET" && path === "/voices") return this.voices;
     if (method === "POST" && (r = m(/^\/voices\/([^/]+)\/sample$/))) {
       this.requireReady();

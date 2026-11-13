@@ -38,7 +38,9 @@ def plain_notes(text: str) -> str:
 
 
 def artifact(folder: Path, suffix: str, version: str) -> Path:
-    found = sorted(p for p in folder.iterdir() if p.name.endswith(suffix) and f"_{version}_" in p.name)
+    found = sorted(
+        p for p in folder.iterdir() if p.name.endswith(suffix) and f"_{version}_" in p.name
+    )
     if len(found) != 1:
         names = ", ".join(p.name for p in found) or "none"
         raise ManifestError(f"one *_{version}_*{suffix} expected in {folder}, found {names}")

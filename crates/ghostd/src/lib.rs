@@ -31,6 +31,7 @@ pub mod reply_duck;
 pub mod routes;
 pub mod schedules;
 pub mod session;
+pub mod speech_models;
 pub mod wake;
 pub mod wake_detectors;
 pub mod wake_takes;

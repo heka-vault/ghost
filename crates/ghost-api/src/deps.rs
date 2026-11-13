@@ -299,6 +299,8 @@ pub struct Deps {
     pub hear: Option<Arc<dyn crate::hear::HearPort>>,
     /// Kept wake takes (ADR 0065); None in a daemon without a wake listener.
     pub wake_takes: Option<Arc<dyn crate::wake_takes::WakeTakesPort>>,
+    /// The speech models the bundle does not carry, and their download (ADR 0066).
+    pub speech_models: Option<Arc<dyn crate::speech_models::SpeechModelsPort>>,
     /// The schedules and their runs (ADR 0047); None in a daemon without them.
     pub schedules: Option<Arc<ghost_core::schedules::Scheduler>>,
     /// The outside tools the operator connected (ADR 0048).
@@ -357,6 +359,7 @@ impl Deps {
             model_sign_in: ModelSignIn::default(),
             hear: None,
             wake_takes: None,
+            speech_models: None,
             schedules: None,
             clients: None,
             clients_listening: Vec::new(),

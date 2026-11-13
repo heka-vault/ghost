@@ -490,7 +490,11 @@ async fn a_model_that_wont_load_is_waited_for_not_a_crash() {
         text.contains("models:missing"),
         "the waiting list names it: {text}"
     );
-    assert!(text.contains("not loaded"), "and says so in words: {text}");
+    // ADR 0066: files that are not here are said as that, with where to get them.
+    assert!(
+        text.contains("not loaded") || text.contains("not downloaded yet"),
+        "and says so in words: {text}"
+    );
 
     until(client, "passive once the models load", |v| {
         v["phase"] == "passive" && v["models_ready"] == true

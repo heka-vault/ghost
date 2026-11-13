@@ -10,7 +10,9 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-_spec = importlib.util.spec_from_file_location("ghost_release_manifest", ROOT / "tools/release_manifest.py")
+_spec = importlib.util.spec_from_file_location(
+    "ghost_release_manifest", ROOT / "tools/release_manifest.py"
+)
 assert _spec and _spec.loader
 rm = importlib.util.module_from_spec(_spec)
 sys.modules[_spec.name] = rm
@@ -21,7 +23,10 @@ NOW = dt.datetime(2026, 11, 13, 12, 0, tzinfo=dt.UTC)
 
 
 def bundle(tmp: Path, version: str = "2026.11.1") -> Path:
-    for name in (f"heka-ghost-desktop_{version}_amd64.AppImage", f"heka-ghost-desktop_{version}_amd64.deb"):
+    for name in (
+        f"heka-ghost-desktop_{version}_amd64.AppImage",
+        f"heka-ghost-desktop_{version}_amd64.deb",
+    ):
         (tmp / name).write_bytes(b"x")
         (tmp / f"{name}.sig").write_text(f"sig-of-{name}\n")
     return tmp

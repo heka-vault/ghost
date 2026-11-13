@@ -10,7 +10,10 @@ import { Offline } from "./Offline";
 import { hrefFor, navigate, usePath } from "./router";
 import { SETTINGS_PAGES, redirectFor, resolve, settingsPageOf } from "./routes";
 import { SettingsFrame } from "./SettingsFrame";
-import { useSetupNeeded } from "./setup";
+import { opensFirstRun, useSetupNeeded } from "./setup";
+import { parseSaved, storageKey } from "../screens/onboarding/state";
+import { gb, useSpeechModels } from "../screens/onboarding/speech";
+import { useGhost } from "@ghost/ui";
 import { PostureProvider, usePosture } from "./PostureContext";
 import { Rail } from "./Rail";
 import { Room } from "./Room";
@@ -33,6 +36,10 @@ export function App() {
   const settingsPage = match?.route.area === "settings" ? settingsPageOf(path) : null;
   const { state, phase, loadingModels } = useConnection();
   const design = useDesign();
+  const { client } = useGhost();
+  // ADR 0066: while the models aren't loaded, whether it is because they aren't downloaded.
+  const speech = useSpeechModels(client, state === "online" && loadingModels).view;
+  const speechMissing = !!speech && speech.missing.length > 0;
   const setup = useSetupNeeded(path, state === "online");
   const setupNeeded = setup.needed;
   // A screen whose focal point is the setup prompt itself (the session's start state) claims
@@ -42,6 +49,20 @@ export function App() {
   // A locked keyring (ADR 0036) is fixed on Passwords, by unlocking: nothing to set up.
   const passwordsPage = SETTINGS_PAGES.find((p) => p.id === "passwords") ?? SETTINGS_PAGES[0];
   const setupHref = hrefFor(setup.locked ? passwordsPage.path : "/welcome");
+  // ADR 0066: a fresh install lands in the first run, once.
+  const firstRunOpened = useRef(false);
+  useEffect(() => {
+    if (firstRunOpened.current || !setupNeeded) return;
+    firstRunOpened.current = true;
+    let seen = true;
+    try {
+      const saved = parseSaved(localStorage.getItem(storageKey(null)));
+      seen = saved.finished || saved.step !== null;
+    } catch {
+      seen = true;
+    }
+    if (opensFirstRun({ path, needed: setupNeeded, locked: setup.locked, welcomeSeen: seen, design: !!design })) navigate("/welcome", { replace: true });
+  }, [setupNeeded, setup.locked, path, design]);
   const live = useMemo<LiveState>(
     () => ({ connection: state, phase, online: state === "online", loadingModels, setupNeeded, setupLocked: setup.locked, setupHref, claimSetupPrompt }),
     [state, phase, loadingModels, setupNeeded, setup.locked, setupHref, claimSetupPrompt],
@@ -151,10 +172,27 @@ export function App() {
           {state === "online" && loadingModels && (
             <div className="shell-banner shell-banner--loading" role="status">
               {/* One signal: the progress line. No spinning icon, no second amber mark. */}
-              <span>
-                <strong>Ghost is loading its voice models.</strong> It can’t hear you until they’re ready, usually under a minute.
-              </span>
-              <Progress label="Loading voice models" className="shell-banner__progress" />
+              {speechMissing && speech?.fetch.state === "fetching" ? (
+                <>
+                  <span>
+                    <strong>Downloading Ghost’s ears and voice.</strong> {gb(speech.fetch.done_bytes)} of {gb(speech.fetch.total_bytes)}; it can’t hear or speak until they’re here.
+                  </span>
+                  <Progress value={speech.fetch.total_bytes ? (speech.fetch.done_bytes / speech.fetch.total_bytes) * 100 : undefined} label="Downloading the speech models" className="shell-banner__progress" />
+                </>
+              ) : speechMissing ? (
+                <span>
+                  <strong>Ghost’s ears and voice aren’t downloaded yet</strong> ({gb(speech.missing_bytes)}).{" "}
+                  {speech.fetch.state === "failed" ? `The download stopped: ${speech.fetch.error ?? "no reason given"}. ` : ""}
+                  <a href={hrefFor("/settings/sound/models")}>Download them in Settings › Sound</a>, or from the first run.
+                </span>
+              ) : (
+                <>
+                  <span>
+                    <strong>Ghost is loading its voice models.</strong> It can’t hear you until they’re ready, usually under a minute.
+                  </span>
+                  <Progress label="Loading voice models" className="shell-banner__progress" />
+                </>
+              )}
             </div>
           )}
           {state === "online" && !loadingModels && setupNeeded && !setupHere && (

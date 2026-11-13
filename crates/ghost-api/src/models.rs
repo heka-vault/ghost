@@ -173,7 +173,7 @@ pub struct Status {
     pub session_id: Option<String>,
     pub models_ready: bool,
     pub uptime_secs: f64,
-    /// YYYY.M.N, the same in every copy (`scripts/version.py`).
+    /// YYYY.M.N, the same in every copy (`tools/version.py`).
     pub version: String,
     #[serde(default)]
     #[schema(required)]

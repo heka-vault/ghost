@@ -54,6 +54,8 @@ import { ListeningButton } from "../../app/ListeningSwitch";
 import { RoomSettings } from "../../app/RoomSettings";
 import { listeningSentence, notListening } from "../../app/listening";
 import { VersionNotice, VersionRows } from "./About";
+import { UpdatesSection } from "./Updates";
+import { SpeechModelsRow } from "../onboarding/speech";
 import { type RouteProps, SETTINGS_PAGES, SETTINGS_SCREEN_PAGES } from "../../app/routes";
 import { type SettingsMark, type SettingsMarks, setSettingsMarks } from "../../app/settingsMarks";
 import { useDesign } from "../../design/context";
@@ -937,6 +939,7 @@ export default function SettingsScreen({ params: route }: RouteProps) {
                 />
               </Card>
             </Section>
+            <UpdatesSection />
             {mock && Prototype && (
               <Suspense fallback={null}>
                 <Prototype only="privacy" />
@@ -1333,25 +1336,12 @@ export default function SettingsScreen({ params: route }: RouteProps) {
               className="set-section"
             >
               <Card list>
-                {models && !models.ready && (
-                  <Row className="set-loading">
-                    <p className="set-label">Loading voice models…</p>
-                    <Progress label="Loading voice models" />
-                    <p className="set-help">Ghost can’t hear its wake phrase until this finishes. The first start can take a few minutes.</p>
-                  </Row>
-                )}
+                {/* ADR 0066: the download, its progress and why it stopped. */}
+                <SpeechModelsRow client={client} online={!!status} />
                 <ListRow
                   title="Speaking voice"
                   description="Kokoro, on this computer."
-                  meta={
-                    !models ? undefined : models.kokoro_present ? (
-                      <Badge tone="ok" size="sm" dot>Downloaded</Badge>
-                    ) : !models.ready ? (
-                      <Badge tone="warn" size="sm" dot>Downloading…</Badge>
-                    ) : (
-                      <Badge size="sm">Downloads on first start</Badge>
-                    )
-                  }
+                  meta={!models ? undefined : models.kokoro_present ? <Badge tone="ok" size="sm" dot>Here</Badge> : <Badge size="sm">Not here yet</Badge>}
                 />
                 <ListRow title="Speech to text" description="Parakeet, on this computer." meta={<span className="set-value is-mono">{models?.stt_model ?? "–"}</span>} />
                 <ListRow title="Model cache" description="Delete this folder to download the models again." meta={<span className="set-value is-mono">{models ? tildePath(models.cache_dir) : "–"}</span>} />

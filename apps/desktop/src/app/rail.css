@@ -226,3 +226,5 @@
   .room-layer, .room-layer__glow, .rail__pulse, .room-work__live, .rail__presence .rail__wisp::after, .rail__agent .rail__agent-mark::after { animation: none !important; }
   .posture__desk, .shell, .rail, .shell__main { transition: none !important; }
 }
+/* A new version (ADR 0066): quiet, in the accent, never a badge that counts. */
+.rail__update .rail__icon { color: var(--accent); }

@@ -53,3 +53,13 @@ export function useSetupNeeded(path: string, online: boolean): SetupState {
 
   return { needed: online && state.needed, locked: online && state.needed && state.locked };
 }
+
+/**
+ * A fresh install opens the first run by itself (ADR 0066), once: from Today, while Ghost
+ * can't answer yet, before the operator has ever opened setup. After that the banner points
+ * at it and nothing moves them again. Never on a locked keyring (Passwords fixes that), never
+ * in the mock's designed states.
+ */
+export function opensFirstRun(o: { path: string; needed: boolean; locked: boolean; welcomeSeen: boolean; design: boolean }): boolean {
+  return !o.design && o.path === "/" && o.needed && !o.locked && !o.welcomeSeen;
+}

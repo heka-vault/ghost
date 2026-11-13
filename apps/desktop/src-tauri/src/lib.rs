@@ -10,6 +10,7 @@ mod bridge;
 pub mod floating;
 mod supervisor;
 mod tray;
+mod updater;
 
 use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
@@ -106,6 +107,9 @@ pub fn run() {
             tray::show_window(app);
         }))
         .plugin(tauri_plugin_opener::init())
+        // ADR 0066: the window's "Update and restart" (updater.rs); the endpoint and the
+        // public key are tauri.conf.json's.
+        .plugin(tauri_plugin_updater::Builder::new().build())
         // At login the app starts in the tray; Open Ghost shows the window.
         .plugin(
             tauri_plugin_autostart::Builder::new()
@@ -126,7 +130,12 @@ pub fn run() {
             daemon_start,
             floating::floating_status,
             floating::floating_set,
-            floating::stage::stage_open
+            floating::stage::stage_open,
+            updater::update_view,
+            updater::update_check,
+            updater::update_set_check,
+            updater::update_install,
+            updater::update_cancel
         ])
         .setup(|app| {
             let floating = floating::setup(app.handle());
@@ -141,6 +150,8 @@ pub fn run() {
                 let _ = w.hide();
             }
             autostart::apply(app.handle());
+            app.manage(updater::Updater::new(app.handle()));
+            updater::start(app.handle());
             let handle = start_supervisor(app.handle());
             *app.state::<Daemon>().handle.lock().unwrap() = Some(handle);
             // Logout or a terminal's Ctrl+C: the same clean stop as Quit.

@@ -36,7 +36,36 @@ see [What's rough](#whats-rough). Linux only today.
   and tells you; set what it must ask about first in Settings › Permissions.
 - **It is early software**, built on one desk. Linux only. See [What's rough](#whats-rough).
 
-## Quick start
+## Install
+
+On Ubuntu 24.04 or 26.04 (x86-64), from the [latest release](https://github.com/heka-vault/ghost/releases/latest):
+
+1. **Download** `heka-ghost-desktop_<version>_amd64.deb` (or the `.AppImage`, below).
+2. **Install** it: open it with App Center, or
+   `sudo apt install ./heka-ghost-desktop_<version>_amd64.deb`. apt brings what it needs
+   (WebKitGTK and eSpeak NG).
+3. **Open Ghost** from the app menu. The first run walks you through the rest: its ears and
+   voice (Parakeet and Kokoro, 2.9 GB, downloaded once by the app with progress; nothing is
+   left for you to fetch by hand), connecting a model (a key from Anthropic, OpenRouter or
+   OpenAI, or a local Ollama or LM Studio), the microphone, the wake word, a voice, an app, an
+   agent and a first question. Each step can be skipped.
+
+**The AppImage** runs on other distributions too: `chmod +x heka-ghost-desktop_*.AppImage`
+and run it. It needs FUSE 2 (`libfuse2t64` on Ubuntu 24.04); without it, run it with
+`--appimage-extract-and-run`.
+
+**No microphone?** Ghost still works typed: the first run's microphone and wake steps can be
+skipped, and typing to Ghost needs no microphone (it answers out loud on your speakers and
+on screen). Turn listening off (the switch by the brand, or Settings › Sound) to keep it
+from looking for one.
+
+**Updates.** Ghost checks for a new release when it starts and once a day, and says
+"Update available" on the rail; Settings › General shows what's new and has **Update and
+restart** (the .deb asks for your password once; the AppImage replaces itself). The check is
+one request to GitHub carrying nothing about you; turn it off there. Your settings, agents
+and memory in `~/.config/ghost` and `~/.local/share/ghost` stay as they are.
+
+## Build from source
 
 You need a Linux desktop with PipeWire (Ubuntu 24.04 or later, Fedora, Arch and the like), about
 15 GB of disk, 8 GB of RAM (16 to build comfortably), a microphone and speakers or a headset, and
@@ -201,8 +230,8 @@ With `make dev` running and the window open:
 - **The phone app** (`apps/mobile`, Android) needs your own build (`make android`, with the
   Android SDK and JDK 17) and pairing on your own network:
   [docs/phone-protocol.md](docs/phone-protocol.md).
-- **Linux only**, x86-64 checked. The installable bundle (`make bundle`, a .deb and an
-  AppImage) builds but has not been tried on other people's machines.
+- **Linux only**, x86-64 checked. The release's .deb and AppImage are checked in clean
+  Ubuntu 24.04 and 26.04 containers, not yet on many people's machines.
 - **First-run sharp edges**: a provider's model list loads from the provider, so it needs the key
   first; an app that won't connect says so on the Apps page and in `make check`.
 
@@ -237,6 +266,12 @@ nothing does with a local model. Your voice is sent only if you choose the realt
 (Settings › Sound, off by default), and then only during a conversation, to that provider.
 Connected apps get the requests Ghost makes to them. Passwords are in an encrypted vault keyed
 by your login keyring and are never shown, logged or given to the model.
+
+**What Ghost itself fetches:** an installed Ghost asks GitHub once when it starts and once a
+day whether there is a new release (one request for the release's `latest.json`, with no
+identifier; turn it off in Settings › General › Updates), and downloads a new version only
+when you press Update and restart. The first run downloads the speech models once, from their
+publishers on Hugging Face and GitHub.
 
 ## How it is built
 

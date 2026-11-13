@@ -39,6 +39,7 @@ import { GhostVoice } from "../settings/GhostVoice";
 import { CONNECTION_KEYS, micOptions, validateConnection } from "../settings/model";
 import { ModelSection } from "../settings/ModelSection";
 import { HeroPresence, StepFrame } from "./frame";
+import { SpeechModelsRow, useSpeechModels } from "./speech";
 import type { Wizard } from "./index";
 import { firstSentence, inputName, phraseCase, splitList, wakeHelp } from "./state";
 import { keeping } from "../hear/wakeTakes";
@@ -117,13 +118,22 @@ const PROMISES = [
 
 export function WelcomeStep({ w }: { w: Wizard }) {
   const back = w.returning;
+  const { online } = useLive();
+  // ADR 0066: Ghost's ears and voice are not in the bundle. Get started also starts their
+  // download, so it runs while the model and the microphone are set up.
+  const speech = useSpeechModels(w.client, online);
+  const missing = !!speech.view && speech.view.missing.length > 0 && speech.view.fetch.state !== "fetching";
+  const start = () => {
+    if (missing) void speech.fetch();
+    w.next();
+  };
   return (
     <StepFrame
       id="welcome"
       lead={<GhostMark size={40} />}
       title={back ? "Welcome back" : "Welcome to Ghost"}
       description={back ? "Pick up where you left off." : "Seven short steps to your first spoken answer. Skip any of them; setup picks up where you stop."}
-      primary={back ? { label: "Continue setup", onClick: () => w.go(w.progress.next) } : { label: "Get started", onClick: w.next }}
+      primary={back ? { label: "Continue setup", onClick: () => w.go(w.progress.next) } : { label: "Get started", onClick: start }}
       autoFocus={w.focusOnOpen}
     >
       <ul className="onb-promises" aria-label="What Ghost promises">
@@ -139,6 +149,11 @@ export function WelcomeStep({ w }: { w: Wizard }) {
           </li>
         ))}
       </ul>
+      {speech.view && speech.view.missing.length > 0 && (
+        <p className="onb-promise__body">
+          {speech.view.fetch.state === "fetching" ? "Ghost’s ears and voice are downloading; setup carries on meanwhile." : `Get started also downloads Ghost’s ears and voice, ${(speech.view.missing_bytes / 1e9).toFixed(1)} GB, while you set up the rest.`}
+        </p>
+      )}
     </StepFrame>
   );
 }
@@ -411,11 +426,7 @@ export function HearStep({ w }: { w: Wizard }) {
             </label>
             <Select id="onb-mic" value={value} onChange={(e) => setDevice(e.target.value)} options={micOptions(d, value)} />
           </div>
-          <ListRow
-            title="Speech models"
-            description={speech ? "Ghost’s ears and voice are on this computer." : "Ghost downloads them once, about 1.6 GB, when it starts. After that speech never needs the internet."}
-            trailing={speech ? <Badge tone="ok" dot>Here</Badge> : speech === false ? <Badge>Downloading at start</Badge> : <Skeleton width={80} height={20} />}
-          />
+          <SpeechModelsRow client={w.client} online={live.online} />
         </Card>
       )}
     </StepFrame>

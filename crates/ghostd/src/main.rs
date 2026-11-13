@@ -165,6 +165,8 @@ fn main() -> anyhow::Result<()> {
             std::process::exit(ghost_voice::perf::cli::main(&args[1..]))
         }
         Some("llm") => std::process::exit(llm(&args[1..])),
+        // ADR 0066: the speech models the bundle does not carry, for a desk with no display
+        Some("models") => std::process::exit(speech_models(&args[1..])),
         Some("mcp") => {
             let cfg = GhostdSettings::load()?;
             if args.get(1).map(String::as_str) == Some("serve") {
@@ -188,7 +190,7 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Some(other) => anyhow::bail!(
-            "unknown command {other:?}; commands: run, status, wake, say, sleep, check, push, latency, llm, perf, restore-volumes, passwords, mcp, api-schema, version"
+            "unknown command {other:?}; commands: run, status, wake, say, sleep, check, models, push, latency, llm, perf, restore-volumes, passwords, mcp, api-schema, version"
         ),
     }
 }
@@ -301,6 +303,20 @@ async fn llm(args: &[String]) -> i32 {
         &mut std::io::stderr(),
     )
     .await
+}
+
+/// `ghostd models [list|fetch]`: the files the daemon's settings name, by the same pins
+/// the app's download uses (ADR 0066). No vault: nothing here needs a password.
+#[tokio::main]
+async fn speech_models(args: &[String]) -> i32 {
+    let env: HashMap<String, String> = std::env::vars().collect();
+    match settings_from(&env) {
+        Ok((_, voice)) => ghostd::speech_models::cli(args, &voice, &mut std::io::stdout()).await,
+        Err(e) => {
+            eprintln!("{e}");
+            2
+        }
+    }
 }
 
 /// `ghostd mcp serve`: a tool's stdin and stdout to the running daemon (ADR 0048).

@@ -400,6 +400,8 @@ pub struct Late {
     pub wake_takes: OnceLock<Arc<ghost_core::wake_takes::Takes>>,
     /// The outside tools and their listener (ADR 0048).
     pub outside: OnceLock<Arc<crate::outside::OutsideHost>>,
+    /// The speech models' download (ADR 0066).
+    pub speech_models: OnceLock<Arc<crate::speech_models::SpeechModelsDesk>>,
 }
 
 /// What a session with any agent reaches (ADR 0034, ADR 0035).
@@ -432,6 +434,8 @@ pub struct Daemon {
     /// The connection is too slow for a good spoken reply (ADR 0056); on the waiting list.
     pub(crate) model_slow: Mutex<Option<ghost_llm::check::Slow>>,
     models_retry: std::time::Duration,
+    /// A download of the speech models ended (ADR 0066): the load tries again at once.
+    models_kick: Arc<tokio::sync::Notify>,
     pub late: Late,
     /// The agents, with the voices once Kokoro is loaded.
     pub conversations: Mutex<Option<Arc<Conversations>>>,
@@ -515,6 +519,7 @@ impl Daemon {
             realtime_check: Mutex::new(None),
             model_slow: Mutex::new(None),
             models_retry: MODELS_RETRY,
+            models_kick: Arc::new(tokio::sync::Notify::new()),
             late: Late::default(),
             conversations: Mutex::new(None),
             reach: Mutex::new(None),
@@ -2227,11 +2232,18 @@ impl Daemon {
                         "models: {e}; trying again in {} s (ghostd check says what is missing)",
                         d.models_retry.as_secs_f64()
                     );
-                    *lock(&d.models_problem) =
-                        Some(format!("Ghost's speech models are not loaded: {e}"));
+                    // ADR 0066: files that are simply not here yet are said as that, with
+                    // where to get them, not as the loader's error.
+                    let missing = crate::speech_models::missing(&d.voice());
+                    *lock(&d.models_problem) = Some(if missing.is_empty() {
+                        format!("Ghost's speech models are not loaded: {e}")
+                    } else {
+                        crate::speech_models::missing_note(&missing)
+                    });
                     d.refresh_waiting_now();
                     tokio::select! {
                         _ = tokio::time::sleep(d.models_retry) => {}
+                        _ = d.models_kick.notified() => {}
                         _ = d.stop.cancelled() => break None,
                     }
                 }
@@ -2597,6 +2609,19 @@ impl Daemon {
         }
     }
 
+    /// The speech models' download (ADR 0066), made once.
+    pub fn speech_models(self: &Arc<Self>) -> Arc<crate::speech_models::SpeechModelsDesk> {
+        self.late
+            .speech_models
+            .get_or_init(|| {
+                crate::speech_models::SpeechModelsDesk::new(
+                    Arc::downgrade(self),
+                    self.models_kick.clone(),
+                )
+            })
+            .clone()
+    }
+
     /// The recorder, made once, before the API that serves it.
     fn hear_desk(self: &Arc<Self>) -> Arc<dyn ghost_api::HearPort> {
         let cfg = self.cfg();
@@ -2655,6 +2680,7 @@ impl Daemon {
                 self.wake_takes(),
                 Arc::downgrade(self),
             )),
+            speech_models: Some(self.speech_models()),
             schedules: Some(p.schedules),
             clients: Some(p.clients),
             clients_listening: p.clients_listening,
