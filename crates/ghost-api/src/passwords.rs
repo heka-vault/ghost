@@ -33,6 +33,8 @@ use crate::models::{
 
 /// GHOST_USES's word for a key only the model reads.
 pub const MODEL_USE: &str = "The model connection";
+/// What the realtime voice's key is listed as being used by (ADR 0062).
+pub const REALTIME_USE: &str = "The realtime voice";
 /// Keys only one model provider uses: not listed until set, unless that provider is chosen.
 pub const PROVIDER_ONLY: [&str; 3] = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "LLM_API_KEY"];
 /// Ghost's own passwords the Settings view lists set-or-not for (the rest is `/passwords`).
@@ -106,6 +108,15 @@ pub fn used_by(deps: &Deps) -> IndexMap<String, Vec<String>> {
     let named = model_password(deps, &settings);
     if !named.is_empty() && ghost_use(&named).is_none() {
         out.entry(named).or_default().push(MODEL_USE.to_string());
+    }
+    // The realtime voice's key, when it is chosen (ADR 0062).
+    let env = env_with(deps, &settings);
+    if let Ok(rt) = ghost_core::realtime::RealtimeSettings::from_vars(|k| env.get(k).cloned())
+        && rt.on
+    {
+        out.entry(rt.password)
+            .or_default()
+            .push(REALTIME_USE.to_string());
     }
     out
 }

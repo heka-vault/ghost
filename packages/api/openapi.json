@@ -4289,6 +4289,240 @@
         ],
         "type": "object"
       },
+      "RealtimeCheckView": {
+        "properties": {
+          "checked_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "connect_ms": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "error": {
+            "description": "In plain words, never with the key.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "first_audio_ms": {
+            "description": "From asking for a line to its first audio.",
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "model": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "reachable": {
+            "type": "boolean"
+          },
+          "tools": {
+            "description": "Whether a request was handed to Ghost's agent; null when not tried.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "usd": {
+            "description": "What the check itself cost, estimated, in US dollars.",
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "checked_at",
+          "provider",
+          "model",
+          "reachable",
+          "usd"
+        ],
+        "type": "object"
+      },
+      "RealtimeModelView": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title"
+        ],
+        "type": "object"
+      },
+      "RealtimeProviderView": {
+        "properties": {
+          "default_model": {
+            "type": "string"
+          },
+          "default_voice": {
+            "type": "string"
+          },
+          "disclosure": {
+            "description": "What turning it on changes, in plain words, shown before it is on.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/RealtimeModelView"
+            },
+            "type": "array"
+          },
+          "password": {
+            "description": "The password's name it reads by default.",
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "voices": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "models",
+          "default_model",
+          "voices",
+          "default_voice",
+          "password",
+          "disclosure"
+        ],
+        "type": "object"
+      },
+      "RealtimeSpendView": {
+        "properties": {
+          "day": {
+            "description": "The local date the figures are for.",
+            "type": "string"
+          },
+          "last_session_usd": {
+            "description": "The last realtime session's estimate in US dollars.",
+            "format": "double",
+            "type": "number"
+          },
+          "priced": {
+            "description": "Whether Ghost knows the chosen model's prices (an unknown model has no estimate).",
+            "type": "boolean"
+          },
+          "prices_as_of": {
+            "description": "When the prices the estimate uses were read from the provider.",
+            "type": "string"
+          },
+          "sessions": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "usd": {
+            "description": "Today's estimate in US dollars.",
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "day",
+          "usd",
+          "sessions",
+          "last_session_usd",
+          "prices_as_of",
+          "priced"
+        ],
+        "type": "object"
+      },
+      "RealtimeView": {
+        "properties": {
+          "daily_cap_usd": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "last_check": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RealtimeCheckView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "mode": {
+            "description": "`local` (the default) or `realtime`.",
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "password": {
+            "description": "The password's name; whether the vault holds it.",
+            "type": "string"
+          },
+          "password_set": {
+            "type": "boolean"
+          },
+          "problem": {
+            "description": "A saved setting that does not read, in plain words.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provider": {
+            "type": "string"
+          },
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/RealtimeProviderView"
+            },
+            "type": "array"
+          },
+          "spend": {
+            "$ref": "#/components/schemas/RealtimeSpendView"
+          },
+          "voice": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode",
+          "provider",
+          "model",
+          "voice",
+          "password",
+          "password_set",
+          "providers",
+          "spend"
+        ],
+        "type": "object"
+      },
       "RoutesView": {
         "description": "`[routes]` in the policy file (ADR 0031): how Ghost reaches the operator.",
         "properties": {
@@ -10327,6 +10561,53 @@
         "summary": "Get Status",
         "tags": [
           "session"
+        ]
+      }
+    },
+    "/voice/realtime": {
+      "get": {
+        "description": "The realtime voice (ADR 0062): the mode (local by default), the provider, model,\nvoice and password's name, whether the vault holds it, the daily cap, what turning it on\nchanges in plain words, today's spend estimate and the latest check. Saved through\nPUT /settings; the key through the passwords.",
+        "operationId": "realtime_voice_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RealtimeView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Realtime Voice",
+        "tags": [
+          "voice"
+        ]
+      }
+    },
+    "/voice/realtime/check": {
+      "post": {
+        "description": "Check the realtime connection with the saved settings (ADR 0062): whether it\nanswers, the time to its first audio for a fixed line, and whether a fixed request is\nhanded to Ghost's agent. Nothing of the operator's is sent; the key is read from the\nvault by the daemon and never shown. Costs a fraction of a cent.",
+        "operationId": "realtime_voice_check_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RealtimeCheckView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "503": {
+            "description": "Ghost can't check the realtime voice now"
+          }
+        },
+        "summary": "Realtime Voice Check",
+        "tags": [
+          "voice"
         ]
       }
     },

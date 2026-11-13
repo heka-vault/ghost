@@ -463,6 +463,7 @@ fn world_setup(setup: Setup) -> World {
         latency_log: None,
         reach: None,
         context_note: None,
+        realtime: None,
     });
     World {
         session,

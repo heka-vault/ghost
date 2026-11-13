@@ -749,6 +749,7 @@ impl Bench {
                     as crate::conversation::Reach
             }),
             context_note: None,
+            realtime: None,
         });
         session.start(true).await;
         let session = Arc::new(session);

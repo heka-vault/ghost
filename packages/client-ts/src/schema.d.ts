@@ -1638,6 +1638,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/voice/realtime": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Realtime Voice
+         * @description The realtime voice (ADR 0062): the mode (local by default), the provider, model,
+         *     voice and password's name, whether the vault holds it, the daily cap, what turning it on
+         *     changes in plain words, today's spend estimate and the latest check. Saved through
+         *     PUT /settings; the key through the passwords.
+         */
+        get: operations["realtime_voice_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/voice/realtime/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Realtime Voice Check
+         * @description Check the realtime connection with the saved settings (ADR 0062): whether it
+         *     answers, the time to its first audio for a fixed line, and whether a fixed request is
+         *     handed to Ghost's agent. Nothing of the operator's is sent; the key is read from the
+         *     vault by the daemon and never shown. Costs a fraction of a cent.
+         */
+        post: operations["realtime_voice_check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/voices": {
         parameters: {
             query?: never;
@@ -3178,6 +3224,82 @@ export interface components {
             description: string;
             name: string;
         };
+        RealtimeCheckView: {
+            /** Format: date-time */
+            checked_at: string;
+            /** Format: int64 */
+            connect_ms?: number | null;
+            /** @description In plain words, never with the key. */
+            error?: string | null;
+            /**
+             * Format: int64
+             * @description From asking for a line to its first audio.
+             */
+            first_audio_ms?: number | null;
+            model: string;
+            provider: string;
+            reachable: boolean;
+            /** @description Whether a request was handed to Ghost's agent; null when not tried. */
+            tools?: boolean | null;
+            /**
+             * Format: double
+             * @description What the check itself cost, estimated, in US dollars.
+             */
+            usd: number;
+        };
+        RealtimeModelView: {
+            id: string;
+            title: string;
+        };
+        RealtimeProviderView: {
+            default_model: string;
+            default_voice: string;
+            /** @description What turning it on changes, in plain words, shown before it is on. */
+            disclosure: string[];
+            id: string;
+            models: components["schemas"]["RealtimeModelView"][];
+            /** @description The password's name it reads by default. */
+            password: string;
+            title: string;
+            voices: string[];
+        };
+        RealtimeSpendView: {
+            /** @description The local date the figures are for. */
+            day: string;
+            /**
+             * Format: double
+             * @description The last realtime session's estimate in US dollars.
+             */
+            last_session_usd: number;
+            /** @description Whether Ghost knows the chosen model's prices (an unknown model has no estimate). */
+            priced: boolean;
+            /** @description When the prices the estimate uses were read from the provider. */
+            prices_as_of: string;
+            /** Format: int64 */
+            sessions: number;
+            /**
+             * Format: double
+             * @description Today's estimate in US dollars.
+             */
+            usd: number;
+        };
+        RealtimeView: {
+            /** Format: double */
+            daily_cap_usd?: number | null;
+            last_check?: components["schemas"]["RealtimeCheckView"] | null;
+            /** @description `local` (the default) or `realtime`. */
+            mode: string;
+            model: string;
+            /** @description The password's name; whether the vault holds it. */
+            password: string;
+            password_set: boolean;
+            /** @description A saved setting that does not read, in plain words. */
+            problem?: string | null;
+            provider: string;
+            providers: components["schemas"]["RealtimeProviderView"][];
+            spend: components["schemas"]["RealtimeSpendView"];
+            voice: string;
+        };
         /** @description `[routes]` in the policy file (ADR 0031): how Ghost reaches the operator. */
         RoutesView: {
             /**
@@ -3934,6 +4056,11 @@ export type SchemaReachEvent = components['schemas']['ReachEvent'];
 export type SchemaReachTotalView = components['schemas']['ReachTotalView'];
 export type SchemaReachView = components['schemas']['ReachView'];
 export type SchemaReadToolInfo = components['schemas']['ReadToolInfo'];
+export type SchemaRealtimeCheckView = components['schemas']['RealtimeCheckView'];
+export type SchemaRealtimeModelView = components['schemas']['RealtimeModelView'];
+export type SchemaRealtimeProviderView = components['schemas']['RealtimeProviderView'];
+export type SchemaRealtimeSpendView = components['schemas']['RealtimeSpendView'];
+export type SchemaRealtimeView = components['schemas']['RealtimeView'];
 export type SchemaRoutesView = components['schemas']['RoutesView'];
 export type SchemaRuleAdd = components['schemas']['RuleAdd'];
 export type SchemaRuleSet = components['schemas']['RuleSet'];
@@ -7173,6 +7300,53 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Status"];
                 };
+            };
+        };
+    };
+    realtime_voice_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RealtimeView"];
+                };
+            };
+        };
+    };
+    realtime_voice_check_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RealtimeCheckView"];
+                };
+            };
+            /** @description Ghost can't check the realtime voice now */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

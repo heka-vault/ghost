@@ -375,6 +375,9 @@ pub struct Daemon {
     followed_vault: AtomicBool,
     /// The last model load's failure while it is tried again; on the waiting list meanwhile.
     models_problem: Mutex<Option<String>>,
+    /// Why the realtime voice was not used or stopped, for the waiting list (ADR 0062).
+    pub(crate) realtime_note: Mutex<Option<String>>,
+    pub(crate) realtime_check: Mutex<Option<ghost_api::realtime::RealtimeCheckView>>,
     /// The connection is too slow for a good spoken reply (ADR 0056); on the waiting list.
     pub(crate) model_slow: Mutex<Option<String>>,
     models_retry: std::time::Duration,
@@ -447,6 +450,8 @@ impl Daemon {
             passwords: Mutex::new(None),
             followed_vault: AtomicBool::new(false),
             models_problem: Mutex::new(None),
+            realtime_note: Mutex::new(None),
+            realtime_check: Mutex::new(None),
             model_slow: Mutex::new(None),
             models_retry: MODELS_RETRY,
             late: Late::default(),
@@ -881,6 +886,75 @@ impl Daemon {
 
     /// The model connection's keys, live: the environment the next session reads, and
     /// the voice settings' copy of them. A turn in flight keeps the model it started on.
+    /// The realtime voice's settings, live from the next session (ADR 0062). Not one of
+    /// them is a password; a value that does not read is refused and the old kept.
+    pub(crate) fn apply_realtime(&self, values: &BTreeMap<String, Option<String>>) -> Vec<String> {
+        let keys: Vec<String> = values
+            .keys()
+            .filter(|k| ghost_voice::realtime::settings::KEYS.contains(&k.as_str()))
+            .cloned()
+            .collect();
+        if keys.is_empty() {
+            return Vec::new();
+        }
+        let before: HashMap<String, Option<String>> = {
+            let env = lock(&self.environ);
+            keys.iter()
+                .map(|k| (k.clone(), env.get(k).cloned()))
+                .collect()
+        };
+        {
+            let mut env = lock(&self.environ);
+            for k in &keys {
+                match values.get(k).and_then(|v| v.as_deref()) {
+                    Some(v) if !v.is_empty() => {
+                        env.insert(k.clone(), v.to_string());
+                    }
+                    _ => {
+                        env.remove(k);
+                    }
+                }
+            }
+        }
+        let env = self.env();
+        match ghost_voice::realtime::RealtimeSettings::from_vars(|k| env.get(k).cloned()) {
+            Ok(s) => {
+                info!("voice: {} from the next session", s.describe());
+                if !s.on {
+                    *lock(&self.realtime_note) = None;
+                }
+                keys
+            }
+            Err(e) => {
+                warn!("voice: {e}; the realtime settings were not changed");
+                let mut env = lock(&self.environ);
+                for (k, v) in before {
+                    match v {
+                        Some(v) => {
+                            env.insert(k, v);
+                        }
+                        None => {
+                            env.remove(&k);
+                        }
+                    }
+                }
+                Vec::new()
+            }
+        }
+    }
+
+    /// The realtime voice's settings as they are now.
+    pub(crate) fn realtime_settings(&self) -> ghost_voice::realtime::RealtimeSettings {
+        let env = self.env();
+        ghost_voice::realtime::RealtimeSettings::from_vars(|k| env.get(k).cloned())
+            .unwrap_or_default()
+    }
+
+    /// Today's realtime spend, kept beside Ghost's data (numbers only).
+    pub(crate) fn realtime_ledger(&self) -> ghost_voice::realtime::spend::Ledger {
+        ghost_voice::realtime::spend::Ledger::new(&self.cfg().data_dir)
+    }
+
     pub(crate) fn apply_model(&self, values: &BTreeMap<String, Option<String>>) -> Vec<String> {
         let known = llm_env_keys();
         let keys: Vec<String> = values

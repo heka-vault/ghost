@@ -82,6 +82,19 @@ pub trait Controller: Send + Sync {
     fn last_model_check(&self) -> Option<ModelCheckRun> {
         None
     }
+    /// The realtime voice's check with the saved settings (ADR 0062), run where the vault
+    /// is. None when the daemon can't check it now.
+    async fn check_realtime(&self) -> Option<crate::realtime::RealtimeCheckView> {
+        None
+    }
+    /// The latest realtime check, kept in memory.
+    fn last_realtime_check(&self) -> Option<crate::realtime::RealtimeCheckView> {
+        None
+    }
+    /// Today's realtime spend (numbers only).
+    fn realtime_spend(&self) -> Option<ghost_core::realtime::Spend> {
+        None
+    }
     /// The routes this daemon has something behind (`RouteEngine.routes`); the digest
     /// is always one.
     fn routes_available(&self) -> Vec<RouteName>;
