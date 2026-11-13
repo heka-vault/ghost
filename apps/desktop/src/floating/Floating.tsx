@@ -2,14 +2,19 @@
  * The floating room (ADR 0059; docs/design-system.md, The floating room): the room posture
  * without a window. At rest a thin line of light at the bottom edge of a monitor (a struck red
  * microphone when Ghost isn't listening, ADR 0057); when a spoken session at this desk floats
- * (`postureOf`), Ghost comes forward from depth over the desktop: the reply in very large type,
- * the operator's last words above it, the session's real work in a dense margin, and a change
- * waiting for a yes or an agent's question with its buttons. When the session ends it falls
- * back to the line.
+ * (`postureOf`), Ghost comes forward from depth over the desktop, beside the work by default.
+ *
+ * It is a voice, so it shows no transcript (owner, 2026-11-12): neither the operator's words nor
+ * Ghost's reply. What it shows is the state (Wisp, the light and its colour, a few words under
+ * Wisp), where Ghost is looking (reach.ts: a named place and a beam for every app and agent the
+ * turn reaches, lit while its call runs, the answer coming back in proportion to what it brought,
+ * a quiet trace after), and only what sound can't carry: a change waiting for a yes and an
+ * agent's question, with their buttons. Captions are a setting, off by default.
  *
  * Three layers, back to front: the field (field.ts, one WebGL2 pass at reduced resolution),
- * Wisp (the brand's own engine), and the words (DOM). No motion library. The frame loop runs
- * only while Ghost is forward, at 30 frames a second unless the voice or the arrival needs 60,
+ * Wisp (the brand's own engine), and the few words and buttons (DOM). Where each sits is
+ * layout.ts, a pure function of the monitor and the operator's placement. No motion library.
+ * The frame loop runs only while Ghost is forward, at 30 frames a second (60 for the arrival),
  * and stops dead at rest, so the line costs nothing.
  */
 import type { PendingProposal, QuestionView, Turn } from "@ghost/client-ts";
@@ -20,8 +25,10 @@ import { postureOf } from "../app/posture";
 import { useSaying, useSessionQuestions } from "../screens/session/live";
 import { Mascot } from "../ui/Mascot";
 import { createField, type Field, type FieldInputs } from "./field";
-import { elapsedText, fpsOf, isForward, labelOf, msText, type Scene, sceneOf, stageX, telemetryOf } from "./scene";
-import { hitRects, log, openApp, setRegion, summon, useShellWord } from "./shell";
+import { layoutOf, type Layout } from "./layout";
+import { litOf, namesText, type Place, reachOf, returnOf, sizeOf, thisTurn } from "./reach";
+import { captionsShown, captionText, fpsOf, goneAfterGoodbye, isForward, labelOf, type Scene, sceneOf } from "./scene";
+import { hitRects, log, openApp, sendAway, setRegion, sound as readSound, type Sound, summon, useShellWord } from "./shell";
 
 const params = new URLSearchParams(window.location.search);
 const reducedQuery = typeof matchMedia !== "undefined" ? matchMedia("(prefers-reduced-motion: reduce)") : null;
@@ -61,22 +68,46 @@ function lastOf(turns: readonly Turn[], role: Turn["role"], session: string | nu
   return null;
 }
 
+/** The window's size, kept in state so the layout follows a move to another monitor. */
+function useViewport(): { w: number; h: number } {
+  const [v, setV] = useState({ w: window.innerWidth, h: window.innerHeight });
+  useEffect(() => {
+    const on = () => setV({ w: window.innerWidth, h: window.innerHeight });
+    window.addEventListener("resize", on);
+    return () => window.removeEventListener("resize", on);
+  }, []);
+  return v;
+}
+
 export function FloatingRoom() {
   const { client, status, connected, turns, pending, activity, voice } = useGhost();
   const shell = useShellWord();
+  const view = useViewport();
   const session = status?.session_id ?? null;
   const deskSession = connected && !!session && status?.session_origin !== "phone";
   const micOff = !!status?.not_listening;
 
   // When this session started here: the questions asked since then are its own.
   const [since, setSince] = useState<string | null>(null);
-  const [startedAt, setStartedAt] = useState<string | null>(null);
   useEffect(() => {
     setSince(session ? new Date(Date.now() - 5_000).toISOString() : null);
-    setStartedAt(session ? new Date().toISOString() : null);
   }, [session]);
   const questions = useSessionQuestions(since);
   const question: QuestionView | null = useMemo(() => [...questions].reverse().find((q) => q.state === "open") ?? null, [questions]);
+
+  // Where Ghost is looking this turn (reach.ts), from the activity alone.
+  const apps = status?.apps ?? [];
+  const reach = useMemo(() => reachOf(activity, apps), [activity, apps.join(",")]);
+  const openCalls = reach.places.reduce((n, p) => n + p.open, 0);
+
+  // The goodbye must not linger: gone once its voice has been quiet a moment, or after 4 s.
+  const ending = !!status?.ending;
+  const [gone, setGone] = useState(false);
+  const goodbye = useRef<{ since: number | null; heard: boolean; quietSince: number }>({ since: null, heard: false, quietSince: 0 });
+  useEffect(() => {
+    goodbye.current = { since: ending ? performance.now() : null, heard: false, quietSince: performance.now() };
+    setGone(false);
+  }, [ending, session]);
 
   // The one posture rule (posture.ts): floating, the main window not the one in use.
   const posture = postureOf({
@@ -92,10 +123,12 @@ export function FloatingRoom() {
     posture,
     capture: shell.capture,
     phase: status?.phase ?? null,
-    ending: !!status?.ending,
+    ending,
     youTalking: youSpeaking(activity),
     pending: !!pending,
     question: !!question,
+    openCalls,
+    gone,
   });
 
   // A full-screen app on the only monitor: stay out of the way (the voice goes on).
@@ -113,6 +146,7 @@ export function FloatingRoom() {
   const moved = useRef({ arrive: 0, leave: 0 });
   const wasForward = useRef(false);
   const [trigger, setTrigger] = useState(0);
+  const [snd, setSnd] = useState<Sound | null>(null);
   useEffect(() => {
     if (forwardWanted && !wasForward.current) {
       wasForward.current = true;
@@ -137,49 +171,69 @@ export function FloatingRoom() {
   }, [forwardWanted]);
 
   const shown = forward || leaving;
-  // The line is the newest thing said: Ghost's reply, or the operator's words while Ghost works
-  // on them (never while they speak: those appear once the turn closes, #73).
-  const lastReply = lastOf(turns, "assistant", session);
-  const heard = scene === "you" ? null : lastOf(turns, "user", session);
-  const yoursIsNewer = !!heard && (!lastReply || heard.at > lastReply.at);
-  const reply = yoursIsNewer ? null : lastReply;
+  const reply = lastOf(turns, "assistant", session);
   const saying = useSaying(turns, status?.phase === "speaking", activity, 1);
-  const apps = status?.apps ?? [];
-  const tele = useMemo(() => telemetryOf(activity, apps), [activity, apps.join(",")]);
-  const usingApp = tele.rows.filter((r) => r.ms == null).map((r) => r.app ?? r.name)[0] ?? null;
   const agent = agentName(status?.conversation ?? null);
-  const label = labelOf(scene, { agent, using: usingApp, asker: question?.asked_by ?? null, micOff });
+
+  // Captions: read the output's mute when Ghost starts to speak (only if the setting needs it).
+  useEffect(() => {
+    if (shell.captions !== "muted" || (scene !== "speaking" && scene !== "ending")) return;
+    void readSound().then(setSnd);
+  }, [shell.captions, scene, reply?.at]);
+  const captions = captionsShown(shell.captions, scene, snd);
+
+  // The model as the wait: seconds since the operator's turn closed, with nothing out and no reply.
+  const [modelSecs, setModelSecs] = useState<number | null>(null);
+  const turnClosedAt = useMemo(() => {
+    for (let i = activity.length - 1; i >= 0; i--) if (activity[i].kind === "you_stopped") return new Date(activity[i].at).getTime();
+    return null;
+  }, [activity]);
+  const waitingOnModel = scene === "thinking" && openCalls === 0 && turnClosedAt != null && !(reply && new Date(reply.at).getTime() > turnClosedAt) && thisTurn(activity).every((a) => a.kind !== "call");
+
+  // ---------------------------------------------------------------- what came back, by size
+  // `GET /calls/{id}` (ADR 0058): its length only, never shown, for the light coming back.
+  const sizes = useRef<Record<string, number>>({});
+  const [, bumpSizes] = useState(0);
+  useEffect(() => {
+    for (const p of reach.places) {
+      if (p.open > 0) continue;
+      for (const id of p.ids) {
+        if (id in sizes.current) continue;
+        sizes.current[id] = 0;
+        client
+          .call(id)
+          .then((c) => {
+            sizes.current[id] = c.preview.length + Number(c.dropped ?? 0);
+            bumpSizes((n) => n + 1);
+          })
+          .catch(() => undefined);
+      }
+    }
+  }, [reach, client]);
+  const placeSize = (p: Place) => sizeOf(Math.max(0, ...p.ids.map((id) => sizes.current[id] ?? 0)));
+
+  const card = (scene === "okay" && !!pending) || (scene === "question" && !!question);
+  const reaching = scene === "thinking" || scene === "speaking" || scene === "you" || scene === "listening";
+  const places = reaching ? reach.places : [];
+  const layout: Layout = useMemo(
+    () => layoutOf({ w: view.w, h: view.h, placement: shell.placement, side: side === "centre" ? null : side, places: places.length, card, captions }),
+    // `place.rs` says which side Ghost's stage sits on: away from the work; right when not known.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [view.w, view.h, shell.placement, side, places.length, card, captions],
+  );
+  const using = namesText(reach.places.filter((p) => p.open > 0).map((p) => p.name));
+  const label = labelOf(scene, { agent, using, asker: question?.asked_by ?? null, micOff, modelSecs: waitingOnModel ? modelSecs : null });
 
   // ---------------------------------------------------------------- the frame loop
   const root = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const wisp = useRef<HTMLDivElement>(null);
-  const clockEl = useRef<HTMLSpanElement>(null);
-  const startedRef = useRef<string | null>(null);
+  const nodeEls = useRef<(HTMLDivElement | null)[]>([]);
   const field = useRef<Field | null>(null);
   const raf = useRef(0);
-  const live = useRef({ scene, arriving, leaving, x: stageX(side), nodes: [] as { on: number }[] });
-  live.current = { ...live.current, scene, arriving, leaving, x: stageX(side) };
+  const live = useRef({ scene, arriving, leaving, layout, places, waitingOnModel, turnClosedAt, modelSecs: null as number | null });
+  live.current = { ...live.current, scene, arriving, leaving, layout, places, waitingOnModel, turnClosedAt };
   const anim = useRef({ dim: 0, glow: 0, ring: 0, okay: 0, you: 0, level: 0, tint: TINT.line, last: 0, since: 0, frames: 0, js: 0, from: 0, gaps: [] as number[] });
-  // The apps reached this turn, lit while their calls run (the reach of the thinking).
-  const reach = useMemo(() => {
-    const names = tele.apps.slice(-6);
-    return names.map((a) => ({ name: a, on: tele.rows.some((r) => r.app === a && r.ms == null) ? 1 : 0.28 }));
-  }, [tele]);
-  live.current.nodes = reach;
-
-  const geometry = useCallback(() => {
-    const w = window.innerWidth;
-    const h = window.innerHeight;
-    const core: [number, number] = [w * live.current.x, h * 0.3];
-    const m = Math.min(w, h);
-    const n = Math.max(1, live.current.nodes.length);
-    const nodes = live.current.nodes.map((_, i) => {
-      const a = Math.PI * (1.15 + (n === 1 ? 0.35 : (i / (n - 1)) * 0.7));
-      return { x: core[0] + Math.cos(a) * m * 0.42, y: core[1] + 0.05 * m + Math.sin(a) * m * 0.22 };
-    });
-    return { w, h, core, nodes };
-  }, []);
 
   const frame = useCallback(
     (now: number) => {
@@ -205,7 +259,7 @@ export function FloatingRoom() {
         L.leaving = false;
         setLeaving(false);
       }
-      const g = geometry();
+      const g = L.layout;
       const on = isForward(L.scene);
       const target = {
         dim: !on ? 0 : L.scene === "speaking" || L.scene === "ending" ? 0.5 : 0.6,
@@ -225,23 +279,51 @@ export function FloatingRoom() {
       A.you = ease(A.you, breath, 8, dt);
       // Ghost's own voice level, as the daemon reports it at the speaker.
       const v = voice.get();
-      const level = performance.now() - v.at < 400 ? v.level : 0;
+      const fresh = performance.now() - v.at < 400;
+      const level = fresh ? v.level : 0;
       A.level = ease(A.level, level, 22, dt);
-      // The session's clock, from the frame loop (the page's timers are throttled here).
-      if (clockEl.current) {
-        const e = elapsedText(startedRef.current, Date.now());
-        if (e && clockEl.current.textContent !== ` · ${e}`) clockEl.current.textContent = ` · ${e}`;
+      // The goodbye: leave once its voice has been quiet a moment, or after its time.
+      const gb = goodbye.current;
+      if (gb.since != null) {
+        if (level > 0.02) {
+          gb.heard = true;
+          gb.quietSince = now;
+        }
+        if (goneAfterGoodbye({ endingFor: now - gb.since, quietFor: now - gb.quietSince, heard: gb.heard })) {
+          gb.since = null;
+          setGone(true);
+        }
+      }
+      // The model as the wait, in whole seconds (a state change at most once a second).
+      const ms = L.waitingOnModel && L.turnClosedAt != null ? Math.floor((Date.now() - L.turnClosedAt) / 1000) : null;
+      if (ms !== L.modelSecs) {
+        L.modelSecs = ms;
+        setModelSecs(ms);
       }
       if (wisp.current) wisp.current.style.setProperty("--flt-pulse", (1 + 0.035 * A.level + 0.02 * A.you).toFixed(4));
       const sinceArrive = performance.now() - moved.current.arrive;
       const shock = L.arriving ? (sinceArrive - WAKE_MS * 0.62) / 700 : -1;
       const scan = L.arriving ? Math.min(1.05, sinceArrive / (WAKE_MS * 0.9)) : -1;
       const fall = L.leaving ? Math.min(1, (performance.now() - moved.current.leave) / DISMISS_MS) : 0;
-      const core: [number, number] = [g.core[0], g.core[1] + (g.h - g.core[1]) * fall * fall];
+      const core: [number, number] = [g.core[0], g.core[1] + (window.innerHeight - g.core[1]) * fall * fall];
+      // Where Ghost is looking: each place's light, the packets out, the answer coming back.
+      const wall = Date.now();
+      const nodes = L.places.map((p, i) => {
+        const lit = L.leaving ? 0 : litOf(p, wall);
+        const el = nodeEls.current[i];
+        if (el) {
+          const want = lit > 0.6 ? "1" : "0";
+          if (el.dataset.on !== want) el.dataset.on = want;
+        }
+        const at = g.places[i] ?? g.core;
+        return { x: at[0], y: at[1], on: lit, out: p.open > 0, back: returnOf(p, wall), size: placeSize(p) };
+      });
       const inputs: FieldInputs = {
         time: t, dim: A.dim, scan, core, glow: A.glow, tint: A.tint, voice: A.you, ring: A.ring, level: A.level, okay: A.okay,
         shock: shock >= 0 && shock <= 1 ? shock : -1,
-        nodes: g.nodes.map((n, i) => ({ x: n.x, y: n.y, on: L.scene === "thinking" ? (L.nodes[i]?.on ?? 0) : 0 })),
+        nodes,
+        size: g.size,
+        region: L.scene === "line" || L.leaving ? null : [g.bounds.x, g.bounds.y, g.bounds.w, g.bounds.h],
       };
       if (DRAW_FIELD) field.current?.draw(inputs);
       A.frames++;
@@ -255,7 +337,7 @@ export function FloatingRoom() {
       raf.current = requestAnimationFrame(frame);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [geometry, voice],
+    [voice],
   );
 
   const flush = (now: number) => {
@@ -291,7 +373,7 @@ export function FloatingRoom() {
     anim.current.from = performance.now();
     raf.current = requestAnimationFrame(frame);
     log(`loop start scene=${scene} arriving=${arriving} leaving=${leaving}`);
-  }, [shown, scene, arriving, leaving, frame]);
+  }, [shown, scene, arriving, leaving, frame, places.length, openCalls]);
 
   useEffect(() => {
     if (!canvas.current) return;
@@ -343,7 +425,7 @@ export function FloatingRoom() {
     send();
     const id = window.setTimeout(send, 450); // after the arrival settles
     return () => window.clearTimeout(id);
-  }, [forward, scene, pending?.id, question?.key, reply?.at]);
+  }, [forward, scene, pending?.id, question?.key, layout]);
 
   // ---------------------------------------------------------------- answers
   const [busy, setBusy] = useState(false);
@@ -369,12 +451,9 @@ export function FloatingRoom() {
   };
 
   // ---------------------------------------------------------------- what is drawn
-  const g = geometry();
   const said = reply ? saying[reply.at] : undefined;
-  const parts = reply ? splitParts(reply.text, said, status?.phase === "speaking") : null;
-  startedRef.current = startedAt;
-  const okayCard = scene === "okay" && pending;
-  const questionCard = scene === "question" && question;
+  const caption = captions && reply ? captionText(reply.text, said ? Math.max(said.chars, said.now?.end ?? 0) : null) : "";
+  const s = layout.scale;
 
   return (
     <div
@@ -383,13 +462,14 @@ export function FloatingRoom() {
       data-scene={scene}
       data-shown={shown ? "1" : "0"}
       data-mic={micOff ? "off" : "on"}
-      style={{ ["--flt-x" as string]: `${stageX(side) * 100}%` }}
+      data-placement={shell.placement}
+      style={{ ["--flt-s" as string]: s.toFixed(3), ["--flt-wisp" as string]: `${layout.wisp}px` }}
     >
       <canvas ref={canvas} className="flt-field" aria-hidden />
 
-      {/* One sentence a screen reader hears per change; the type itself is decoration. */}
+      {/* One sentence a screen reader hears per change: the state, and Ghost's reply whole when it starts. */}
       <p className="flt-sr" role="status" aria-live="polite">
-        {scene === "hidden" ? "" : forward ? [label, scene === "speaking" && reply ? reply.text : ""].filter(Boolean).join(". ") : micOff ? "Ghost is not listening." : ""}
+        {scene === "hidden" ? "" : forward ? [label, scene === "speaking" && reply ? splitSaid(reply.text, reply.text.length).said : ""].filter(Boolean).join(". ") : micOff ? "Ghost is not listening." : ""}
       </p>
 
       {/* At rest: the line says Ghost hears for its name; struck and red when it can't (ADR 0057). */}
@@ -401,33 +481,57 @@ export function FloatingRoom() {
       )}
 
       {shown && (
-        <div className="flt-stage" style={{ left: g.core[0], top: g.core[1] }}>
+        <div className="flt-stage" style={{ left: layout.core[0], top: layout.core[1] }}>
           <div ref={wisp} className="flt-wisp" aria-hidden>
-            {DRAW_WISP && <Mascot size={176} mood={leaving ? null : MOOD[scene]} trigger={trigger} level={voice} idle maxFps={fpsOf(scene, arriving) || 60} />}
+            {DRAW_WISP && <Mascot size={layout.wisp} mood={leaving ? null : MOOD[scene]} trigger={trigger} level={voice} idle maxFps={fpsOf(scene, arriving) || 60} />}
           </div>
-          <p className="flt-label">
-            <span className="flt-label__dot" />
-            {label}
-            {micOff && scene !== "listening" ? <span className="flt-label__mic"> · mic off</span> : null}
-          </p>
+          <div className="flt-under">
+            <p className="flt-label">
+              <span className="flt-label__dot" />
+              {label}
+              {micOff && scene !== "listening" ? <span className="flt-label__mic"> · mic off</span> : null}
+            </p>
+            {forward && (
+              <p className="flt-acts">
+                <button type="button" data-hit className="flt-pill" onClick={openApp}>
+                  Open in Ghost
+                </button>
+                <button type="button" data-hit className="flt-pill" title="Ends the session, as “Ghost, that’s all” does" onClick={() => sendAway(() => client.sleep())}>
+                  Done
+                </button>
+              </p>
+            )}
+          </div>
         </div>
       )}
 
+      {/* Where Ghost is looking: each place's name over its beam's end. */}
       {shown &&
-        reach.map((r, i) => (
-          <div key={r.name} className="flt-node" data-on={r.on > 0.6 ? "1" : "0"} hidden={scene !== "thinking"} style={{ left: g.nodes[i]?.x, top: g.nodes[i]?.y }}>
-            <span className="flt-node__name">{r.name.charAt(0).toUpperCase() + r.name.slice(1)}</span>
+        places.map((p, i) => (
+          <div
+            key={p.key}
+            ref={(el) => {
+              nodeEls.current[i] = el;
+            }}
+            className="flt-node"
+            data-on="1"
+            aria-hidden
+            style={{ left: layout.places[i]?.[0], top: layout.places[i]?.[1] }}
+          >
+            <span className="flt-node__name">{p.name}</span>
+            {p.word && <span className="flt-node__word">{p.word}</span>}
           </div>
         ))}
+      {shown && reach.more > 0 && reaching && (
+        <p className="flt-more" aria-hidden style={{ left: layout.core[0], top: layout.core[1] - layout.ring - 8 * s }}>
+          +{reach.more} more
+        </p>
+      )}
 
-      {forward && (
-        <div className="flt-words" aria-hidden={!okayCard && !questionCard ? true : undefined}>
-          {heard && !okayCard && !questionCard && <p className={yoursIsNewer ? "flt-heard flt-heard--line" : "flt-heard"}>{heard.text}</p>}
-          {okayCard ? (
+      {forward && card && layout.card && (
+        <div className="flt-card" style={{ left: layout.card.x, top: layout.card.y, width: layout.card.w, maxHeight: layout.card.h }}>
+          {scene === "okay" && pending ? (
             <div className="flt-ask flt-ask--okay" role="alertdialog" aria-label={`Waiting for your yes: ${pending.summary}`}>
-              <p className="flt-ask__over">
-                {agentName(status?.conversation ?? null)} asks · <span className="flt-mono">{pending.operation}</span>
-              </p>
               <p className="flt-ask__q">{pending.summary}?</p>
               <div className="flt-ask__acts">
                 <button type="button" data-hit className="flt-word flt-word--yes" disabled={busy} onClick={() => void decide(pending, true)}>
@@ -439,12 +543,11 @@ export function FloatingRoom() {
                 <span className="flt-ask__or">or say it</span>
               </div>
             </div>
-          ) : questionCard ? (
+          ) : question ? (
             <div className="flt-ask" role="alertdialog" aria-label={`${question.asked_by} asks: ${question.question}`}>
-              <p className="flt-ask__over">{question.asked_by} asks</p>
               <p className="flt-ask__q">{question.question}</p>
               <div className="flt-ask__acts">
-                {question.choices.map((c) => (
+                {question.choices.slice(0, 4).map((c) => (
                   <button key={c} type="button" data-hit className="flt-word" disabled={busy} onClick={() => void answer(question, c)}>
                     {c}
                   </button>
@@ -452,59 +555,18 @@ export function FloatingRoom() {
                 <span className="flt-ask__or">{question.choices.length ? "or say it" : "Answer by voice, or in Ghost"}</span>
               </div>
             </div>
-          ) : (
-            parts && (
-              <p className="flt-reply">
-                <span className="flt-reply__said">{parts.said}</span>
-                <span className="flt-reply__now">{parts.now}</span>
-                <span className="flt-reply__rest">{parts.rest}</span>
-              </p>
-            )
-          )}
+          ) : null}
         </div>
       )}
 
-      {forward && (
-        <aside className="flt-margin" aria-hidden>
-          <p className="flt-margin__head">
-            {agent.toUpperCase()}
-            <span ref={clockEl} />
-          </p>
-          <p className="flt-margin__counts">
-            <span>calls {tele.calls}</span>
-            <span>open {tele.open}</span>
-            <span>apps {tele.apps.length}</span>
-            {status?.waiting ? <span>waiting {status.waiting}</span> : null}
-          </p>
-          <ol className="flt-margin__calls">
-            {tele.rows.map((r) => (
-              <li key={r.id} data-open={r.ms == null ? "1" : undefined}>
-                <span>{r.at}</span>
-                <span className="flt-margin__name">{r.name}</span>
-                <span>{msText(r.ms)}</span>
-              </li>
-            ))}
-          </ol>
-          <button type="button" data-hit className="flt-open" onClick={openApp}>
-            Open in Ghost
-          </button>
-        </aside>
+      {forward && caption && layout.captions && (
+        <p className="flt-captions" aria-hidden style={{ left: layout.captions.x, top: layout.captions.y, width: layout.captions.w }}>
+          {caption}
+        </p>
       )}
     </div>
   );
 }
-
-/** The reply split for the type: said, the clause being said now, and the rest. */
-function splitParts(text: string, s: { chars: number; now?: { end: number } | null; cut: boolean } | undefined, speaking: boolean) {
-  if (!s) return speaking ? { said: "", now: "", rest: text } : { said: text, now: "", rest: "" };
-  const { said, rest } = splitSaid(text, s.chars);
-  if (s.now && !s.cut) {
-    const end = Math.max(s.chars, s.now.end);
-    return { said, now: text.slice(s.chars, end), rest: text.slice(end) };
-  }
-  return { said, now: "", rest };
-}
-
 
 function MicOff() {
   return (

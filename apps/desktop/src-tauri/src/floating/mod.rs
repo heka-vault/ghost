@@ -49,6 +49,33 @@ pub struct Settings {
     pub on: bool,
     /// Which monitor it comes forward on.
     pub monitor: MonitorPref,
+    /// Where on that monitor: beside the work (default), the centre, or a corner.
+    pub placement: Placement,
+    /// Ghost's words on screen, for when the sound can't carry them. Off by default.
+    pub captions: Captions,
+}
+
+/// Where on the monitor the floating room comes forward (docs/design-system.md, the layout
+/// rule): a column at the edge away from the work, the stage in the middle, or small and low
+/// in the far corner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Placement {
+    #[default]
+    Beside,
+    Centre,
+    Corner,
+}
+
+/// When Ghost's spoken words are written under it: never (default), when the output is muted
+/// or turned down too far to hear, or always.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Captions {
+    #[default]
+    Off,
+    Muted,
+    Always,
 }
 
 pub fn load(path: &Path) -> Settings {
@@ -65,6 +92,32 @@ pub fn save(path: &Path, s: &Settings) -> std::io::Result<()> {
     let tmp = path.with_extension("json.tmp");
     std::fs::write(&tmp, serde_json::to_vec_pretty(s).unwrap_or_default())?;
     std::fs::rename(tmp, path)
+}
+
+/// The default output as PipeWire reports it (`wpctl get-volume @DEFAULT_AUDIO_SINK@`), read
+/// for the captions' "when muted" choice. Read only: nothing here changes the sound.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct Sound {
+    pub volume: f32,
+    pub muted: bool,
+}
+
+impl Sound {
+    /// Too low to hear Ghost from across a desk: muted, or under 8%.
+    pub fn inaudible(&self) -> bool {
+        self.muted || self.volume < 0.08
+    }
+}
+
+/// `Volume: 0.40` or `Volume: 0.40 [MUTED]`; anything else is not known.
+pub fn parse_wpctl(out: &str) -> Option<Sound> {
+    let rest = out.trim().strip_prefix("Volume:")?.trim();
+    let mut parts = rest.split_whitespace();
+    let volume: f32 = parts.next()?.parse().ok()?;
+    Some(Sound {
+        volume,
+        muted: rest.contains("[MUTED]"),
+    })
 }
 
 /// Whether this desktop can float a window properly.
@@ -499,6 +552,8 @@ mod tests {
         let s = Settings {
             on: true,
             monitor: MonitorPref::Named("HDMI-3".into()),
+            placement: Placement::Corner,
+            captions: Captions::Muted,
         };
         save(&path, &s).unwrap();
         assert_eq!(load(&path), s);
@@ -508,6 +563,11 @@ mod tests {
         // A file from a later build with more fields keeps what it knows.
         std::fs::write(&path, r#"{"on":true,"monitor":"here","later":1}"#).unwrap();
         assert_eq!(load(&path).monitor, MonitorPref::Here);
+        // A file from before the placement and captions: beside the work, no captions.
+        let old = load(&path);
+        assert_eq!((old.placement, old.captions), (Placement::Beside, Captions::Off));
+        let line = serde_json::to_string(&s).unwrap();
+        assert!(line.contains(r#""placement":"corner""#) && line.contains(r#""captions":"muted""#), "{line}");
     }
 
     #[test]
@@ -517,6 +577,7 @@ mod tests {
             settings: Settings {
                 on: true,
                 monitor: MonitorPref::Other,
+                ..Settings::default()
             },
             running: true,
             capture: Capture::No,
@@ -534,6 +595,17 @@ mod tests {
         s.running = true;
         s.settings.on = false;
         assert!(!s.can_float());
+    }
+
+    #[test]
+    fn the_output_reads_as_muted_or_too_low_only_when_pipewire_says_so() {
+        let s = parse_wpctl("Volume: 0.40\n").unwrap();
+        assert_eq!(s, Sound { volume: 0.40, muted: false });
+        assert!(!s.inaudible());
+        assert!(parse_wpctl("Volume: 0.40 [MUTED]").unwrap().inaudible());
+        assert!(parse_wpctl("Volume: 0.05").unwrap().inaudible());
+        assert_eq!(parse_wpctl(""), None);
+        assert_eq!(parse_wpctl("Translate ID error"), None);
     }
 
     #[test]

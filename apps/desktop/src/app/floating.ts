@@ -10,9 +10,17 @@ import { inTauri } from "../transport";
 
 export type MonitorPref = "other" | "here" | { named: string };
 
+/** Where on the monitor it comes forward (`src/floating/layout.ts`). */
+export type FloatingPlacement = "beside" | "centre" | "corner";
+/** When Ghost's spoken words are written under it. */
+export type FloatingCaptions = "off" | "muted" | "always";
+
 export interface FloatingSettings {
   on: boolean;
   monitor: MonitorPref;
+  /** Older shells don't send these: beside the work, no captions. */
+  placement?: FloatingPlacement;
+  captions?: FloatingCaptions;
 }
 
 export interface FloatingStatus {
@@ -44,7 +52,7 @@ function mockStatus(): FloatingStatus {
   const c = p.get("capture");
   return {
     support: f === "refused" ? { kind: "no", why: "The floating room needs XWayland, and this desktop isn't running it." } : { kind: "xwayland" },
-    settings: { on: f === "on", monitor: "other" },
+    settings: { on: f === "on", monitor: "other", placement: "beside", captions: "off" },
     running: f === "on",
     capture: c === "yes" ? "yes" : c === "unknown" ? "unknown" : "no",
     monitors: [

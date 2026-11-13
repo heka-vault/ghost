@@ -1,5 +1,5 @@
 /**
- * The field: everything soft behind Ghost, in one WebGL2 draw per frame. SPIKE.
+ * The field: everything soft behind Ghost, in one WebGL2 draw per frame.
  *
  * One full-screen triangle and one fragment shader, drawn at a fraction of the screen's
  * resolution and stretched by the compositor: the dim and the vignette over the desktop, the
@@ -29,8 +29,15 @@ export interface FieldInputs {
   ring: number;
   /** Ghost's own voice level 0..1 (speaking). */
   level: number;
-  /** Up to 6 reach targets in CSS pixels, each with its activity 0..1. */
-  nodes: { x: number; y: number; on: number }[];
+  /**
+   * Up to 6 places Ghost reaches (reach.ts), in CSS pixels: how lit the beam is 0..1, whether a
+   * call is out (a packet travels out), the light coming back 0..1 (-1 none) and its size 0..1.
+   */
+  nodes: { x: number; y: number; on: number; out?: boolean; back?: number; size?: number }[];
+  /** The ring and glow's scale against the monitor (layout.ts `size`), 1 at the stage's own. */
+  size?: number;
+  /** The stage's box in CSS px (layout.ts `bounds`): the dim is there, feathered; null: everywhere. */
+  region?: [number, number, number, number] | null;
   /** 0..1 amber "waiting for your yes". */
   okay: number;
   /** 0..1 progress of the arrival shockwave; < 0 none. */
@@ -50,7 +57,10 @@ uniform float uScale;     // drawing pixels per CSS pixel
 uniform float uTime, uDim, uScan, uGlow, uVoice, uRing, uLevel, uOkay, uShock;
 uniform vec2 uCore;
 uniform vec3 uTint;
-uniform vec3 uNodes[6];   // x, y (CSS px), activity
+uniform vec3 uNodes[6];   // x, y (CSS px), how lit
+uniform vec3 uNodesB[6];  // out (0|1), the light coming back 0..1 (<0 none), its size 0..1
+uniform float uSize;      // the ring's scale (layout.ts)
+uniform vec4 uRegion;     // the dim's box, CSS px (x, y, w, h); w < 0: everywhere
 out vec4 outColor;
 
 float hash(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
@@ -72,16 +82,27 @@ void main() {
   float minDim = min(css.x, css.y);
 
   // The dim: darker at the edges (vignette), lifted around Ghost.
-  vec2 dc = (frag - uCore) / minDim;
+  vec2 dc = (frag - uCore) / (minDim * uSize);
   float vign = smoothstep(0.15, 1.1, length((uv - 0.5) * vec2(css.x / css.y, 1.0)));
   float shade = uDim * (0.72 + 0.28 * vign);
+  // The dim, the haze and the dust stay in an oval over the stage's box, darkest at Ghost and
+  // feathered out: the work beside it is left as it was (the layout rule's share). An oval, not
+  // the box: a box's edge reads as a grey slab over a white page.
+  float inBox = 1.0;
+  if (uRegion.z > 0.0) {
+    vec2 half_ = uRegion.zw * 0.5 + 60.0;
+    vec2 q = (frag - (uRegion.xy + uRegion.zw * 0.5)) / half_;
+    inBox = 1.0 - smoothstep(0.55, 1.12, length(q));
+    float nearGhost = exp(-dot(dc, dc) * 3.0);
+    shade = uDim * inBox * (0.78 + 0.32 * nearGhost);
+  }
 
   // Haze: slow drifting noise, brighter near the core.
   float t = uTime;
   vec2 hp = frag / 420.0;
   float haze = noise(hp + vec2(t * 0.020, -t * 0.012)) * 0.6 + noise(hp * 2.3 - vec2(t * 0.031, t * 0.017)) * 0.4;
   float nearCore = exp(-dot(dc, dc) * 2.2);
-  vec3 col = uTint * haze * haze * (0.05 + 0.20 * nearCore) * uDim * 1.6;
+  vec3 col = uTint * haze * haze * (0.05 + 0.20 * nearCore) * uDim * 1.6 * inBox;
 
   // Glow behind Wisp: a tight core and a wide falloff (bloom without a pass).
   float d = length(dc);
@@ -125,22 +146,37 @@ void main() {
   float r1 = r0 + 0.06 + 0.05 * fract(t * 0.6);
   col += uTint * uRing * uVoice * 0.25 * exp(-abs(d - r1) * 220.0);
 
-  // Reach: beams from the core to each app or agent, a node glow, a packet travelling out.
+  // Reach: where Ghost is looking. A beam from the core to each place, lit while its call
+  // runs (packets travelling out), the answer coming back as light the size of what it
+  // brought, then a quiet trace of where it looked this turn.
   for (int i = 0; i < 6; i++) {
     vec3 n = uNodes[i];
+    vec3 b = uNodesB[i];
     if (n.z <= 0.001) continue;
     float bd = segDist(frag, uCore, n.xy) / minDim;
-    float flow = fract(t * 0.9 + float(i) * 0.37);
-    vec2 pkt = mix(uCore, n.xy, flow);
-    float pd = length(frag - pkt) / minDim;
-    col += uTint * n.z * (0.000006 / (bd * bd + 0.000006) * 0.55 + 0.00006 / (pd * pd + 0.00006) * 0.7);
+    col += uTint * n.z * (0.000006 / (bd * bd + 0.000006) * 0.55);
+    if (b.x > 0.5) {
+      for (int j = 0; j < 2; j++) {
+        float flow = fract(t * 0.9 + float(i) * 0.37 + float(j) * 0.5);
+        float pd = length(frag - mix(uCore, n.xy, flow)) / minDim;
+        col += uTint * (0.00006 / (pd * pd + 0.00006) * 0.7);
+      }
+    }
+    if (b.y >= 0.0) {
+      // Eased in toward Ghost; brighter and wider the more came back.
+      float e = b.y * b.y * (3.0 - 2.0 * b.y);
+      vec2 pkt = mix(n.xy, uCore, e);
+      float pd = length(frag - pkt) / minDim;
+      float r2 = 0.00004 + 0.00045 * b.z;
+      col += mix(uTint, vec3(1.0), 0.45) * (r2 / (pd * pd + r2)) * (0.6 + 0.8 * b.z) * (1.0 - 0.4 * e);
+    }
     float nd = length(frag - n.xy) / minDim;
     col += uTint * n.z * (0.0004 / (nd * nd + 0.0004)) * 0.5;
   }
 
   // Waiting for a yes: an amber horizon under Ghost.
   vec3 amber = vec3(1.0, 0.66, 0.18);
-  float horizon = exp(-abs(uv.y - 0.86) * 38.0) * smoothstep(0.5, 0.0, abs(uv.x - 0.5));
+  float horizon = exp(-abs(frag.y - (uCore.y + 0.42 * minDim * uSize)) / css.y * 38.0) * smoothstep(0.42 * minDim * uSize * 1.4, 0.0, abs(frag.x - uCore.x)) * inBox;
   col += amber * uOkay * horizon * 0.55;
 
   // The scanned light: a band sweeping down, a hot line at its front.
@@ -156,7 +192,7 @@ void main() {
   vec2 mote = cell + vec2(hash(cell + 7.1), hash(cell + 3.3));
   float md = length(gp - mote);
   float twinkle = 0.5 + 0.5 * sin(t * (1.0 + 2.0 * h) + h * 40.0);
-  col += uTint * step(0.86, h) * exp(-md * 18.0) * twinkle * uDim * 0.5 * (0.4 + nearCore);
+  col += uTint * step(0.86, h) * exp(-md * 18.0) * twinkle * uDim * 0.5 * (0.4 + nearCore) * inBox;
 
   // Scan lines over the lit area only.
   float lines = 0.92 + 0.08 * sin(frag.y * 3.14159 * 0.5);
@@ -201,11 +237,13 @@ export function createField(canvas: HTMLCanvasElement, resolution = 0.5): Field 
   const loc = {
     res: u("uRes"), scale: u("uScale"), time: u("uTime"), dim: u("uDim"), scan: u("uScan"), glow: u("uGlow"),
     voice: u("uVoice"), shock: u("uShock"), ring: u("uRing"), level: u("uLevel"), okay: u("uOkay"), core: u("uCore"), tint: u("uTint"), nodes: u("uNodes"),
+    nodesB: u("uNodesB"), size: u("uSize"), region: u("uRegion"),
   };
   const dbg = gl.getExtension("WEBGL_debug_renderer_info");
   const renderer = dbg ? String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)) : String(gl.getParameter(gl.RENDERER));
   let scale = 1;
   const nodes = new Float32Array(18);
+  const nodesB = new Float32Array(18);
 
   const resize = () => {
     scale = (window.devicePixelRatio || 1) * resolution;
@@ -242,8 +280,16 @@ export function createField(canvas: HTMLCanvasElement, resolution = 0.5): Field 
       gl.uniform2f(loc.core, i.core[0], i.core[1]);
       gl.uniform3f(loc.tint, i.tint[0], i.tint[1], i.tint[2]);
       nodes.fill(0);
-      i.nodes.slice(0, 6).forEach((n, k) => nodes.set([n.x, n.y, n.on], k * 3));
+      nodesB.fill(-1);
+      i.nodes.slice(0, 6).forEach((n, k) => {
+        nodes.set([n.x, n.y, n.on], k * 3);
+        nodesB.set([n.out ? 1 : 0, n.back ?? -1, n.size ?? 0], k * 3);
+      });
       gl.uniform3fv(loc.nodes, nodes);
+      gl.uniform3fv(loc.nodesB, nodesB);
+      gl.uniform1f(loc.size, i.size ?? 1);
+      const r = i.region;
+      gl.uniform4f(loc.region, r ? r[0] : 0, r ? r[1] : 0, r ? r[2] : -1, r ? r[3] : -1);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     },
   };

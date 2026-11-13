@@ -1,9 +1,8 @@
-import type { Activity } from "@ghost/ui";
 import { describe, expect, it } from "vitest";
 
 import { canFloat, prefOf, prefValue, type FloatingStatus } from "../src/app/floating";
 import { postureOf } from "../src/app/posture";
-import { elapsedText, fpsOf, isForward, labelOf, msText, sceneOf, stageX, telemetryOf, type SceneInput } from "../src/floating/scene";
+import { captionsShown, captionText, fpsOf, goneAfterGoodbye, GOODBYE_MS, isForward, labelOf, sceneOf, type SceneInput } from "../src/floating/scene";
 
 const base: SceneInput = { posture: "float", capture: "no", phase: "listening", ending: false, youTalking: false, pending: false, question: false };
 
@@ -25,6 +24,34 @@ describe("sceneOf", () => {
     expect(sceneOf({ ...base, pending: true, question: true, youTalking: true, phase: "speaking" })).toBe("okay");
     expect(sceneOf({ ...base, question: true, youTalking: true })).toBe("question");
     expect(sceneOf({ ...base, youTalking: true, phase: "thinking" })).toBe("you");
+  });
+
+  it("says speaking while Ghost's voice plays, even with a turn the VAD opened (the live screenshot)", () => {
+    // 2026-11-12: "Listening to you" over a reply. The daemon interrupts Ghost when a turn
+    // really starts, so a speaking phase with a turn open is Ghost still at the speaker.
+    expect(sceneOf({ ...base, youTalking: true, phase: "speaking" })).toBe("speaking");
+    expect(sceneOf({ ...base, youTalking: true, phase: "listening" })).toBe("you");
+  });
+
+  it("is working while calls run, whatever the phase says (the phase follows the audio)", () => {
+    // "One sec." over the calls: phase listening once it is said, calls still out.
+    expect(sceneOf({ ...base, phase: "listening", openCalls: 2 })).toBe("thinking");
+    expect(sceneOf({ ...base, phase: "listening", openCalls: 0 })).toBe("listening");
+    // Ghost's voice and the operator's turn still win: the beams are drawn in those scenes too.
+    expect(sceneOf({ ...base, phase: "speaking", openCalls: 2 })).toBe("speaking");
+    expect(sceneOf({ ...base, youTalking: true, openCalls: 1 })).toBe("you");
+  });
+
+  it("does not linger after the goodbye", () => {
+    expect(sceneOf({ ...base, ending: true })).toBe("ending");
+    expect(sceneOf({ ...base, ending: true, gone: true })).toBe("line");
+    expect(goneAfterGoodbye({ endingFor: null, quietFor: 9_000, heard: true })).toBe(false);
+    // Said and quiet a moment: gone.
+    expect(goneAfterGoodbye({ endingFor: 1_500, quietFor: 200, heard: true })).toBe(false);
+    expect(goneAfterGoodbye({ endingFor: 1_500, quietFor: 800, heard: true })).toBe(true);
+    // Never heard (the voice level never came): its time is the cap.
+    expect(goneAfterGoodbye({ endingFor: 1_500, quietFor: 1_500, heard: false })).toBe(false);
+    expect(goneAfterGoodbye({ endingFor: GOODBYE_MS, quietFor: 0, heard: true })).toBe(true);
   });
 
   it("follows the phase otherwise", () => {
@@ -55,66 +82,42 @@ describe("cost and words", () => {
     expect(isForward("okay")).toBe(true);
   });
 
-  it("labels the scene in plain words", () => {
+  it("labels the scene in a few plain words", () => {
     const o = { agent: "Ghost", using: null, asker: null, micOff: false };
     expect(labelOf("you", o)).toBe("Listening to you");
-    expect(labelOf("thinking", { ...o, using: "github" })).toBe("Using github");
+    expect(labelOf("thinking", { ...o, using: "3 places" })).toBe("Looking in 3 places");
+    expect(labelOf("thinking", o)).toBe("Thinking");
+    // A slow provider: nothing out, no reply yet, the model is the wait.
+    expect(labelOf("thinking", { ...o, modelSecs: 2.5 })).toBe("Thinking");
+    expect(labelOf("thinking", { ...o, modelSecs: 5.6 })).toBe("Waiting on the model · 5 s");
     expect(labelOf("question", { ...o, asker: "Accounting" })).toBe("Accounting asks");
     expect(labelOf("listening", { ...o, micOff: true })).toBe("Mic off · type in Ghost");
     expect(labelOf("line", o)).toBe("");
   });
-
-  it("places the stage away from the work on one monitor", () => {
-    expect(stageX("centre")).toBe(0.5);
-    expect(stageX("left")).toBeLessThan(0.5);
-    expect(stageX("right")).toBeGreaterThan(0.5);
-    expect(stageX(null)).toBe(0.5);
-  });
 });
 
-describe("telemetryOf", () => {
-  const at = (s: number) => new Date(Date.UTC(2026, 10, 12, 15, 0, s)).toISOString();
-  const a = (kind: Activity["kind"], s: number, extra: Partial<Activity> = {}): Activity => ({ kind, at: at(s), session_id: "s", names: [], ...extra }) as Activity;
-
-  it("is the session's calls, timed from its activity, with the apps they reached", () => {
-    const t = telemetryOf(
-      [
-        a("you_started", 0),
-        a("call", 1, { id: "c1", name: "github_issue_list" }),
-        a("call", 2, { id: "c2", name: "calendar_events_list" }),
-        a("result", 3, { id: "c1", name: "github_issue_list" }),
-        a("handover", 3),
-        a("call", 4, { id: "c3", name: "unknown_tool" }),
-        a("cut", 5),
-      ],
-      ["github", "calendar"],
-    );
-    expect(t.calls).toBe(3);
-    expect(t.open).toBe(2);
-    expect(t.apps).toEqual(["github", "calendar"]);
-    expect(t.rows.map((r) => [r.name, r.ms])).toEqual([
-      ["github.issue_list", 2000],
-      ["calendar.events_list", null],
-      ["unknown_tool", null],
-    ]);
-    expect([t.handovers, t.cuts]).toEqual([1, 1]);
+describe("captions", () => {
+  const loud = { volume: 0.4, muted: false };
+  it("are off by default, and only Ghost's own words while it speaks", () => {
+    expect(captionsShown("off", "speaking", { volume: 0, muted: true })).toBe(false);
+    expect(captionsShown("always", "speaking", loud)).toBe(true);
+    expect(captionsShown("always", "you", loud)).toBe(false);
+    expect(captionsShown("always", "thinking", loud)).toBe(false);
   });
-
-  it("keeps the last few rows but counts them all", () => {
-    const list = Array.from({ length: 12 }, (_, i) => a("call", i, { id: `c${i}`, name: "github_issue_read" }));
-    const t = telemetryOf(list, ["github"], 8);
-    expect(t.rows).toHaveLength(8);
-    expect(t.rows[7].id).toBe("c11");
-    expect(t.calls).toBe(12);
+  it("follow the output when set to 'when the sound is off', and an unread output is not off", () => {
+    expect(captionsShown("muted", "speaking", loud)).toBe(false);
+    expect(captionsShown("muted", "speaking", { volume: 0.4, muted: true })).toBe(true);
+    expect(captionsShown("muted", "speaking", { volume: 0.03, muted: false })).toBe(true);
+    expect(captionsShown("muted", "speaking", null)).toBe(false);
   });
-
-  it("says times the way the margin reads them", () => {
-    expect(msText(null)).toBe("…");
-    expect(msText(412)).toBe("412 ms");
-    expect(msText(1440)).toBe("1.4 s");
-    expect(msText(12_400)).toBe("12 s");
-    expect(elapsedText(at(0), Date.parse(at(65)))).toBe("1:05");
-    expect(elapsedText(null, 0)).toBeNull();
+  it("hold the newest words, never the wall", () => {
+    const long = "The deploy is blocked on its migration step: the job that adds the invoice currency column timed out twice last night, both times after about twelve minutes.";
+    const c = captionText(long, null, 80);
+    expect(c.length).toBeLessThanOrEqual(81);
+    expect(c.startsWith("…")).toBe(true);
+    expect(c.endsWith("twelve minutes.")).toBe(true);
+    expect(captionText(long, 26)).toBe("The deploy is blocked on i".trim());
+    expect(captionText("Short.", null)).toBe("Short.");
   });
 });
 
