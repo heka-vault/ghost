@@ -640,8 +640,7 @@ mod tests {
         assert!(t.get(&cut.id).unwrap().cut_at_start);
         // a take written before the field reads as whole
         let mut v: serde_json::Value =
-            serde_json::from_slice(&fs::read(t.path(&whole.id, "json").unwrap()).unwrap())
-                .unwrap();
+            serde_json::from_slice(&fs::read(t.path(&whole.id, "json").unwrap()).unwrap()).unwrap();
         v.as_object_mut().unwrap().remove("cut_at_start");
         assert!(!serde_json::from_value::<TakeMeta>(v).unwrap().cut_at_start);
     }

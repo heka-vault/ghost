@@ -809,7 +809,11 @@ mod tests {
         let keeper = FakeKeeper::new(true);
         // the hit's window ends 20.0 s in
         let call = 1 + (20 * RATE - WINDOW) / STEP;
-        let mut d = detector(FakeScorer::with(&[call], 0.8, "hey_ghost"), &recognize, true);
+        let mut d = detector(
+            FakeScorer::with(&[call], 0.8, "hey_ghost"),
+            &recognize,
+            true,
+        );
         d.keeper = Some(keeper.clone());
         let events = run(
             d,
