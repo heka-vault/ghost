@@ -20,6 +20,7 @@ use tauri::{Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use super::capture::Capture;
 use super::desktop::{self, Seen, Xlib};
 use super::place::{self, Choice, Monitor, Rect};
+use super::share::Sharing;
 use super::{FromSurface, Settings, ToSurface};
 use crate::bridge;
 
@@ -31,6 +32,8 @@ pub struct ShellState {
     pub settings: Settings,
     pub main_active: bool,
     pub capture: Option<Capture>,
+    /// What to do about a share now (`share.rs`).
+    pub sharing: Sharing,
 }
 
 struct State {
@@ -152,12 +155,11 @@ fn place_now(
     };
     let choice = place::choose(&pref, &known);
     if let Some(c) = &choice {
-        let g = mons[c.monitor].geometry;
+        let g = workarea(&gw, c.monitor, mons[c.monitor].geometry);
         let state = app.state::<State>();
         let mut at = state.at.lock().unwrap();
         if *at != Some(g) {
-            gw.move_(g.x, g.y);
-            gw.resize(g.width, g.height);
+            move_to(&gw, g);
             *at = Some(g);
         }
     }
@@ -173,10 +175,57 @@ fn place_now(
     })
 }
 
+/// The part of a monitor windows may use (without GNOME's top bar and any dock), as GDK
+/// reads it through X11 (`_NET_WORKAREA`, per monitor under GNOME); the whole monitor when
+/// it can't tell.
+fn workarea(gw: &gtk::ApplicationWindow, index: usize, whole: Rect) -> Rect {
+    gw.display()
+        .monitor(index as i32)
+        .map(|m| {
+            let w = m.workarea();
+            Rect {
+                x: w.x(),
+                y: w.y(),
+                width: w.width(),
+                height: w.height(),
+            }
+        })
+        .filter(|w| w.width > 0 && w.height > 0)
+        .unwrap_or(whole)
+}
+
+/// Move the surface onto a monitor: its work area, never more.
+///
+/// Measured 2026-11-13 on GNOME Shell 50.1 under XWayland (docs/floating-room.md, Which
+/// monitor): a window the monitor's full size doesn't fit a monitor with the top bar, so
+/// mutter keeps it on, or sends it back to, the monitor where it fits, and the surface never
+/// moved to the primary monitor; and an undecorated window that asks to cover a whole monitor
+/// is made a legacy full-screen one (`_NET_WM_STATE_FULLSCREEN`), which then ignores sizes,
+/// moves only as a whole monitor, and on the primary monitor makes GNOME Shell hide its top
+/// bar. So: out of full screen first, then one request for the work area.
+fn move_to(gw: &gtk::ApplicationWindow, g: Rect) {
+    gw.unfullscreen();
+    if let Some(gdk) = gw.window() {
+        let display = gdk.display();
+        display.flush();
+        gdk.move_resize(g.x, g.y, g.width, g.height);
+        display.flush();
+    }
+    // GTK's own idea of the window, so it doesn't put it back.
+    gw.move_(g.x, g.y);
+    gw.resize(g.width, g.height);
+}
+
 /// "Open the app": the shell brings the main window here.
 #[tauri::command]
 fn floating_open_app() {
     say(&FromSurface::OpenApp);
+}
+
+/// The share card's answer: show Ghost in this share, or keep it out (for this share only).
+#[tauri::command]
+fn floating_share(show: bool) {
+    say(&FromSurface::Share { show });
 }
 
 /// What the shell last said, for a page that just loaded.
@@ -220,7 +269,10 @@ fn listen_to_shell(app: tauri::AppHandle) {
                 let mut s = state.shell.lock().unwrap();
                 match &msg {
                     ToSurface::MainActive { active } => s.main_active = *active,
-                    ToSurface::Capture { capture } => s.capture = Some(*capture),
+                    ToSurface::Capture { capture, sharing } => {
+                        s.capture = Some(*capture);
+                        s.sharing = *sharing;
+                    }
                     ToSurface::Settings { settings } => s.settings = settings.clone(),
                 }
             }
@@ -337,6 +389,7 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             floating_region,
             floating_summon,
             floating_open_app,
+            floating_share,
             floating_shell,
             floating_log,
             floating_sound
@@ -405,7 +458,7 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
                 },
             );
             if let Some(c) = idle {
-                let g = mons[c.monitor].geometry;
+                let g = workarea(&gw, c.monitor, mons[c.monitor].geometry);
                 gw.move_(g.x, g.y);
                 gw.resize(g.width, g.height);
                 *app.state::<State>().at.lock().unwrap() = Some(g);
