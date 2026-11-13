@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
+
 from wake_train.features import STEP
 
 RATE = 16000
@@ -22,15 +23,58 @@ NEAR = 1.2
 
 
 def hits(sc: np.ndarray, threshold: float, floor: float) -> list[tuple[float, float]]:
+    """(seconds, score) of each hit: the first frame at the floor, then the cooldown."""
     out: list[tuple[float, float]] = []
     last = -1e9
-    for i, s in enumerate(sc):
+    for i in np.flatnonzero(sc >= min(floor, threshold)):
         t = i * STEP / RATE
-        if s < min(floor, threshold) or t - last < COOLDOWN:
+        if t - last < COOLDOWN:
             continue
-        out.append((t, float(s)))
+        out.append((t, float(sc[i])))
         last = t
     return out
+
+
+def rule_counts(negs: list[np.ndarray], threshold: float, floor: float) -> tuple[int, int]:
+    """(false wakes, Parakeet asked) over negative score streams, as the daemon decides:
+    a hit whose first frame at the floor is already at the threshold wakes Ghost unchecked;
+    one under it is read by Parakeet."""
+    fw = asked = 0
+    for sc in negs:
+        for _t, s in hits(sc, threshold, floor):
+            if s >= threshold:
+                fw += 1
+            else:
+                asked += 1
+    return fw, asked
+
+
+def operating_point(
+    old_negs: list[np.ndarray],
+    new_negs: list[np.ndarray],
+    heard,
+    shipped: tuple[float, float],
+) -> tuple[float, float, dict] | None:
+    """The new detector's threshold and floor, from its own curve under the daemon's rule:
+    of the points that wake no more often and ask Parakeet no more often than the shipped
+    detector does on the training negatives (issue #13), the one that hears most of the
+    training takes (``heard(thr, floor)`` -> (woke at once, checked)). None when no point
+    keeps both."""
+    f0, a0 = rule_counts(old_negs, *shipped)
+    best = None
+    for thr in np.round(np.arange(0.50, 0.995, 0.01), 2):
+        for floor in np.round(np.arange(0.20, thr + 1e-9, 0.05), 2):
+            fw, asked = rule_counts(new_negs, float(thr), float(floor))
+            if fw > f0 or asked > a0:
+                continue
+            woke, checked = heard(float(thr), float(floor))
+            key = (woke, woke + checked, -fw, -asked)
+            if best is None or key > best[0]:
+                best = (key, float(thr), float(floor), {"false_wakes": fw, "asked": asked})
+    if best is None:
+        return None
+    _k, thr, floor, at = best
+    return thr, floor, {**at, "shipped_false_wakes": f0, "shipped_asked": a0}
 
 
 @dataclass

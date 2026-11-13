@@ -421,37 +421,6 @@ def main(argv: list[str] | None = None) -> int:
                 out.append(det(x))
         return out
 
-    def fit(train_groups: set[str], seed: int):
-        x, o, y, w = build(train_groups)
-        log(f"  training on {int(y.sum())} positive and {int(len(y) - y.sum())} negative windows")
-        t0 = time.time()
-        head = model.train(x, o, y, w, seed=seed, log=log)
-        log(f"  trained in {time.time() - t0:.0f} s")
-
-        def det(win: np.ndarray) -> np.ndarray:
-            return head(win, shipped(win))
-
-        keys = train_negatives(train_groups)
-        grid = np.round(np.arange(0.30, 0.96, 0.01), 2)
-        old_negs = neg_scores(shipped, keys)
-        new_negs = neg_scores(det, keys)
-        f0 = int(evaluate.curve(old_negs, np.array([SHIPPED_THRESHOLD]))[0])
-        c0 = int(evaluate.curve(old_negs, np.array([SHIPPED_FLOOR]))[0])
-        fw = evaluate.curve(new_negs, grid)
-        ok = np.flatnonzero(fw <= f0)
-        thr = float(grid[ok[0]]) if len(ok) else 0.95
-        fgrid = np.round(np.arange(0.10, thr, 0.01), 2)
-        fc = evaluate.curve(new_negs, fgrid) if len(fgrid) else np.array([], int)
-        okf = np.flatnonzero(fc <= c0)
-        floor = float(fgrid[okf[0]]) if len(okf) else round(thr - 0.01, 2)
-        log(
-            f"  threshold {thr:.2f} ({int(fw[ok[0]]) if len(ok) else '?'} false wakes on the "
-            f"training negatives, shipped {f0} at {SHIPPED_THRESHOLD}); floor {floor:.2f} "
-            f"(Parakeet asked {int(fc[okf[0]]) if len(okf) else '?'} times, shipped {c0})"
-        )
-        curve = {"grid": grid.tolist(), "false_wakes": fw.tolist(), "shipped_at_threshold": f0}
-        return head, det, thr, floor, curve
-
     def score_takes(det, thr, floor, groups: set[str]) -> dict[str, evaluate.Count]:
         out: dict[str, evaluate.Count] = {}
         for title, s in pos_streams:
@@ -463,14 +432,56 @@ def main(argv: list[str] | None = None) -> int:
             out.setdefault(title, evaluate.Count()).add(c)
         return out
 
+    def fit(train_groups: set[str], seed: int):
+        x, o, y, w = build(train_groups)
+        log(f"  training on {int(y.sum())} positive and {int(len(y) - y.sum())} negative windows")
+        t0 = time.time()
+        head = model.train(x, o, y, w, seed=seed, log=log)
+        log(f"  trained in {time.time() - t0:.0f} s")
+
+        def det(win: np.ndarray) -> np.ndarray:
+            return head(win, shipped(win))
+
+        keys = train_negatives(train_groups)
+        old_negs = neg_scores(shipped, keys)
+        new_negs = neg_scores(det, keys)
+
+        def heard(thr: float, floor: float) -> tuple[int, int]:
+            c = evaluate.Count()
+            for v in score_takes(det, thr, floor, train_groups).values():
+                c.add(v)
+            return c.woke, c.checked
+
+        point = evaluate.operating_point(
+            old_negs, new_negs, heard, (SHIPPED_THRESHOLD, SHIPPED_FLOOR)
+        )
+        if point is None:
+            f0, a0 = evaluate.rule_counts(old_negs, SHIPPED_THRESHOLD, SHIPPED_FLOOR)
+            log(
+                "  no threshold keeps false wakes and Parakeet's checks at the shipped "
+                f"detector's ({f0} and {a0} on the training negatives)"
+            )
+            return head, det, None, None, {"shipped_false_wakes": f0, "shipped_asked": a0}
+        thr, floor, curve = point
+        log(
+            f"  threshold {thr:.2f}, floor {floor:.2f}: {curve['false_wakes']} false wakes and "
+            f"{curve['asked']} checks on the training negatives (shipped "
+            f"{curve['shipped_false_wakes']} and {curve['shipped_asked']})"
+        )
+        return head, det, thr, floor, curve
+
     # cross-check: every take scored by a model that never saw its recording
     log(f"cross-check over {len(fold_sets)} folds")
+    cv_ok = True
     cv_before: dict[str, evaluate.Count] = {}
     cv_after: dict[str, evaluate.Count] = {}
     all_groups = set(weight)
     for i, f in enumerate(fold_sets):
         log(f" fold {i}: holding out {sorted(f)}")
         _h, det, thr, floor, _c = fit(all_groups - f, a.seed + i)
+        if thr is None:
+            cv_ok = False
+            continue
         for k, v in score_takes(det, thr, floor, f).items():
             cv_after.setdefault(k, evaluate.Count()).add(v)
         for k, v in score_takes(shipped, SHIPPED_THRESHOLD, SHIPPED_FLOOR, f).items():
@@ -480,6 +491,18 @@ def main(argv: list[str] | None = None) -> int:
     held = fold_sets[0]
     log(f"candidate: holding out {sorted(held)}")
     head, det, thr, floor, curve = fit(all_groups - held, a.seed)
+    if thr is None or not cv_ok:
+        out = private_dir(a.out / a.name)
+        why = (
+            "No threshold of the new detector keeps its false wakes and Parakeet's checks at "
+            "or under the shipped detector's on the training negatives "
+            + ("(the candidate)" if thr is None else "(a fold of the cross-check)")
+            + ". Nothing was written that could be installed: keep the shipped detector, "
+            "keep and label more wake takes, and run this again."
+        )
+        (out / "report.md").write_text(f"# Wake detector {a.name}: not made\n\n{why}\n")
+        print(why)
+        return 3
 
     rep = evaluate.Report()
     for title, s in [(st.title, s) for st in sets for s in st.streams]:
