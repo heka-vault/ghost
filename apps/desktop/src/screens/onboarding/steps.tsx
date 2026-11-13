@@ -41,6 +41,7 @@ import { ModelSection } from "../settings/ModelSection";
 import { HeroPresence, StepFrame } from "./frame";
 import type { Wizard } from "./index";
 import { firstSentence, phraseCase, splitList, wakeHelp } from "./state";
+import { KEEP_NOTICE } from "../hear/wakeTakes";
 import { exchangeOf, isAwake, useWakeWatch } from "./watch";
 
 /* ------------------------------------------------------------------------------ shared */
@@ -535,6 +536,12 @@ export function WakeStep({ w }: { w: Wizard }) {
       </p>
       <div className="onb-try">
         {line && <p className="onb-try__line">{line}</p>}
+        <p className="onb-try__meta">
+          {KEEP_NOTICE}{" "}
+          <a href="#/settings/sound" onClick={(e) => (e.preventDefault(), navigate("/settings/sound"))}>
+            Turn off or delete
+          </a>
+        </p>
         {list.length > 1 && !success && !quiet && <p className="onb-try__meta">It also answers to {list.slice(1).map((o) => quoted(phraseCase(o))).join(" and ")}.</p>}
         {(quiet || off) && !success && (
           <div className="onb-ladder">

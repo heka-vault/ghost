@@ -430,6 +430,8 @@ pub struct DetectorSpec {
     pub models: Vec<ghost_infer::WakeModel>,
     pub verify: bool,
     pub cooldown_secs: f64,
+    /// Kept wake takes (ADR 0065): each decided hit's audio, when the operator keeps them.
+    pub keeper: Option<Arc<dyn ghost_voice::wakeword::TakeKeeper>>,
 }
 
 /// The listener's view of a shared scorer.
@@ -449,6 +451,7 @@ impl DetectorSpec {
             models: self.models.clone(),
             verify: self.verify,
             cooldown_secs: self.cooldown_secs,
+            keeper: self.keeper.clone(),
         }
     }
 }
@@ -1062,6 +1065,7 @@ mod tests {
             )],
             verify: true,
             cooldown_secs: 2.0,
+            keeper: None,
         };
         let l = WakeListener::new(
             settings(|_| None),

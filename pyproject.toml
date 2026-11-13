@@ -18,7 +18,7 @@ package = false
 
 [tool.uv.workspace]
 members = ["tools"]
-exclude = ["tools/oracle", "tools/voice-trial"]
+exclude = ["tools/oracle", "tools/voice-trial", "tools/wake-train"]
 
 [dependency-groups]
 dev = ["pytest>=8.3", "ruff>=0.8"]
@@ -33,6 +33,10 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "ASYNC"]
+
+[tool.ruff.lint.isort]
+# The same answer in a clean checkout and in one with the tools' environments built.
+known-first-party = ["wake_train"]
 
 [tool.ruff.lint.per-file-ignores]
 # One-off measurement scripts whose report lines are long f-strings.

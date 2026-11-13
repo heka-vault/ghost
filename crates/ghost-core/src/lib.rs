@@ -49,6 +49,7 @@ pub mod store;
 pub mod targets;
 pub mod time;
 pub mod waiting;
+pub mod wake_takes;
 pub mod watches;
 
 pub use apps::{App, AppError, AppSpec, Apps, AppsFile, ToolInfo};

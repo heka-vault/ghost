@@ -129,6 +129,12 @@ export type ScheduleRunInfo = Schemas["ScheduleRunInfo"];
 export type ScheduleRunsView = Schemas["ScheduleRunsView"];
 /** The Hearing test (ADR 0042): the recorder, a take's check, the take list, sessions and score runs. */
 export type HearView = Schemas["HearView"];
+/** Kept wake takes (ADR 0065). */
+export type WakeTakesView = Schemas["WakeTakesView"];
+export type WakeTakeView = Schemas["WakeTakeView"];
+export type WakeTakesChoice = Schemas["WakeTakesChoice"];
+export type WakeTakeLabel = Schemas["WakeTakeLabel"];
+export type WakeTakeOutcome = Schemas["WakeTakeOutcome"];
 export type HearState = Schemas["HearState"];
 export type HearScoring = Schemas["HearScoring"];
 export type TakeEnding = Schemas["TakeEnding"];
@@ -728,6 +734,31 @@ export class GhostClient {
   }
   hearStopPlaying() {
     return unwrap(this.api.POST("/hear/play/stop"));
+  }
+
+  // ------------------------------------------------------------------ kept wake takes (ADR 0065)
+  /** Every kept wake take (no audio), the choice, the count and the bytes. */
+  wakeTakes() {
+    return unwrap(this.api.GET("/wake/takes"));
+  }
+  setWakeTakesChoice(choice: WakeTakesChoice) {
+    return unwrap(this.api.PUT("/wake/takes/choice", { body: choice }));
+  }
+  labelWakeTake(id: string, label: WakeTakeLabel | null) {
+    return unwrap(this.api.PUT("/wake/takes/{id}/label", { params: { path: { id } }, body: { label } }));
+  }
+  deleteWakeTake(id: string) {
+    return unwrap(this.api.DELETE("/wake/takes/{id}", { params: { path: { id } } }));
+  }
+  deleteWakeTakes() {
+    return unwrap(this.api.DELETE("/wake/takes"));
+  }
+  /** Through Ghost's own speaker; `array`: the array's own stream. */
+  playWakeTake(id: string, array = false) {
+    return unwrap(this.api.POST("/wake/takes/{id}/play", { params: { path: { id } }, body: { array } }));
+  }
+  stopWakeTake() {
+    return unwrap(this.api.POST("/wake/takes/play/stop"));
   }
   hearRuns() {
     return unwrap(this.api.GET("/hear/runs"));

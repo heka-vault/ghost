@@ -236,3 +236,4 @@
 /* The realtime voice's disclosure (ADR 0063): what changes, one plain line each. */
 .set-disclosure { display: grid; gap: var(--space-2); color: var(--text-2); font-size: var(--text-sm); line-height: var(--leading-sm); }
 .set-disclosure__line { display: block; padding-left: var(--space-3); border-left: 2px solid var(--border); }
+.set-wake-takes { display: inline-flex; align-items: center; gap: var(--space-3); }

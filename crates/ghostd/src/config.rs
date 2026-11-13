@@ -161,6 +161,10 @@ pub struct GhostdSettings {
     pub wake_address_verify: Option<bool>,
     /// Their score that counts as a hit. Unset: 0.3 when they are checked, 0.7 when not.
     pub wake_address_threshold: Option<f64>,
+    /// A retrained "hey ghost" detector by name (ADR 0065, `wake_detectors`): its file and
+    /// its card's threshold and floor replace the shipped model's. Empty or `shipped`: the
+    /// shipped one. `ghostd detector use <name>` sets it.
+    pub wake_detector: String,
 
     // Audio
     /// Matched against sink-input application names.
@@ -219,6 +223,7 @@ impl Default for GhostdSettings {
             wake_address_model_path: None,
             wake_address_verify: None,
             wake_address_threshold: None,
+            wake_detector: String::new(),
             duck_apps: vec!["spotify".into()],
             duck_level: 0.25,
             pause_players: true,
@@ -410,6 +415,7 @@ impl GhostdSettings {
             "GHOST_WAKE_ADDRESS_THRESHOLD",
             &mut s.wake_address_threshold,
         )?;
+        env.string("GHOST_WAKE_DETECTOR", &mut s.wake_detector);
         env.list("GHOST_DUCK_APPS", &mut s.duck_apps)?;
         env.float("GHOST_DUCK_LEVEL", &mut s.duck_level)?;
         env.bool("GHOST_PAUSE_PLAYERS", &mut s.pause_players)?;
@@ -432,6 +438,12 @@ impl GhostdSettings {
             return t;
         }
         if self.wake_verify { 0.3 } else { 0.7 }
+    }
+
+    /// The retrained detector set by name, if any (ADR 0065).
+    pub fn retrained_detector(&self) -> Option<&str> {
+        let n = self.wake_detector.trim();
+        (!n.is_empty() && n != crate::wake_detectors::SHIPPED).then_some(n)
     }
 
     pub fn address_verify(&self) -> bool {
