@@ -1,7 +1,8 @@
 # Ghost's entry points. `make` alone lists them, grouped by what you are doing.
 #
 # Working on Ghost:
-#   make setup     once per machine: dependencies, Ghost's folder, the echo-cancelled mic
+#   make prereqs   what this machine is missing to build Ghost, and the command that installs it
+#   make setup     once per machine: the build, the models, Ghost's folder
 #   make dev       the daemon and the desktop app from this checkout, both logging to this
 #                  terminal; the UI reloads on save, and Ctrl+C stops both
 #   make reload    in another terminal after a Rust change: rebuilds and restarts the daemon,
@@ -51,10 +52,10 @@ define ghostd
 cargo build -q -p ghostd || exit 1; $(load_env) $(GHOSTD)
 endef
 
-.PHONY: help setup sync env passwords passwords-import echo-cancel echo-cancel-off \
+.PHONY: help prereqs setup sync env passwords passwords-import echo-cancel echo-cancel-off \
         dev daemon desktop desktop-web reload start stop restart \
         wake say status check latency restore-volumes \
-        lint fmt test deny typecheck ci api-schema version release \
+        lint fmt test deny typecheck contract web ci api-schema version release screenshots \
         deploy deploy-rollback deploy-status service-on service-off service-logs service-install \
         perf perf-micro perf-llm perf-providers perf-hear perf-turns record wake-eval record-takes wake-takes-eval wake-check-replay \
         android android-apk android-install mobile-web \
@@ -65,19 +66,20 @@ help: ## list the targets
 
 ##@ Set up, once per machine (safe to repeat)
 
-setup: ## build the daemon, sync the tools, pnpm install, env, echo-cancel and check, then says what is left to do by hand
-	@if dpkg -l 'heka-ghost*' 2>/dev/null | grep -q '^ii'; then \
-	  echo "The heka-ghost packages are installed. Remove them so only this checkout runs:"; \
-	  echo "  sudo apt remove heka-ghost heka-ghost-desktop heka-ghostd"; echo; fi
-	cargo build -p ghostd
-	@$(MAKE) --no-print-directory sync
+prereqs: ## check the system packages, Rust, Node, pnpm and uv, and say the command that installs what is missing (never runs sudo)
+	@scripts/prereqs.sh
+
+setup: ## prereqs, then the daemon built, the Python tools synced (make sync adds the oracle), the runtime and the models fetched, pnpm install, Ghost's folder, and ghostd check
+	@scripts/prereqs.sh
+	cargo build -p ghostd -p ghost-core --bins
+	$(UV) sync
 	@$(MAKE) --no-print-directory onnxruntime
 	@$(MAKE) --no-print-directory models
 	pnpm install
 	@$(MAKE) --no-print-directory env
-	@systemctl --user is-active --quiet ghost-echo-cancel || infra/pipewire/install.sh
-	@$(ghostd) check
+	@$(ghostd) check || true
 	@echo; echo "Ready: make dev starts the daemon and the desktop app from this checkout."
+	@echo "Optional: make echo-cancel, so Ghost doesn't hear itself on open speakers (README.md, \"Sound\")."
 
 sync: ## install or refresh the Python tools: the root workspace and the oracle
 	$(UV) sync
@@ -86,15 +88,15 @@ sync: ## install or refresh the Python tools: the root workspace and the oracle
 onnxruntime: ## fetch ONNX Runtime 1.24.4 into ~/.cache/ghost/onnxruntime/ once, where the daemon loads it from (the bundle carries its own)
 	@scripts/onnxruntime.sh >/dev/null
 
-models: ## fetch the model files into ~/.cache/ghost/models/ once, pinned: Silero, Smart Turn, the wake front end (the bundle carries these) and Parakeet (2.5 GB, not in the bundle)
+models: ## fetch the model files into ~/.cache/ghost/ once, pinned: Silero, Smart Turn, the wake front end (the bundle carries these), Parakeet (2.5 GB) and Kokoro (340 MB)
 	@scripts/models.sh >/dev/null
 	@scripts/models.sh parakeet >/dev/null
+	@scripts/models.sh kokoro >/dev/null
 
 env: ## seed settings.env, policy.toml and Ghost's folder on first run (passwords: make passwords)
 	@if [[ ! -e "$(SETTINGS)" ]]; then \
-	  mkdir -p "$(dir $(SETTINGS))"; \
-	  printf 'GHOST_INPUT_DEVICE=ghost.mic\n' > "$(SETTINGS)"; \
-	  echo "seeded $(SETTINGS) (ghost.mic); edit it for non-secret settings"; \
+	  mkdir -p "$(dir $(SETTINGS))"; cp infra/example/settings.env "$(SETTINGS)"; \
+	  echo "seeded $(SETTINGS); non-secret settings only (passwords: make passwords)"; \
 	fi
 	@if [[ ! -e "$(POLICY)" ]]; then \
 	  mkdir -p "$(dir $(POLICY))"; cp infra/policy.example.toml "$(POLICY)"; \
@@ -114,7 +116,7 @@ passwords: ## what is in Ghost's vault, by name; set one with: target/debug/ghos
 passwords-import: ## once: heka-vault, ~/.config/ghost/env and apps.env into the vault, then the plain files deleted
 	@$(ghostd) passwords import
 
-echo-cancel: ## install and start the echo-cancelled mic "ghost.mic" (a user service); without it Ghost hears itself
+echo-cancel: ## optional: the echo-cancelled mic "ghost.mic" (a user service), so Ghost doesn't hear itself on open speakers
 	infra/pipewire/install.sh
 
 echo-cancel-off: ## stop and remove the echo-cancel service
@@ -133,6 +135,9 @@ desktop: ## the desktop app only (Tauri window, hot reload), against whichever d
 
 desktop-web: ## the same UI in a browser at http://localhost:1420; ?mock=busy and other scenarios need no daemon
 	@pnpm dev:desktop
+
+screenshots: ## the README's screenshots from the mock UI (make desktop-web running; Chrome and ImageMagick): make screenshots [SHOTS="home apps"]
+	@scripts/screenshots.sh $(SHOTS)
 
 reload: ## rebuild and restart the daemon that make dev or make daemon runs, after a Rust change
 	@scripts/dev.sh reload
@@ -175,7 +180,7 @@ restore-volumes: ## undo music ducking if ghostd died mid-session
 
 ##@ Before you push (CI runs these and more)
 
-ci: lint test deny typecheck ## lint, test, deny and typecheck, as CI does
+ci: lint test deny typecheck contract web ## everything CI runs but the bundle: lint, test, deny, typecheck, the API contract, the web tests and build
 
 lint: ## rustfmt and clippy over the workspace, then ruff over the Python tools and scripts
 	cargo fmt --all --check
@@ -196,6 +201,14 @@ deny: ## cargo deny: a known vulnerability or a license outside deny.toml fails
 
 typecheck: ## the TypeScript apps and packages
 	pnpm typecheck
+
+contract: ## openapi.json current from the Rust types, and the TS client current from it
+	cargo run -q -p ghost-api --bin ghost-api-export --locked | diff -u packages/api/openapi.json -
+	pnpm gen:check
+
+web: ## the TypeScript tests (vitest) and the desktop's production build
+	pnpm test
+	pnpm build
 
 api-schema: ## regenerate packages/api/openapi.json from the Rust types (crates/ghost-api), then the TS client
 	cargo run -q -p ghost-api --bin ghost-api-export > packages/api/openapi.json
