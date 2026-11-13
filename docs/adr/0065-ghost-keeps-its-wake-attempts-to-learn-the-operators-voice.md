@@ -1,4 +1,4 @@
-# 0064: Ghost keeps its wake attempts to learn the operator's voice
+# 0065: Ghost keeps its wake attempts to learn the operator's voice
 
 - **Status:** accepted
 - **Date:** 2026-11-13

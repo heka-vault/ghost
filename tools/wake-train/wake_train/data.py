@@ -1,4 +1,4 @@
-"""What the retraining reads, and how it splits it (ADR 0064). Standard library only, so the
+"""What the retraining reads, and how it splits it (ADR 0065). Standard library only, so the
 tools' own tests cover it without the training's dependencies.
 
 Three kinds of audio, all read in place and never copied, sent or rewritten:

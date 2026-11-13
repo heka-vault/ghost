@@ -1,5 +1,5 @@
 """Build a new "hey ghost" detector from the operator's own wake takes, on this machine
-(ADR 0064). ``make wake-train``; ``--help`` for the options.
+(ADR 0065). ``make wake-train``; ``--help`` for the options.
 
 1. Reads the labelled streams (``sets.txt``) and the kept takes the operator labelled.
 2. Holds out whole recordings of the operator's takes for testing (``--folds``: each take

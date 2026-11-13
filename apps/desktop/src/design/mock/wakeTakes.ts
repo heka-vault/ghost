@@ -1,5 +1,5 @@
 /**
- * The mock daemon's kept wake takes (ADR 0064, `ghostd::wake_takes`): a morning's takes,
+ * The mock daemon's kept wake takes (ADR 0065, `ghostd::wake_takes`): a morning's takes,
  * woken and turned down, some labelled; the choice, labels, deleting and playing (playing
  * does nothing here: the daemon plays through Ghost's own speaker). Readings are made up.
  */

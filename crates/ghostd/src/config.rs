@@ -161,7 +161,7 @@ pub struct GhostdSettings {
     pub wake_address_verify: Option<bool>,
     /// Their score that counts as a hit. Unset: 0.3 when they are checked, 0.7 when not.
     pub wake_address_threshold: Option<f64>,
-    /// A retrained "hey ghost" detector by name (ADR 0064, `wake_detectors`): its file and
+    /// A retrained "hey ghost" detector by name (ADR 0065, `wake_detectors`): its file and
     /// its card's threshold and floor replace the shipped model's. Empty or `shipped`: the
     /// shipped one. `ghostd detector use <name>` sets it.
     pub wake_detector: String,
@@ -432,7 +432,7 @@ impl GhostdSettings {
         if self.wake_verify { 0.3 } else { 0.7 }
     }
 
-    /// The retrained detector set by name, if any (ADR 0064).
+    /// The retrained detector set by name, if any (ADR 0065).
     pub fn retrained_detector(&self) -> Option<&str> {
         let n = self.wake_detector.trim();
         (!n.is_empty() && n != crate::wake_detectors::SHIPPED).then_some(n)

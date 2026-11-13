@@ -1,4 +1,4 @@
-//! Retrained wake detectors, installed beside the shipped one (ADR 0064).
+//! Retrained wake detectors, installed beside the shipped one (ADR 0065).
 //!
 //! `make wake-train` writes each into `<data>/wake/detectors/<name>/`: `hey_ghost.onnx` and
 //! `card.json`, its SHA-256, the threshold and floor chosen from its own curve, and every

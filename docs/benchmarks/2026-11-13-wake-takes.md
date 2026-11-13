@@ -1,6 +1,6 @@
 # Kept wake takes and retraining on this computer, 2026-11-13
 
-ADR 0064 and issue #101: Ghost keeps each wake attempt, and `make wake-train` retrains the
+ADR 0065 and issue #101: Ghost keeps each wake attempt, and `make wake-train` retrains the
 "hey ghost" detector on them. This note covers three things: the keeper running live, what
 local retraining costs, and whether retraining on the takes already on disk beats the
 shipped detector. It quotes no speech.

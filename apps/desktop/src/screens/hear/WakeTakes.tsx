@@ -1,5 +1,5 @@
 /**
- * Owner: hear. Wake takes (ADR 0064): the sound of each time Ghost thought it heard its name,
+ * Owner: hear. Wake takes (ADR 0065): the sound of each time Ghost thought it heard its name,
  * kept on this computer to learn the operator's voice. Each is labelled with one key and
  * the next unlabelled one plays at once (`wakeTakes.ts` has the keys). Takes play through
  * Ghost's own speaker, as the Hearing test's do; no audio comes to this screen.

@@ -1,4 +1,4 @@
-//! Kept wake takes, the daemon's side (ADR 0064, `ghost_core::wake_takes`).
+//! Kept wake takes, the daemon's side (ADR 0065, `ghost_core::wake_takes`).
 //!
 //! - [`Keeper`] is what the wake processor hands each decided hit to: it adds the input's
 //!   name and, when the array's own stream is captured beside the one the detector hears,

@@ -1,4 +1,4 @@
-"""The operating point of a retrained detector (ADR 0064): chosen under the daemon's rule,
+"""The operating point of a retrained detector (ADR 0065): chosen under the daemon's rule,
 and refused when no point keeps false wakes at the shipped detector's. Synthetic scores."""
 
 import numpy as np

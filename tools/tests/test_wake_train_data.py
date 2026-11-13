@@ -1,4 +1,4 @@
-"""The retraining's data handling (ADR 0064, tools/wake-train/wake_train/data.py): what it
+"""The retraining's data handling (ADR 0065, tools/wake-train/wake_train/data.py): what it
 reads, what counts as the operator's voice, and what is held out. Tiny synthetic audio in a
 temp folder; never the operator's."""
 

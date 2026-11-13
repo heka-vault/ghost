@@ -67,7 +67,7 @@ pub type Recognize = Arc<dyn Fn(Vec<f32>) -> String + Send + Sync>;
 pub type OnMatch = Arc<dyn Fn(WakeMatch) -> BoxFuture<'static, ()> + Send + Sync>;
 pub type OnHeard = Arc<dyn Fn() -> BoxFuture<'static, ()> + Send + Sync>;
 
-/// Where a decided hit's audio goes when the operator keeps wake takes (ADR 0064,
+/// Where a decided hit's audio goes when the operator keeps wake takes (ADR 0065,
 /// `ghost_core::wake_takes`). The processor asks `wants` before it copies any audio, so
 /// with keeping off nothing is copied, let alone written.
 pub trait TakeKeeper: Send + Sync {
@@ -684,7 +684,7 @@ mod tests {
         parts.into_iter().flatten().collect()
     }
 
-    /// A keeper that records what it is handed (ADR 0064).
+    /// A keeper that records what it is handed (ADR 0065).
     struct FakeKeeper {
         on: bool,
         asked: Mutex<usize>,

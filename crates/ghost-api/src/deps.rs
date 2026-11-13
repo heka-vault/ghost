@@ -294,7 +294,7 @@ pub struct Deps {
     pub model_sign_in: ModelSignIn,
     /// The Hearing test (ADR 0042); None in a daemon without the desk's models.
     pub hear: Option<Arc<dyn crate::hear::HearPort>>,
-    /// Kept wake takes (ADR 0064); None in a daemon without a wake listener.
+    /// Kept wake takes (ADR 0065); None in a daemon without a wake listener.
     pub wake_takes: Option<Arc<dyn crate::wake_takes::WakeTakesPort>>,
     /// The schedules and their runs (ADR 0047); None in a daemon without them.
     pub schedules: Option<Arc<ghost_core::schedules::Scheduler>>,

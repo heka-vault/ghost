@@ -1,4 +1,4 @@
-//! Kept wake takes (ADR 0064): the sound of each time Ghost thought it heard its name, kept
+//! Kept wake takes (ADR 0065): the sound of each time Ghost thought it heard its name, kept
 //! on this computer so the wake detector can be retrained on the operator's own voice
 //! through their own microphone.
 //!

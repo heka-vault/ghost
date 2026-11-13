@@ -1,4 +1,4 @@
-"""Retraining the "hey ghost" detector on the operator's own wake takes (ADR 0064)."""
+"""Retraining the "hey ghost" detector on the operator's own wake takes (ADR 0065)."""
 
 import os
 

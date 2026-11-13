@@ -355,7 +355,7 @@ pub struct Late {
     pub schedules: OnceLock<Arc<ghost_core::schedules::Scheduler>>,
     /// The Hearing test's recorder (ADR 0042).
     pub hear: OnceLock<Arc<crate::hear::HearDesk>>,
-    /// Kept wake takes (ADR 0064).
+    /// Kept wake takes (ADR 0065).
     pub wake_takes: OnceLock<Arc<ghost_core::wake_takes::Takes>>,
     /// The outside tools and their listener (ADR 0048).
     pub outside: OnceLock<Arc<crate::outside::OutsideHost>>,
@@ -552,7 +552,7 @@ impl Daemon {
         self.late.models.get().cloned()
     }
 
-    /// Kept wake takes (ADR 0064): made once, under the data folder.
+    /// Kept wake takes (ADR 0065): made once, under the data folder.
     pub fn wake_takes(&self) -> Arc<ghost_core::wake_takes::Takes> {
         self.late
             .wake_takes
@@ -1106,7 +1106,7 @@ impl Daemon {
         let cfg = self.cfg();
         let voice = self.voice();
         let (mut path, address) = wake_model_paths(&cfg, &voice);
-        // ADR 0064: a retrained detector, with the threshold and floor from its own curve.
+        // ADR 0065: a retrained detector, with the threshold and floor from its own curve.
         let mut retrained: Option<(f64, f64)> = None;
         if let Some(name) = cfg.retrained_detector() {
             match crate::wake_detectors::load(&cfg.data_dir, name) {
@@ -1175,7 +1175,7 @@ impl Daemon {
             );
         }
         info!("wake: those phrases only");
-        // ADR 0064: the array's own stream beside the one the detector hears, for the kept
+        // ADR 0065: the array's own stream beside the one the detector hears, for the kept
         // takes, when there is one and the detector is not already hearing it.
         let tape = std::fs::read_to_string(cfg.config_dir.join("echo-cancel.conf"))
             .ok()
@@ -1279,7 +1279,7 @@ impl Daemon {
             Err(e) => warn!("listening: the switch could not be read ({e}); listening"),
         }
         d.follow_mic();
-        // ADR 0064: kept wake takes, on unless the operator turned them off.
+        // ADR 0065: kept wake takes, on unless the operator turned them off.
         match d.wake_takes().attach(Items::new(store.clone())) {
             Ok(c) if c.keep => info!("wake takes: kept on this computer (Settings › Sound)"),
             Ok(_) => info!("wake takes: not kept, as the operator chose"),

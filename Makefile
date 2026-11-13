@@ -295,7 +295,7 @@ record-takes: ## guided recording of the wake test set (docs/wake-recording.md):
 wake-takes-eval: ## score the wake takes, transcript wake against the trained detector (the oracle): make wake-takes-eval [TAKES=dir]
 	@$(ORACLE) python -I docs/benchmarks/scripts/wake_takes_eval.py $(if $(TAKES),--takes $(TAKES)) $(ARGS)
 
-wake-train: ## retrain the "hey ghost" detector on your labelled wake takes, on this computer (ADR 0064, docs/wake-takes.md): make wake-train [ARGS="--unlabelled-accepted-are-me"]
+wake-train: ## retrain the "hey ghost" detector on your labelled wake takes, on this computer (ADR 0065, docs/wake-takes.md): make wake-train [ARGS="--unlabelled-accepted-are-me"]
 	@$(UV) sync -q --project tools/wake-train
 	@$(UV) run -q --project tools/wake-train python -I -m wake_train $(ARGS)
 

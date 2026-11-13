@@ -1,4 +1,4 @@
-//! Kept wake takes (ADR 0064): the sound of each time Ghost thought it heard its name, kept
+//! Kept wake takes (ADR 0065): the sound of each time Ghost thought it heard its name, kept
 //! on this computer to learn the operator's voice, and the operator's labels on them.
 //!
 //! These routes carry no audio: the list is metadata (the score, the time, the input, the

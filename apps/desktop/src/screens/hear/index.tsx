@@ -5,7 +5,7 @@
  *   #/hear/sessions     the sessions recorded, their takes, play, continue, delete
  *   #/hear/runs[/:id]   score a session; the runs, and a run's report against a baseline
  *   #/hear/plan         the take list, editable
- *   #/hear/wake         wake takes Ghost kept (ADR 0064): play, label, delete
+ *   #/hear/wake         wake takes Ghost kept (ADR 0065): play, label, delete
  *
  * The recorder holds the mic while it is open, so Ghost isn't listening for its name then.
  * It is open while Record is the tab (and while a run it started is scoring), and closes when

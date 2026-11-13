@@ -1,5 +1,5 @@
 /**
- * Kept wake takes (ADR 0064): the labelling's rules, apart from the screen so they are
+ * Kept wake takes (ADR 0065): the labelling's rules, apart from the screen so they are
  * tested on their own. A take is labelled with one key and the next unlabelled one plays at
  * once, so a day's takes are labelled in a couple of minutes.
  *

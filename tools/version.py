@@ -39,7 +39,7 @@ WORKSPACE = ("ghost", "ghost-tools")
 ORACLE = "ghost-oracle"
 # Kokoro's split and the third round's measurements (ADR 0053), its own lock too.
 VOICE_TRIAL = "ghost-voice-trial"
-# Retraining the wake detector on the operator's takes (ADR 0064), its own lock too.
+# Retraining the wake detector on the operator's takes (ADR 0065), its own lock too.
 WAKE_TRAIN = "ghost-wake-train"
 
 

@@ -1,7 +1,7 @@
 # Wake takes: Ghost learns your voice
 
 Ghost keeps the sound of each time it thinks it heard its name, on this computer, to learn
-your voice ([ADR 0064](adr/0064-ghost-keeps-its-wake-attempts-to-learn-the-operators-voice.md)).
+your voice ([ADR 0065](adr/0065-ghost-keeps-its-wake-attempts-to-learn-the-operators-voice.md)).
 The wake detector was trained on synthetic voices; your own "hey Ghost", through your own
 microphone, is what makes it hear you reliably.
 

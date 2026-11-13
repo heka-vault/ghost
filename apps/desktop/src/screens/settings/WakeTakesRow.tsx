@@ -1,5 +1,5 @@
 /**
- * Settings › Sound: kept wake takes (ADR 0064). On unless the operator turns it off, so it
+ * Settings › Sound: kept wake takes (ADR 0065). On unless the operator turns it off, so it
  * is said here in one plain line, with the switch, what is kept, Delete, and where to label
  * them (Hearing test › Wake takes).
  */

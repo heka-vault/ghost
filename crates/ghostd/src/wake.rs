@@ -426,7 +426,7 @@ pub struct DetectorSpec {
     pub models: Vec<ghost_infer::WakeModel>,
     pub verify: bool,
     pub cooldown_secs: f64,
-    /// Kept wake takes (ADR 0064): each decided hit's audio, when the operator keeps them.
+    /// Kept wake takes (ADR 0065): each decided hit's audio, when the operator keeps them.
     pub keeper: Option<Arc<dyn ghost_voice::wakeword::TakeKeeper>>,
 }
 

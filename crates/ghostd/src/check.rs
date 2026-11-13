@@ -241,7 +241,7 @@ pub fn check_models(
         }
     }
 
-    // ADR 0064: a retrained detector is loaded only when it matches its card and wakes no
+    // ADR 0065: a retrained detector is loaded only when it matches its card and wakes no
     // more often than the shipped one on any set the card measured.
     if let Some(name) = cfg.retrained_detector() {
         match crate::wake_detectors::load(&cfg.data_dir, name) {

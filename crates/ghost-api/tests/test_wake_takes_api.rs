@@ -1,4 +1,4 @@
-//! Kept wake takes (ADR 0064): the list carries no audio, the choice and labels go through,
+//! Kept wake takes (ADR 0065): the list carries no audio, the choice and labels go through,
 //! deleting one and deleting all really delete. A fake port over a real keeper in a temp
 //! folder; no audio device.
 
