@@ -1,0 +1,60 @@
+# The labelled streams of the 2026-11-12 wake check (docs/benchmarks/2026-11-12-wake-check.md),
+# as `make wake-dynamics` replays them. One stream per line, in wake_check_replay.py's form
+# (PATH[#CHANNEL]:LABEL); `[name]` starts a set. A PATH with `*` is its sorted matches joined
+# with 1 s of silence after each. $SCRATCH is the main checkout's .scratch
+# (~/projects/active/ghost/.scratch unless set); $HEAR is the Hearing recorder's sessions
+# (~/.local/share/ghost/hear/sessions unless set). Everything is read, nothing written.
+
+[operator takes, ghost.mic]
+$SCRATCH/clips/wake-weak-194309-aec.wav:pos@39.2,62.8,70.16
+$SCRATCH/clips/over-ghost-195521-aec.wav:pos@44.72,46.8,48.88,82.72,87.92,177.36
+$SCRATCH/clips/weak-empty-203018-aec.wav:pos@216.32,218.48
+$SCRATCH/clips/respeaker-out-212422-aec.wav:pos@13.8,16.5,116.7,121.5,125.1,131.1,576.1
+$SCRATCH/clips/music-80pct-aec.wav:pos@24.9,~22.3
+$SCRATCH/clips/barge-154525-aec.wav:pos@41.5
+$SCRATCH/clips/barge-175024-aec.wav:pos@37.8
+
+[operator takes, raw array]
+$SCRATCH/clips/wake-weak-194309-raw.wav:pos@39.2,62.8,70.16
+$SCRATCH/clips/over-ghost-195521-raw.wav:pos@44.72,46.8,48.88,82.72,87.92,177.36
+$SCRATCH/clips/weak-empty-203018-raw.wav:pos@216.32,218.48
+$SCRATCH/clips/respeaker-out-212422-raw.wav:pos@13.8,16.5,116.7,121.5,125.1,131.1,576.1
+$SCRATCH/clips/music-80pct-raw.wav:pos@24.9,~22.3
+$SCRATCH/clips/barge-154525-raw.wav:pos@41.5
+$SCRATCH/clips/barge-175024-raw.wav:pos@37.8
+
+[operator negatives, ghost.mic]
+$HEAR/2026-11-06/*.aec.wav:neg
+$SCRATCH/clips/wake-empty-200200-aec.wav:neg
+$SCRATCH/clips/wake-184852-aec.wav:neg
+$SCRATCH/clips/wake-fr-185232-aec.wav:neg
+$SCRATCH/clips/barge-155521-aec.wav:neg
+$SCRATCH/clips/barge-161511-aec.wav:neg
+$SCRATCH/clips/barge-162905-aec.wav:neg
+$SCRATCH/clips/barge-174030-aec.wav:neg
+$SCRATCH/clips/barge-180635-aec.wav:neg
+$SCRATCH/clips/barge-181215-aec.wav:neg
+$SCRATCH/clips/barge-181716-aec.wav:neg
+$SCRATCH/clips/barge-183525-aec.wav:neg
+
+[operator negatives, raw array]
+$HEAR/2026-11-06/*.raw.wav#0:neg
+$SCRATCH/clips/wake-empty-200200-raw.wav:neg
+$SCRATCH/clips/wake-184852-raw.wav:neg
+$SCRATCH/clips/wake-fr-185232-raw.wav:neg
+$SCRATCH/clips/barge-155521-raw.wav:neg
+$SCRATCH/clips/barge-161511-raw.wav:neg
+$SCRATCH/clips/barge-162905-raw.wav:neg
+$SCRATCH/clips/barge-174030-raw.wav:neg
+$SCRATCH/clips/barge-180635-raw.wav:neg
+$SCRATCH/clips/barge-181215-raw.wav:neg
+$SCRATCH/clips/barge-181716-raw.wav:neg
+$SCRATCH/clips/barge-183525-raw.wav:neg
+
+[Kokoro, digital]
+$SCRATCH/wake-review/program-full.wav:program=$SCRATCH/wake-review/program-full.json
+
+[Kokoro, room (array ch0: desk, music, far)]
+$SCRATCH/wake-review/rec/near-rs.wav:program=$SCRATCH/wake-review/program-room.json
+$SCRATCH/wake-review/rec/music-rs.wav:program=$SCRATCH/wake-review/program-room.json
+$SCRATCH/wake-review/rec/far-rs.wav:program=$SCRATCH/wake-review/program-room.json
