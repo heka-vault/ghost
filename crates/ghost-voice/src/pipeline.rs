@@ -869,6 +869,7 @@ pub fn build_session(p: SessionParams) -> GhostSession {
         max_tokens: settings.llm_max_tokens,
         thinking: (!settings.llm_thinking.is_empty()).then(|| settings.llm_thinking.clone()),
         cache_system: true,
+        effort: None,
     };
     let inject: crate::llm::Inject = {
         let c = control.clone();
@@ -1082,7 +1083,8 @@ pub fn build_session(p: SessionParams) -> GhostSession {
                 runtime.clone(),
             )
             .with_fast(p.fast_model.clone())
-            .with_fast_thinking(settings.llm_fast_thinking.clone())
+            .with_fast_ask(settings.fast_ask())
+            .with_race(settings.llm_race)
             .with_fast_reads(
                 (settings.llm_fast_reads && p.fast_model.is_some()).then(|| {
                     let d = dispatcher.clone();

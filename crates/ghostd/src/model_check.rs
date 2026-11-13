@@ -7,7 +7,10 @@
 //! - a connection too slow for a good spoken reply is a note on the waiting list, with
 //!   what would help (a fast model, or which of the operator's tried options measured
 //!   faster), from the latest check of the saved connection or the operator's own recent
-//!   turns in `latency.jsonl`;
+//!   turns in `latency.jsonl`. It is for the screen (`Response::Show`): no route and no
+//!   wake ever says it. One item under one key, raised over 1.5 s, cleared only under
+//!   1.2 s, and its words kept while it holds unless the figure moves by half a second
+//!   or the advice changes ([`settle`]);
 //! - the desktop shows the latest check of the saved connection.
 //!
 //! The password is read from the vault by the daemon at the point of use (the env the
@@ -21,15 +24,20 @@ use ghost_api::ModelCheckRun;
 use ghost_core::connection::{ModelConnection, Target};
 use ghost_core::store::ModelCheckRow;
 use ghost_llm::capabilities::{self, route_key};
-use ghost_llm::check::{self, CheckOptions, ModelCheck, Tried};
+use ghost_llm::check::{
+    self, CheckOptions, ModelCheck, QUICK_AGAIN_SECS, SLOW_FIRST_WORD_SECS, Slow, Tried,
+};
 use ghost_llm::model::Model;
 use serde_json::Value;
 use tracing::{info, warn};
 
 use crate::daemon::{Daemon, lock};
 
-/// The waiting list's key for a connection too slow for a good spoken reply.
-pub const SLOW_PROBLEM_KEY: &str = "model:slow";
+/// The waiting list's key for a connection too slow for a good spoken reply: one item
+/// however its figure moves.
+pub const SLOW_NOTE_KEY: &str = "model:slow";
+/// How far the figure must move before a note that holds is reworded.
+const REWORD_BY_SECS: f64 = 0.5;
 /// Checks kept per route.
 const KEEP: i64 = 20;
 /// Recent spoken turns read for the live measure, and how many it needs.
@@ -46,6 +54,31 @@ fn label(row: &ModelCheckRow) -> String {
 
 fn parsed(row: &ModelCheckRow) -> Option<ModelCheck> {
     serde_json::from_value(row.report.clone()).ok()
+}
+
+/// The slow note after one more look: raised over [`SLOW_FIRST_WORD_SECS`], and once
+/// raised held until the measure is under [`QUICK_AGAIN_SECS`]; while it holds its words
+/// stay as they are unless the figure moved by [`REWORD_BY_SECS`] or the advice changed,
+/// so a connection near the line is neither raised and cleared nor reworded turn by turn.
+pub fn settle(
+    held: Option<&Slow>,
+    models: &[ModelCheck],
+    has_fast: bool,
+    live: Option<(f64, usize)>,
+    others: &[Tried],
+) -> Option<Slow> {
+    let over = if held.is_some() {
+        QUICK_AGAIN_SECS
+    } else {
+        SLOW_FIRST_WORD_SECS
+    };
+    let found = check::advice(models, has_fast, live, others, over)?;
+    match held {
+        Some(h) if h.help == found.help && (found.secs - h.secs).abs() < REWORD_BY_SECS => {
+            Some(h.clone())
+        }
+        _ => Some(found),
+    }
 }
 
 /// The first model call's time to its first byte in the operator's recent spoken turns:
@@ -131,7 +164,11 @@ impl Daemon {
             models.push(found);
         }
         let at = Utc::now();
-        let advice = self.advice_for(&models, fast.is_some(), &[route_key(&main)]);
+        // The Test judges what it tested afresh (it may not be the saved connection yet);
+        // the note on the waiting list is the saved connection's, with its hysteresis.
+        let advice = self
+            .advice_for(None, &models, fast.is_some(), &[route_key(&main)])
+            .map(|s| s.text());
         self.refresh_slow_note();
         ModelCheckRun { at, models, advice }
     }
@@ -165,8 +202,15 @@ impl Daemon {
             .unwrap_or_default()
     }
 
-    /// What would help, from `models` and the other routes the operator has tried.
-    fn advice_for(&self, models: &[ModelCheck], has_fast: bool, own: &[String]) -> Option<String> {
+    /// The note after one more look, from `models` and the other routes the operator has
+    /// tried, given the one that holds.
+    fn advice_for(
+        &self,
+        held: Option<&Slow>,
+        models: &[ModelCheck],
+        has_fast: bool,
+        own: &[String],
+    ) -> Option<Slow> {
         let others: Vec<Tried> = self
             .latest_checks()
             .iter()
@@ -180,7 +224,7 @@ impl Daemon {
             })
             .collect();
         let live = live_first_token(&crate::latency::read_records(&self.cfg().latency_path()));
-        check::advice(models, has_fast, live, &others)
+        settle(held, models, has_fast, live, &others)
     }
 
     /// The latest kept check of the saved connection.
@@ -193,11 +237,10 @@ impl Daemon {
         if let Some(f) = fast.as_ref().and_then(find).and_then(|r| parsed(&r)) {
             models.push(f);
         }
-        let advice = self.advice_for(&models, fast.is_some(), &[route_key(&main)]);
         Some(ModelCheckRun {
             at: main_row.at,
             models,
-            advice,
+            advice: self.slow_note(),
         })
     }
 
@@ -218,7 +261,7 @@ impl Daemon {
     }
 
     /// The slow note, from the saved connection's latest check and the operator's own
-    /// recent turns. On the waiting list while it holds (`slow_problem`).
+    /// recent turns. On the waiting list while it holds (`slow_note`), never said.
     pub(crate) fn refresh_slow_note(&self) {
         let (main, fast) = self.saved_targets();
         let rows = self.latest_checks();
@@ -228,7 +271,8 @@ impl Daemon {
             .filter_map(|t| rows.iter().find(|r| r.route == route_key(t)))
             .filter_map(parsed)
             .collect();
-        let note = self.advice_for(&mine, fast.is_some(), &[route_key(&main)]);
+        let held = lock(&self.model_slow).clone();
+        let note = self.advice_for(held.as_ref(), &mine, fast.is_some(), &[route_key(&main)]);
         let changed = {
             let mut slot = lock(&self.model_slow);
             let changed = *slot != note;
@@ -261,8 +305,8 @@ impl Daemon {
             .and_then(|c| c.first_word.median)
     }
 
-    pub(crate) fn slow_problem(&self) -> Option<String> {
-        lock(&self.model_slow).clone()
+    pub(crate) fn slow_note(&self) -> Option<String> {
+        lock(&self.model_slow).as_ref().map(Slow::text)
     }
 }
 
@@ -270,6 +314,35 @@ impl Daemon {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    fn live(secs: f64) -> Option<(f64, usize)> {
+        Some((secs, 10))
+    }
+
+    /// One refresh of the note from the operator's own turns, as `refresh_slow_note` does.
+    fn step(held: Option<Slow>, secs: f64) -> Option<Slow> {
+        settle(held.as_ref(), &[], true, live(secs), &[])
+    }
+
+    #[test]
+    fn the_note_is_one_item_that_holds_its_words_until_the_state_really_changes() {
+        // 2026-11-12: 1.6 s then 1.7 s made the note "new" twice and both wakes said it.
+        let first = step(None, 1.6).expect("over 1.5 s: raised");
+        let again = step(Some(first.clone()), 1.7).expect("still slow");
+        assert_eq!(
+            again.text(),
+            first.text(),
+            "a tenth of a second is not news"
+        );
+        // Hysteresis: once raised it holds until replies are clearly quick again.
+        let held = step(Some(again), 1.4).expect("1.4 s does not clear it");
+        assert_eq!(held.text(), first.text());
+        assert_eq!(step(Some(held), 1.1), None, "quick again: cleared");
+        assert_eq!(step(None, 1.4), None, "not slow enough to raise");
+        // A real move of the figure is reworded in place (the same key, new words).
+        let worse = step(Some(first.clone()), 2.3).expect("much slower");
+        assert!(worse.text().contains("2.3 s"), "{}", worse.text());
+    }
 
     #[test]
     fn the_live_measure_reads_the_first_call_of_recent_spoken_turns() {

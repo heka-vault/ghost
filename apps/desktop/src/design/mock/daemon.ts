@@ -3,7 +3,7 @@
  * update this state and emit the same events the real daemon would, so screens behave
  * as they will against the real thing. Foundation-owned; data lives in fixtures/.
  */
-import { wordEnds } from "@ghost/ui";
+import { parseLook, wordEnds } from "@ghost/ui";
 
 import { speechEnvelope } from "../../ui/VoiceWave";
 import type {
@@ -68,6 +68,7 @@ import { LONG_REPLY, type SessionFixture } from "./fixtures/session";
 import { sourceOf } from "./fixtures/sources";
 import { AUTONOMY, LISTS, conditionalFor, levelOf, parseRule, readPolicyText, ruleText, withRule } from "./permissions";
 import { type CatalogSkill, GHOST_SKILLS_DIR, SKILL_CATALOG, type SkillFixture, missingOf } from "./fixtures/skills";
+import { MockReach } from "./reach";
 import { MockRealtime } from "./realtime";
 import { hex, type Scenario, seeded } from "./scenarios";
 
@@ -244,6 +245,9 @@ export class MockDaemon {
   private hear: MockHear;
   /** What the agents do on their own (ADR 0047): the schedules and their runs. */
   private schedules: MockSchedules;
+  /** Each call an agent made, as counts and sizes (ADR 0060). */
+  private reach: MockReach;
+  private reachTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(scenario: Scenario, f: Fixtures, options: MockOptions = {}) {
     this.scenario = scenario;
@@ -364,7 +368,11 @@ export class MockDaemon {
         this.waitingChanged();
       },
       later: (fn, ms) => this.later(ms, fn),
+      ran: (run, phase) => this.emit({ type: "run", run, phase }),
     });
+    // What the day's agents read (ADR 0060), made up from its runs and the session.
+    this.reach = new MockReach([...f.apps.filter((a) => a.view.state === "connected").map((a) => a.view.name), "ghost"]);
+    if (scenario.data !== "empty") this.reach.seed(this.schedules.allRuns(), { id: f.session.sessionId, agent: scenario.session ?? "ghost" });
     this.hear = new MockHear(
       f.hear,
       {
@@ -385,6 +393,7 @@ export class MockDaemon {
       for (const activity of this.activity) l({ type: "activity", activity });
     });
     this.startVoice();
+    this.startReach();
     if (!this.storyPlayed) {
       this.storyPlayed = true;
       this.playStory();
@@ -513,7 +522,10 @@ export class MockDaemon {
   }
   /**
    * `?mock=floating`: a whole spoken session as the daemon sends it, for the floating room
-   * (ADR 0059), then rest, then again. Synthetic words only.
+   * (ADR 0059), then rest, then again, about 95 s a loop. Every state in order: the wake, your
+   * turn, one place (Memory), a slow model then three calls in flight and a long reply, six
+   * places and a reply with a list and numbers, a change waiting for a yes, an agent's
+   * question, the goodbye. Synthetic words only.
    */
   private floatingPlayed = false;
   private playFloating() {
@@ -525,31 +537,71 @@ export class MockDaemon {
         at += ms;
         this.later(at, f);
       };
+      const turn = (words: string, speakMs: number) => {
+        step(900, () => this.act("you_started"));
+        step(speakMs, () => {
+          this.act("you_stopped");
+          this.addTurn("user", words, "voice");
+          this.heard(words);
+          this.pushStatus({ phase: "thinking" });
+        });
+      };
+      const call = (name: string, id: string) => () => this.act("call", { name, id });
+      const done = (name: string, id: string) => () => this.act("result", { name, id });
+      let n = 0;
+      const ids = () => `fl${Date.now().toString(36)}${n++}`;
+
+      // 1. The wake and a turn with one place: Memory.
       step(2500, () => this.wake("ghost"));
-      step(900, () => this.act("you_started"));
-      step(2300, () => {
-        this.act("you_stopped");
-        const asked = "What needs me before the billing deploy?";
-        this.addTurn("user", asked, "voice");
-        this.heard(asked);
-        this.pushStatus({ phase: "thinking" });
-      });
-      const calls = [
-        { name: "github_issue_list", id: "f1" },
-        { name: "github_issue_read", id: "f2" },
-        { name: "github_actions_runs", id: "f3" },
-        { name: "ghost_recall", id: "f4" },
+      turn("What's on my plate this morning?", 2100);
+      const m1 = ids();
+      step(500, call("ghost_recall", m1));
+      step(1100, done("ghost_recall", m1));
+      step(500, () => this.reply("Three meetings, the billing deploy, and a review Dana asked for yesterday."));
+
+      // 2. A slow model, then three calls in flight at once, then a long reply.
+      step(5200, () => undefined);
+      turn("And what's blocking the billing deploy?", 2300);
+      const [g1, c1, s1] = [ids(), ids(), ids()];
+      step(5600, call("github_issue_list", g1)); // the model took 5.6 s to decide (a slow provider)
+      step(250, call("calendar_events_today", c1));
+      step(300, call("github-acme_actions_runs", s1));
+      step(1500, done("calendar_events_today", c1));
+      step(700, done("github_issue_list", g1));
+      step(900, done("github-acme_actions_runs", s1));
+      step(400, () =>
+        this.reply(
+          "The deploy is blocked on its migration step: the job that adds the invoice currency column timed out twice last night, both times after about twelve minutes, and the retry policy gave up. Issue 212 tracks it and nobody is assigned. The release window Dana booked is at three this afternoon, so there are about five hours. The quickest way through is to run the migration by hand with the longer timeout, then rerun the deploy; I can open a change for that if you want.",
+        ),
+      );
+
+      // 3. Six places at once, then a reply with a list and numbers.
+      step(30_500, () => undefined);
+      turn("Check everything for the launch.", 1800);
+      const six: [string, string][] = [
+        ["github_issue_list", ids()],
+        ["calendar_events_week", ids()],
+        ["ghost_recall", ids()],
+        ["github-acme_pull_requests", ids()],
+        ["mobbin_screens_search", ids()],
+        ["ghost_ask_agent", ids()],
       ];
-      step(400, () => this.act("call", calls[0]));
-      step(500, () => this.act("call", calls[2]));
-      step(600, () => this.act("result", calls[0]));
-      step(150, () => this.act("call", calls[1]));
-      step(700, () => this.act("result", calls[2]));
-      step(200, () => this.act("result", calls[1]));
-      step(100, () => this.act("call", calls[3]));
-      step(500, () => this.act("result", calls[3]));
-      step(300, () => this.reply("Two things. The billing deploy failed at its migration step, and app 151 looks like a duplicate of 148."));
-      step(8200, () => {
+      step(900, call(...six[0]));
+      step(200, call(...six[1]));
+      step(150, call(...six[2]));
+      step(250, call(...six[3]));
+      step(600, done(...six[2]));
+      step(200, call(...six[4]));
+      step(300, call(...six[5]));
+      step(700, done(...six[1]));
+      step(500, done(...six[0]));
+      step(600, done(...six[4]));
+      step(900, done(...six[3]));
+      step(1400, done(...six[5]));
+      step(400, () => this.reply("Four things for the launch: 3 issues still open, 2 pull requests waiting on review, 1 failing check, and Accounting wants the pricing page signed off by Friday."));
+
+      // 4. A change waiting for a yes.
+      step(10_500, () => {
         this.propose({
           source: "github",
           operation: "github_issue_write",
@@ -570,6 +622,8 @@ export class MockDaemon {
         this.heard("Yes.");
         this.confirm();
       });
+
+      // 5. An agent's question.
       step(4200, () => {
         const q: QuestionView = {
           key: `question:float-${Date.now()}`, kind: "question", source: "agent:accounting", asked_by: "Accounting", asked_at: now(),
@@ -590,6 +644,8 @@ export class MockDaemon {
         this.questions = this.questions.map((x) => (x.key === q.key ? answered : x));
         this.emit({ type: "question", question: answered });
       });
+
+      // 6. The goodbye.
       step(800, () => {
         this.pushStatus({ ending: true });
         this.reply("Okay. I'll tell Accounting to wait. Talk soon.", 3200);
@@ -612,6 +668,16 @@ export class MockDaemon {
   private pushStatus(patch: Partial<Status> = {}) {
     this.status = { ...this.status, ...patch, pending: this.pending };
     this.emit({ type: "status", status: this.snapshot() });
+  }
+  /** While runs are going, each makes a call every second or two (ADR 0060). */
+  private startReach() {
+    if (this.reachTimer) return;
+    this.reachTimer = setInterval(() => {
+      for (const run of this.schedules.allRuns().filter((r) => r.status === "running")) {
+        if (rand() < 0.45) continue;
+        this.emit({ type: "reach", reach: this.reach.call(`run-${run.id}`, run.agent, new Date(), rand() > 0.12) });
+      }
+    }, 1400);
   }
   private later(ms: number, f: () => void) {
     const t = setTimeout(() => {
@@ -810,8 +876,8 @@ export class MockDaemon {
 
   // ------------------------------------------------------------------ agents (ADR 0014, ADR 0035)
   private view(d: ConversationDetail): ConversationView {
-    const { id, slug, name, aliases, job, voice, speed, own_voice, created_at, last_active_at, retired_at, active, is_ghost } = d;
-    return { id, slug, name, aliases, job, voice, speed, own_voice, created_at, last_active_at, retired_at, active, is_ghost };
+    const { id, slug, name, aliases, job, voice, speed, own_voice, created_at, last_active_at, retired_at, active, is_ghost, look } = d;
+    return { id, slug, name, aliases, job, voice, speed, own_voice, created_at, last_active_at, retired_at, active, is_ghost, look };
   }
   private agent(slug: string): AgentRecord {
     const l = this.agents.get(slug);
@@ -1459,8 +1525,17 @@ export class MockDaemon {
       if (r[2] === "cancel") return { ok: true };
       return { proposal_id: r[1], target: item.change!.target, status: "success", applied: [item.change!.summary], summary: `Applied on ${item.change!.target}.` } satisfies OutcomeView;
     }
+    if (method === "GET" && path === "/reach") {
+      const since = query.get("since");
+      if (!since) throw new HttpError(422, "since is required");
+      return this.reach.view(since, query.get("until"), (query.get("sessions") ?? "").split(",").filter(Boolean));
+    }
     if (method === "GET" && path === "/audit") {
       let items = this.audit;
+      // A stretch of time (ADR 0060).
+      const since = query.get("since"), until = query.get("until");
+      if (since) items = items.filter((e) => e.created_at >= since);
+      if (until) items = items.filter((e) => e.created_at < until);
       const source = query.get("source"), status = query.get("status"), sid = query.get("session_id");
       if (source) items = items.filter((e) => e.source === source);
       if (status) items = items.filter((e) => e.status === status);
@@ -1660,6 +1735,7 @@ export class MockDaemon {
         id: newId(), slug, name, aliases: (b.aliases as string[]) ?? [], job: String(b.job ?? ""),
         voice: own ? (b.voice as string) : this.ghostVoice(), speed: (b.speed as number) ?? 1, own_voice: own,
         persona: String(b.persona ?? ""), memory, notes: [], created_at: now(), last_active_at: null, retired_at: null, active: false, is_ghost: false,
+        look: typeof b.look === "string" && parseLook(b.look) ? b.look : null,
         turn_count: 0, compactions: memory ? 1 : 0, dir: `${CONFIG_DIR}/agents/${slug}`,
       };
       this.agents.set(slug, { detail, turns: [], compactions: memory ? [{ id: newId(), at: now(), source: "manual", summary: memory, through_turn_id: null }] : [] });
@@ -1679,6 +1755,12 @@ export class MockDaemon {
       if (method === "PATCH" && sub === "") {
         if (d.retired_at) throw new HttpError(409, `${d.name} is retired. Rehire it to change it.`);
         if (d.is_ghost && typeof b.name === "string" && slugOf(b.name) !== slug) throw new HttpError(409, "Ghost keeps its name");
+        // A look, as the daemon checks it: a known shape and colour, "" back to the slug's; never Ghost's.
+        if (typeof b.look === "string") {
+          if (d.is_ghost) throw new HttpError(422, "Ghost is always Wisp");
+          if (b.look && !parseLook(b.look)) throw new HttpError(422, "a shape (wisp, drop, bell, hood, cloud, lantern, star, moth), a colon and a colour 0 to 7");
+          d.look = b.look || null;
+        }
         for (const k of ["name", "aliases", "job", "speed", "persona", "memory", "notes"] as const) {
           if (b[k] != null) (d as unknown as Record<string, unknown>)[k] = b[k];
         }

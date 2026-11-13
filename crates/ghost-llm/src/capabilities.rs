@@ -27,6 +27,9 @@ pub struct Capabilities {
     /// Chat Completions, as `"reasoning_effort"`); it is not sent again.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rejects_thinking: Option<String>,
+    /// The route refused `output_config.effort`; it is not sent again.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub rejects_effort: bool,
     /// The route refused the cache markers; they are not sent again.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub rejects_cache_markers: bool,

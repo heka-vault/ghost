@@ -116,6 +116,7 @@ pub fn runner(
             max_tokens: voice.llm_max_tokens.max(RUN_MAX_TOKENS),
             thinking: (!voice.llm_thinking.is_empty()).then(|| voice.llm_thinking.clone()),
             cache_system: true,
+            effort: None,
         },
         skills: Some(skills.clone()),
     })

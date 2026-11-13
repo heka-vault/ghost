@@ -119,7 +119,7 @@ pub fn read_agent_json(folder: &Path) -> Option<Map<String, Value>> {
 
 /// The order `Profile::agent_json` built its keys in (Python kept insertion order);
 /// anything else follows, sorted.
-const AGENT_KEYS: [&str; 6] = ["id", "name", "aliases", "job", "voice", "speed"];
+const AGENT_KEYS: [&str; 7] = ["id", "name", "aliases", "job", "voice", "speed", "look"];
 
 struct AgentJson<'a>(&'a Map<String, Value>);
 

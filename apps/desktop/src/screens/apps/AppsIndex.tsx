@@ -1,5 +1,5 @@
 /**
- * Owner: apps. #/settings/apps: the apps Ghost is connected to, then the catalog to add more from.
+ * Owner: apps. #/apps: the apps Ghost is connected to, then the catalog to add more from.
  * Everything a connected app offers runs (ADR 0034); a change is announced. What to block or
  * have Ghost ask first is set on each app's page, or for everything on Permissions.
  */
@@ -11,11 +11,12 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { hrefFor } from "../../app/router";
 import { useDesign } from "../../design/context";
 import { Badge, Button, Card, EmptyState, IconButton, Input, ListRow, Menu, Notice, Page, Section, Skeleton, Spinner, errorText, relativeTime, useLive } from "../../ui";
+import { useToday } from "../../app/today";
 import { useAppActions } from "./actions";
 import { AddOwnDialog } from "./AddOwnDialog";
 import { AppIcon } from "./AppIcon";
 import { ConnectDialog } from "./ConnectDialog";
-import { problemWords, sentence, summaryWords } from "./model";
+import { problemWords, sentence, summaryWords, usedWords } from "./model";
 
 /** After a middle dot, lowercase, except a name (“Ghost can’t reach it”). */
 const afterDot = (t: string) => (t.startsWith("Ghost") ? t : t.charAt(0).toLowerCase() + t.slice(1));
@@ -133,21 +134,27 @@ export function AppsIndex() {
 /* ------------------------------------------------------------------ connected */
 
 function AppRow({ app: a, actions }: { app: AppView; actions: ReturnType<typeof useAppActions> }) {
+  const today = useToday();
+  // What Ghost used it for today (ADR 0060): counts and sizes only.
+  const used = usedWords(today.reachDay?.by_app.find((x) => x.key === a.name) ?? null, today.calls.filter((c) => c.app === a.name));
   const { online } = useLive();
   const busy = actions.busy === a.name;
   const line =
     a.sign_in_url ? (
-      <span className="apps-row__state is-warn">Finish signing in in your browser</span>
+      <span className="apps-row__state is-pending">Finish signing in in your browser</span>
     ) : a.state === "connected" && a.problem ? (
-      <span className="apps-row__state is-warn" data-user-content>
+      <span className="apps-row__state is-danger" data-user-content>
         {summaryWords(a)} · {a.problem}
       </span>
     ) : a.state === "connected" ? (
-      <span className="apps-row__state">{summaryWords(a)}</span>
+      <span className="apps-row__state">
+        {summaryWords(a)}
+        {used && <span className="apps-row__used"> · {used}</span>}
+      </span>
     ) : a.state === "connecting" ? (
       <span className="apps-row__state">Connecting…</span>
     ) : a.state === "needs_sign_in" ? (
-      <span className="apps-row__state is-warn">Needs you to sign in again</span>
+      <span className="apps-row__state is-danger">Needs you to sign in again</span>
     ) : (
       <span className="apps-row__state is-danger" data-user-content>
         <span title={a.problem ?? undefined}>Not connected · {afterDot(problemWords(a.problem))}</span>
@@ -173,7 +180,7 @@ function AppRow({ app: a, actions }: { app: AppView; actions: ReturnType<typeof 
 
   return (
     <ListRow
-      href={hrefFor(`/settings/apps/${encodeURIComponent(a.name)}`)}
+      href={hrefFor(`/apps/${encodeURIComponent(a.name)}`)}
       leading={<AppIcon title={a.title} icon={a.icon} />}
       title={a.title}
       description={line}

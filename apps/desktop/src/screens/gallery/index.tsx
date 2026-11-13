@@ -5,6 +5,7 @@
  * States marked hover, pressed and focus are forced with the primitives' .is-hover,
  * .is-active and .is-focus classes, which exist for this page and screenshots only.
  */
+import { AgentMarks } from "./AgentMarks";
 import {
   ArrowUp,
   ArrowUpRight,
@@ -143,6 +144,8 @@ export default function Gallery() {
             </CheckRow>
           </Card>
         </section>
+
+        <AgentMarks />
 
         <section className="gal-block" id="gal-routes">
           <h2 className="gal-h2">Routes × scenarios</h2>

@@ -8,7 +8,8 @@
 //! alerting, and an item that changes alerts again.
 //!
 //! The **waiting list** is the open items whose response is `tell`, with Ghost's own: the
-//! changes waiting for a yes (ADR 0030), the apps with a problem and Ghost's folder's. It
+//! changes waiting for a yes (ADR 0030), the apps with a problem and Ghost's folder's, and
+//! Ghost's notes (`show`: seen on the list, never announced). It
 //! is a projection over the store; [`WaitingList::refresh`] re-reads Ghost's own each
 //! time.
 //!
@@ -56,12 +57,16 @@ pub enum WaitingError {
 pub type Result<T> = std::result::Result<T, WaitingError>;
 
 /// What a watch declared for its items: `record` (kept for the digest and for "what
-/// happened overnight?") or `tell` (the item goes on the waiting list).
+/// happened overnight?") or `tell` (the item goes on the waiting list). `show` is Ghost's
+/// own only, never a watch's: a note on the waiting list for the operator to see, which
+/// no route delivers, the wake's digest never says and the count leaves out (ADR 0056:
+/// Ghost's note about its own speed).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Response {
     Record,
     Tell,
+    Show,
 }
 
 impl Response {
@@ -69,6 +74,7 @@ impl Response {
         match self {
             Response::Record => "record",
             Response::Tell => "tell",
+            Response::Show => "show",
         }
     }
 
@@ -76,6 +82,7 @@ impl Response {
         match s {
             "record" => Some(Response::Record),
             "tell" => Some(Response::Tell),
+            "show" => Some(Response::Show),
             _ => None,
         }
     }
@@ -479,13 +486,16 @@ where
 pub type OnChange = Arc<dyn Fn() + Send + Sync>;
 
 /// The waiting list (ADR 0029). `changes` returns the changes waiting for a yes (the
-/// gate's `waiting`); `problems` returns Ghost's own trouble as (key, title). `on_change`
+/// gate's `waiting`); `problems` returns Ghost's own trouble as (key, title), told like
+/// any item; `notes` returns Ghost's own notes as (key, title), shown and never told
+/// ([`Response::Show`]). `on_change`
 /// runs after a refresh that found something new, changed or resolved, and after an
 /// acknowledge or snooze.
 pub struct WaitingList {
     pub items: Items,
     changes: Arc<dyn Changes>,
     problems: Arc<dyn Problems>,
+    notes: Arc<dyn Problems>,
     on_change: OnChange,
 }
 
@@ -498,6 +508,7 @@ impl WaitingList {
             items,
             changes,
             problems,
+            notes: Arc::new(Vec::<(String, String)>::new),
             on_change: Arc::new(|| {}),
         }
     }
@@ -509,6 +520,13 @@ impl WaitingList {
 
     pub fn with_problems(mut self, problems: Arc<dyn Problems>) -> Self {
         self.problems = problems;
+        self
+    }
+
+    /// Ghost's own notes: on the list to be seen, never announced by any route or the
+    /// wake's digest, and not counted as needing the operator.
+    pub fn with_notes(mut self, notes: Arc<dyn Problems>) -> Self {
+        self.notes = notes;
         self
     }
 
@@ -532,12 +550,23 @@ impl WaitingList {
             .problems()
             .into_iter()
             .map(|(k, t)| ItemDraft::new(k, t))
+            .chain(
+                self.notes
+                    .problems()
+                    .into_iter()
+                    .map(|(k, t)| ItemDraft::new(k, t).response(Response::Show)),
+            )
             .collect();
         let b = self.items.sync(GHOST, &drafts, Some(now))?;
         if a.any() || b.any() {
             (self.on_change)();
         }
-        self.items.open(Some(Response::Tell))
+        Ok(self
+            .items
+            .open(None)?
+            .into_iter()
+            .filter(|i| i.response != Response::Record.as_str())
+            .collect())
     }
 
     pub fn acknowledge(
@@ -1063,6 +1092,51 @@ mod tests {
         problems.lock().unwrap().clear();
         assert!(waiting.refresh(None).unwrap().is_empty());
         assert_eq!(*calls.lock().unwrap(), vec![1, 1]);
+    }
+
+    #[test]
+    fn a_note_is_on_the_list_to_see_and_never_alerts() {
+        // ADR 0056: Ghost's note about its own speed is for the screen; a wake read it aloud
+        // twice running (2026-11-12) because a problem is told like anything else.
+        let problems = Arc::new(Mutex::new(vec![(
+            "app:github".to_string(),
+            "github needs signing in again".to_string(),
+        )]));
+        let notes = Arc::new(Mutex::new(vec![(
+            "model:slow".to_string(),
+            "Replies are starting slowly".to_string(),
+        )]));
+        let waiting = {
+            let problems = problems.clone();
+            let notes = notes.clone();
+            WaitingList::new(items())
+                .with_problems(Arc::new(move || problems.lock().unwrap().clone()))
+                .with_notes(Arc::new(move || notes.lock().unwrap().clone()))
+        };
+        let open = waiting.refresh(None).unwrap();
+        let keys: Vec<&str> = open.iter().map(|i| i.key.as_str()).collect();
+        assert_eq!(
+            keys,
+            vec!["app:github", "model:slow"],
+            "both are on the list"
+        );
+        let note = open.iter().find(|i| i.key == "model:slow").unwrap();
+        assert_eq!(note.response, Response::Show.as_str());
+        assert!(!note.needs_alerting(None), "a note is never announced");
+        assert_eq!(
+            waiting.count(None).unwrap(),
+            1,
+            "only the problem needs the operator"
+        );
+        // A note that holds stays one item; one that clears is resolved like a problem.
+        notes.lock().unwrap().clear();
+        let keys: Vec<String> = waiting
+            .refresh(None)
+            .unwrap()
+            .into_iter()
+            .map(|i| i.key)
+            .collect();
+        assert_eq!(keys, vec!["app:github".to_string()]);
     }
 
     #[tokio::test]

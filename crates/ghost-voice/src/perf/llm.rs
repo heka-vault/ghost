@@ -368,6 +368,7 @@ async fn call(t: &TargetRow, tools: &Tools, context: Context) -> (Sample, Said) 
             Protocol::Openai => None,
         },
         cache_system: t.sysbp,
+        effort: None,
     };
     let mut s = Sample::default();
     let mut said = Said::default();

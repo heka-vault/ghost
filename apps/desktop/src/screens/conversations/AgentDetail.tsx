@@ -23,6 +23,7 @@ import {
   IconButton,
   Input,
   SaveBar,
+  SegmentedControl,
   LineGlyph,
   Menu,
   type MenuItem,
@@ -45,6 +46,10 @@ import { type Draft, type DraftKey, FIELD_WORDS, dirtyKeys, drafts, fromDetail, 
 import { useAutoRows } from "./autosize";
 import { aliasExample, MEMORY_EXAMPLE, PERSONA_EXAMPLE } from "./examples";
 import { LineStateText, lineState } from "./lineState";
+import { lookOf, lookText } from "@ghost/ui";
+
+import { AgentBrief } from "./AgentBrief";
+import { LookPicker } from "./LookPicker";
 import { History } from "./History";
 import { Notes } from "./Notes";
 import { personaCache } from "./personaCache";
@@ -63,7 +68,7 @@ import { WAKE_KEY, WakePhrasesField, wakeHelp } from "../settings/WakePhrases";
 type TabId = "persona" | "memory" | "transcript" | "history";
 const TABS: TabId[] = ["persona", "memory", "transcript", "history"];
 const TURN_LIMIT = 200;
-const PERSONA_KEYS: DraftKey[] = ["name", "aliases", "job", "voice", "speed", "persona"];
+const PERSONA_KEYS: DraftKey[] = ["name", "aliases", "job", "voice", "speed", "persona", "look"];
 const MEMORY_KEYS: DraftKey[] = ["memory", "notes"];
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -77,7 +82,11 @@ const sayList = (w: string[]) => (w.length <= 1 ? w.join("") : `${w.slice(0, -1)
 let keptWake: { base: string; draft: string } | null = null;
 const sameWake = (a: string, b: string) => joinList(splitList(a)) === joinList(splitList(b));
 
-export function AgentDetail({ slug }: { slug: string }) {
+/**
+ * `manage`: Settings › Agents › this agent (its persona, voice, look, memory and history); else
+ * the conversation with it (#/agents/:slug), which the rail opens (the owner, 2026-11-12).
+ */
+export function AgentDetail({ slug, manage = false }: { slug: string; manage?: boolean }) {
   const { client, status, conversationsVersion, turns: sessionTurns, heldTurns, pending } = useGhost();
   const { online, connection, phase, loadingModels } = useLive();
   const design = useDesign();
@@ -98,7 +107,8 @@ export function AgentDetail({ slug }: { slug: string }) {
   const [notice, setNotice] = useState<{ title: string; text: string } | null>(null);
   const [tab, setTabState] = useState<TabId>(() => {
     const t = readParam("tab", slug) as TabId | null;
-    return t && TABS.includes(t) ? t : "transcript";
+    if (manage) return t && t !== "transcript" && TABS.includes(t) ? t : "persona";
+    return "transcript";
   });
   const [picker, setPicker] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -127,6 +137,17 @@ export function AgentDetail({ slug }: { slug: string }) {
       navigate("/session");
       return;
     }
+    // The conversation and the agent's settings are two places: Settings › Agents holds the rest.
+    if (t === "transcript" && manage) {
+      writeParam("tab", null, slug);
+      navigate(`/agents/${encodeURIComponent(slug)}`);
+      return;
+    }
+    if (t !== "transcript" && !manage) {
+      writeParam("tab", t, slug);
+      navigate(`/settings/agents/${encodeURIComponent(slug)}`);
+      return;
+    }
     setTabState(t);
     writeParam("tab", t === "transcript" ? null : t, slug);
   };
@@ -137,7 +158,7 @@ export function AgentDetail({ slug }: { slug: string }) {
   }, [slug]);
   useEffect(
     () => () => {
-      if (!window.location.hash.startsWith("#/agents/")) clearParams();
+      if (!window.location.hash.startsWith("#/agents/") && !window.location.hash.startsWith("#/settings/agents/")) clearParams();
     },
     [],
   );
@@ -385,7 +406,13 @@ export function AgentDetail({ slug }: { slug: string }) {
     setText("");
     setActing("send");
     try {
-      const r = live ? await client.say(t) : await client.say(t, slug);
+      // A session with another agent: typing here transfers it to this one first (the owner:
+      // "a list of agents I can call or chat with directly").
+      if (elsewhere) {
+        const sw = await client.switchConversation(slug);
+        if (sw.ok === false) throw new Error(sw.detail ?? `Couldn’t switch to ${name}`);
+      }
+      const r = live || elsewhere ? await client.say(t) : await client.say(t, slug);
       if (r.ok === false) {
         setText((now) => now || t);
         setNotice({ title: `Couldn’t send to ${name}`, text: r.detail ?? "Ghost didn’t take it. Try again." });
@@ -500,7 +527,7 @@ export function AgentDetail({ slug }: { slug: string }) {
       await client.deleteConversation(slug);
       drafts.delete(slug);
       toast({ title: `Deleted ${name}` });
-      navigate("/agents");
+      navigate("/settings/agents");
     } catch (e) {
       fail(`Couldn’t delete ${name}`, e);
     }
@@ -705,7 +732,7 @@ export function AgentDetail({ slug }: { slug: string }) {
   // Typing to the agent: on when the session is here or there is none; while Ghost is with
   // another agent the field says so, and Switch in the header is the way over.
   const elsewhere = inSession && !live;
-  const canType = online && modelsReady && !elsewhere && (!inSession || live);
+  const canType = online && modelsReady;
   const composerDock = detail && !readOnly && tab === "transcript" && (
     <div className="conv-dock">
       <Composer
@@ -715,7 +742,7 @@ export function AgentDetail({ slug }: { slug: string }) {
         onSubmit={() => void send()}
         disabled={!canType || (acting !== null && acting !== "send")}
         sending={acting === "send"}
-        placeholder={!online ? "Reconnecting…" : elsewhere ? `Ghost is with ${agentName(liveSlug!, agents.find((l) => l.slug === liveSlug)?.name)}` : `Type to ${name}…`}
+        placeholder={!online ? "Reconnecting…" : elsewhere ? `Type to ${name}: the session moves here from ${agentName(liveSlug!, agents.find((l) => l.slug === liveSlug)?.name)}` : `Type to ${name}…`}
         label={`Message ${name}`}
         presence={live ? phase : undefined}
       />
@@ -741,12 +768,12 @@ export function AgentDetail({ slug }: { slug: string }) {
       leading={<LineGlyph slug={slug} name={name} size="xl" />}
       // Ghost's page here is only its settings views; their bar's “← Conversation” goes home.
       crumb={
-        isGhost ? undefined : (
-          <Link to="/agents">
+        manage ? (
+          <Link to="/settings/agents">
             <ChevronLeft size={14} aria-hidden />
             Agents
           </Link>
-        )
+        ) : undefined
       }
       status={pageStatus}
       description={description}
@@ -791,11 +818,25 @@ export function AgentDetail({ slug }: { slug: string }) {
         {tab !== "transcript" && (
           <div className="conv-view__bar">
             <Button variant="ghost" size="sm" onClick={() => setTab("transcript")}>
-              ← Conversation
+              {isGhost ? "← Conversation" : `Talk to ${name}`}
             </Button>
-            <span className="conv-view__title">
-              {tab === "persona" ? <>Voice and persona{unsaved(PERSONA_KEYS)}</> : tab === "memory" ? <>Memory{unsaved(MEMORY_KEYS)}</> : "History"}
-            </span>
+            {manage ? (
+              <SegmentedControl
+                aria-label={`${name}’s settings`}
+                size="sm"
+                value={tab}
+                onChange={(v) => setTab(v as TabId)}
+                options={[
+                  { value: "persona", label: `Voice and persona${tabDirty(PERSONA_KEYS) ? " •" : ""}` },
+                  { value: "memory", label: `Memory${tabDirty(MEMORY_KEYS) ? " •" : ""}` },
+                  { value: "history", label: "History" },
+                ]}
+              />
+            ) : (
+              <span className="conv-view__title">
+                {tab === "persona" ? <>Voice and persona{unsaved(PERSONA_KEYS)}</> : tab === "memory" ? <>Memory{unsaved(MEMORY_KEYS)}</> : "History"}
+              </span>
+            )}
           </div>
         )}
         {!detail || !draft ? (
@@ -825,6 +866,12 @@ export function AgentDetail({ slug }: { slug: string }) {
                 onChange={(e) => setDraft({ persona: e.target.value })}
               />
             </Section>
+
+            {!isGhost && (
+              <Section id="conv-look" title="How it looks" description="Its shape and colour, wherever it appears: the rail, Today, the room. Ghost is always Wisp.">
+                <LookPicker value={lookOf(slug, draft.look || null)} onChange={(l) => setDraft({ look: lookText(l) })} name={draft.name || name} disabled={readOnly} />
+              </Section>
+            )}
 
             <Section id="conv-voice" title="Voice" description={isGhost ? "Ghost’s voice, which every agent without its own speaks in." : draft.voice ? "Its own voice." : "Ghost’s voice, until you give it one of its own."}>
               <Card list>
@@ -946,7 +993,7 @@ export function AgentDetail({ slug }: { slug: string }) {
                     variant="secondary"
                     onClick={() => {
                       newAgentSeed.slug = slug;
-                      navigate("/agents");
+                      navigate("/settings/agents");
                     }}
                   >
                     Start an agent from this memory
@@ -962,7 +1009,20 @@ export function AgentDetail({ slug }: { slug: string }) {
             </p>
           </>
         ) : tab === "transcript" ? (
-          <Transcript turns={live ? withoutHeld(turns, heldTurns) : turns} lineName={name} limit={TURN_LIMIT} total={detail.turn_count} />
+          <>
+            {!isGhost && (
+              <AgentBrief
+                slug={slug}
+                name={name}
+                detail={detail}
+                voiceTitle={voice ? voiceTitle(voice, voices) : "Ghost’s voice"}
+                onPersona={() => setTab("persona")}
+                onMemory={() => setTab("memory")}
+              />
+            )}
+            <h2 className="conv-section-title">The conversation</h2>
+          <Transcript turns={live ? withoutHeld(turns, heldTurns) : turns} lineName={name} limit={TURN_LIMIT} total={detail.turn_count} openAtTop={!isGhost} />
+          </>
         ) : (
           <History
             versions={versions}

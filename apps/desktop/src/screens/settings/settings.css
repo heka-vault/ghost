@@ -30,6 +30,7 @@
 .set-optional { color: var(--text-3); }
 .set-waits { color: var(--warn); font-weight: var(--weight-medium); }
 .set-live { color: var(--ok); font-weight: var(--weight-medium); }
+.set-slow { color: var(--danger); font-weight: var(--weight-medium); }
 .set-help-strong { color: var(--text-2); font-weight: var(--weight-medium); }
 .set-detail { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-3); font-weight: var(--weight-regular); font-feature-settings: normal; }
 .set-path { font-family: var(--font-mono); font-size: var(--text-sm); font-feature-settings: normal; color: var(--text-2); }

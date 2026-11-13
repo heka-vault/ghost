@@ -1092,6 +1092,13 @@
           "job": {
             "type": "string"
           },
+          "look": {
+            "description": "How it is drawn, `\"<shape>:<colour>\"`; empty or left out for the one picked from its slug.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "name": {
             "type": "string"
           },
@@ -1214,6 +1221,13 @@
               "null"
             ]
           },
+          "look": {
+            "description": "`\"<shape>:<colour>\"`, or \"\" for the one picked from its slug. Not Ghost's: Ghost is Wisp.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "memory": {
             "type": [
               "string",
@@ -1296,6 +1310,13 @@
               "null"
             ]
           },
+          "look": {
+            "description": "How it is drawn, `\"<shape>:<colour>\"` (shapes: wisp, drop, bell, hood, cloud,\nlantern, star, moth; colours 0 to 7). Null: the one the desktop picks from its slug.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "name": {
             "type": "string"
           },
@@ -1335,7 +1356,8 @@
           "created_at",
           "last_active_at",
           "active",
-          "is_ghost"
+          "is_ghost",
+          "look"
         ],
         "type": "object"
       },

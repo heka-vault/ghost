@@ -362,6 +362,9 @@ pub struct Late {
 /// What a session with any agent reaches (ADR 0034, ADR 0035).
 pub type Reach = Arc<dyn Fn(&Profile) -> Vec<ToolSource> + Send + Sync>;
 
+/// The waiting list's key for the realtime voice's note (ADR 0063).
+pub const REALTIME_NOTE_KEY: &str = "voice:realtime";
+
 pub struct Daemon {
     pub cfg: Mutex<GhostdSettings>,
     pub voice: Mutex<Arc<VoiceSettings>>,
@@ -375,11 +378,12 @@ pub struct Daemon {
     followed_vault: AtomicBool,
     /// The last model load's failure while it is tried again; on the waiting list meanwhile.
     models_problem: Mutex<Option<String>>,
-    /// Why the realtime voice was not used or stopped, for the waiting list (ADR 0063).
+    /// Why the realtime voice was not used or stopped, for the waiting list (ADR 0063):
+    /// a note under [`REALTIME_NOTE_KEY`], shown and never said.
     pub(crate) realtime_note: Mutex<Option<String>>,
     pub(crate) realtime_check: Mutex<Option<ghost_api::realtime::RealtimeCheckView>>,
     /// The connection is too slow for a good spoken reply (ADR 0056); on the waiting list.
-    pub(crate) model_slow: Mutex<Option<String>>,
+    pub(crate) model_slow: Mutex<Option<ghost_llm::check::Slow>>,
     models_retry: std::time::Duration,
     pub late: Late,
     /// The agents, with the voices once Kokoro is loaded.
@@ -1444,12 +1448,29 @@ impl Daemon {
                             if let Some(problem) = lock(&d.models_problem).clone() {
                                 out.push((MODELS_PROBLEM_KEY.to_string(), problem));
                             }
-                            if let Some(slow) = d.slow_problem() {
-                                out.push((crate::model_check::SLOW_PROBLEM_KEY.to_string(), slow));
-                            }
                             if let Some(problem) = d.late.outside.get().and_then(|o| o.problem()) {
                                 out.push((crate::outside::PROBLEM_KEY.to_string(), problem));
                             }
+                        }
+                        out
+                    }
+                }))
+                // ADR 0056: Ghost's note about its own speed is for the screen; no route
+                // and no wake says it.
+                .with_notes(Arc::new({
+                    let weak = Arc::downgrade(d);
+                    move || {
+                        let Some(d) = weak.upgrade() else {
+                            return Vec::new();
+                        };
+                        let mut out: Vec<(String, String)> = d
+                            .slow_note()
+                            .map(|slow| (crate::model_check::SLOW_NOTE_KEY.to_string(), slow))
+                            .into_iter()
+                            .collect();
+                        // ADR 0063: why the realtime voice was not used, shown, never said.
+                        if let Some(note) = lock(&d.realtime_note).clone() {
+                            out.push((REALTIME_NOTE_KEY.to_string(), note));
                         }
                         out
                     }

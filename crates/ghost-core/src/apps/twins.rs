@@ -65,12 +65,44 @@ pub fn twins(apps: &[Seen]) -> HashMap<String, String> {
     lines
 }
 
+/// Each app of a set of twins, with the others of its set in `apps` order: where a read it
+/// cannot find is tried next.
+pub fn sets(apps: &[Seen]) -> HashMap<String, Vec<String>> {
+    type Key<'a> = (&'a str, &'a BTreeSet<String>);
+    let mut groups: Vec<(Key, Vec<&str>)> = Vec::new();
+    for app in apps {
+        if app.service.is_empty() || app.tools.is_empty() {
+            continue;
+        }
+        let key = (app.service.as_str(), &app.tools);
+        match groups.iter_mut().find(|(k, _)| *k == key) {
+            Some((_, names)) => names.push(&app.name),
+            None => groups.push((key, vec![&app.name])),
+        }
+    }
+    let mut out = HashMap::new();
+    for (_, names) in groups.iter().filter(|(_, n)| n.len() > 1) {
+        for name in names {
+            let others = names
+                .iter()
+                .filter(|n| *n != name)
+                .map(|n| n.to_string())
+                .collect();
+            out.insert(name.to_string(), others);
+        }
+    }
+    out
+}
+
 fn line(first: &str, this: &str) -> String {
+    // Not "never both" (2026-11-12, live): the two may be accounts that see different
+    // things, and an issue only the second could see was answered as not found.
     format!(
         " {this} and {first} are two connections to the same service with the same tools, \
-         perhaps as different accounts. Read one thing through one of them, never both: \
-         the one that already reached it in this conversation, else {first}; {this} only \
-         when {first} cannot reach it."
+         perhaps as different accounts that see different things. Read one thing through \
+         one of them: the one that already reached it in this conversation, else {first}; \
+         when it cannot find it, Ghost reads it through the other in the same call. To list \
+         or count across both, ask both in one response."
     )
 }
 
@@ -120,9 +152,23 @@ mod tests {
             line.contains("github_quotient and github are two connections"),
             "{line}"
         );
-        assert!(line.contains("never both"), "{line}");
+        assert!(line.contains("Ghost reads it through the other"), "{line}");
         assert!(t["github_other"].contains("else github;"));
         assert!(!t.contains_key("github"), "the first says nothing");
+    }
+
+    #[test]
+    fn each_twin_knows_the_others_of_its_set() {
+        let gh = ["issue_read", "list_issues"];
+        let apps = [
+            seen("github", "api.githubcopilot.com", &gh),
+            seen("mobbin", "mobbin.com", &["search"]),
+            seen("github_quotient", "api.githubcopilot.com", &gh),
+        ];
+        let s = sets(&apps);
+        assert_eq!(s["github"], ["github_quotient"]);
+        assert_eq!(s["github_quotient"], ["github"]);
+        assert!(!s.contains_key("mobbin"));
     }
 
     #[test]
@@ -135,5 +181,6 @@ mod tests {
             seen("e", "", &["issue_read"]),
         ];
         assert!(twins(&apps).is_empty());
+        assert!(sets(&apps).is_empty());
     }
 }

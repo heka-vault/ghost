@@ -1550,3 +1550,152 @@ mod ghosts_own_app {
         assert!(paragraph < 900);
     }
 }
+
+// --- two connections to the same service (2026-11-12) -----------------------------------
+
+/// A GitHub connection that sees only the issues it is given, as an account sees the
+/// repositories it has access to.
+fn account(
+    name: &str,
+    sees: &'static [&'static str],
+    twins: &[&str],
+    reads: Arc<Mutex<Vec<String>>>,
+) -> ToolSource {
+    let app = name.to_string();
+    let issue_read = ReadTool {
+        name: format!("{name}_issue_read"),
+        description: "Read an issue.".into(),
+        properties: json!({"repo": {"type": "string"}, "issue_number": {"type": "integer"}}),
+        required: vec![],
+        handler: Arc::new(move |a| {
+            let (app, reads) = (app.clone(), reads.clone());
+            Box::pin(async move {
+                let key = format!("{}#{}", a["repo"].as_str().unwrap_or(""), a["issue_number"]);
+                reads.lock().unwrap().push(format!("{app} {key}"));
+                if sees.contains(&key.as_str()) {
+                    let mut m = Map::new();
+                    m.insert("title".into(), json!(format!("issue {key}")));
+                    Ok(m)
+                } else {
+                    // What GitHub's app answers for a repository the account cannot see.
+                    anyhow::bail!("failed to get issue: GET {key}: 404 Not Found []")
+                }
+            })
+        }),
+        operation: "issue_read".into(),
+    };
+    ToolSource {
+        name: name.into(),
+        title: "GitHub".into(),
+        app: true,
+        read_tools: vec![issue_read],
+        twins: twins.iter().map(|t| t.to_string()).collect(),
+        ..Default::default()
+    }
+}
+
+fn two_accounts(policy: &str) -> (Arc<ToolDispatcher>, Arc<Mutex<Vec<String>>>) {
+    let reads = Arc::new(Mutex::new(Vec::new()));
+    let gate = Arc::new(
+        WriteGate::new(Arc::new(Store::in_memory().unwrap()))
+            .with_autonomy(AutonomyPolicy::parse(policy, "test").unwrap()),
+    );
+    let (on_sleep, _) = sleeper();
+    let tools = ToolDispatcher::new(ToolsParams {
+        sources: vec![
+            account("github_work", &["app#1"], &["github_home"], reads.clone()),
+            account("github_home", &["web#413"], &["github_work"], reads.clone()),
+        ],
+        gate,
+        session_id: "s".into(),
+        on_hang_up: on_sleep,
+        on_hold: None,
+        turns: None,
+        events: None,
+        conversations: None,
+        on_call: None,
+        last_request: None,
+        probe: None,
+    });
+    (tools, reads)
+}
+
+#[tokio::test]
+async fn a_read_one_connection_cannot_see_is_read_through_its_twin() {
+    // Live, 2026-11-12 23:07: "read me issue 413" went through the first of two GitHub
+    // connections (the twin line said one of them, never both), which answered 404, and
+    // Ghost said it could not find the issue. The other account could see it. A read a
+    // connection says it cannot find is read through its twin, in the same call.
+    let (tools, reads) = two_accounts("[permissions]\n");
+    let r = tools
+        .call(
+            "github_work_issue_read",
+            args(json!({"repo": "web", "issue_number": 413})),
+            "c",
+        )
+        .await;
+    assert_eq!(r.result["title"], json!("issue web#413"), "{:?}", r.result);
+    assert!(
+        r.result["read_through"]
+            .as_str()
+            .unwrap()
+            .contains("github_home"),
+        "{:?}",
+        r.result
+    );
+    assert_eq!(
+        *reads.lock().unwrap(),
+        ["github_work web#413", "github_home web#413"]
+    );
+    // Found through the first: the twin is not asked.
+    reads.lock().unwrap().clear();
+    let r = tools
+        .call(
+            "github_work_issue_read",
+            args(json!({"repo": "app", "issue_number": 1})),
+            "c",
+        )
+        .await;
+    assert_eq!(r.result["title"], json!("issue app#1"));
+    assert_eq!(*reads.lock().unwrap(), ["github_work app#1"]);
+    // Found by neither: the first connection's answer, and that the other was tried.
+    reads.lock().unwrap().clear();
+    let r = tools
+        .call(
+            "github_work_issue_read",
+            args(json!({"repo": "x", "issue_number": 9})),
+            "c",
+        )
+        .await;
+    assert!(
+        r.result["error"].as_str().unwrap().contains("404"),
+        "{:?}",
+        r.result
+    );
+    assert!(
+        r.result["also_tried"]
+            .as_str()
+            .unwrap()
+            .contains("github_home")
+    );
+    assert_eq!(reads.lock().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn the_twin_is_not_read_when_the_operator_blocks_it() {
+    // The fallback is a read like any other: a block rule on the twin holds.
+    let (tools, reads) = two_accounts("[permissions]\nblock = [\"github_home.issue_read\"]\n");
+    let r = tools
+        .call(
+            "github_work_issue_read",
+            args(json!({"repo": "web", "issue_number": 413})),
+            "c",
+        )
+        .await;
+    assert!(
+        r.result["error"].as_str().unwrap().contains("404"),
+        "{:?}",
+        r.result
+    );
+    assert_eq!(*reads.lock().unwrap(), ["github_work web#413"]);
+}

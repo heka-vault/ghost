@@ -8,7 +8,7 @@
 import { useState } from "react";
 
 import { Button, Card, Kbd, ListRow, Notice, SegmentedControl, Select, Switch } from "../ui";
-import { prefOf, prefValue, useFloating } from "./floating";
+import { type FloatingCaptions, type FloatingPlacement, prefOf, prefValue, useFloating } from "./floating";
 import { AWAY_CHOICES, readAway, readSessionRoom, writeAway, writeSessionRoom } from "./posture";
 import { usePosture } from "./PostureContext";
 
@@ -95,7 +95,7 @@ function FloatingSettings() {
           title="Float over the desktop"
           description={
             refused ??
-            "When you call Ghost and this window isn’t the one you’re using, Ghost comes forward over your desktop instead, with no window around it, and goes back to a thin line at the bottom of the screen when you’re done. It never takes your keyboard, and clicks pass through everywhere it isn’t drawn."
+            "When you call Ghost and this window isn’t the one you’re using, Ghost comes forward over your desktop instead, with no window around it, and goes back to a thin line at the bottom of the screen when you’re done. It never takes your keyboard, and clicks pass through everywhere it isn’t drawn. To send it away, say “Ghost, goodbye” or click Done under it."
           }
           trailing={<Switch aria-label="Float over the desktop" checked={on} disabled={!!refused} onChange={(v: boolean) => void set({ ...status.settings, on: v })} />}
         />
@@ -110,6 +110,44 @@ function FloatingSettings() {
                   : "With one monitor, Ghost comes forward on the side away from your work when it can tell where that is."
             }
             trailing={<Select size="sm" aria-label="Ghost appears on" value={value} options={options} onChange={(e) => void set({ ...status.settings, monitor: prefOf(e.target.value) })} />}
+          />
+        )}
+        {on && (
+          <ListRow
+            title="Where on the screen"
+            description="Beside your work keeps Ghost in a column at the edge away from what you’re doing. The corner is the smallest. The centre is the whole stage."
+            trailing={
+              <Select
+                size="sm"
+                aria-label="Where on the screen"
+                value={status.settings.placement ?? "beside"}
+                options={[
+                  { value: "beside", label: "Beside your work" },
+                  { value: "corner", label: "In the corner" },
+                  { value: "centre", label: "In the centre" },
+                ]}
+                onChange={(e) => void set({ ...status.settings, placement: e.target.value as FloatingPlacement })}
+              />
+            }
+          />
+        )}
+        {on && (
+          <ListRow
+            title="Captions"
+            description="Ghost is a voice: by default nothing it says is written over your desktop. Captions show the words being said, two lines at the bottom. “When the sound is off” means muted or turned down too far to hear."
+            trailing={
+              <Select
+                size="sm"
+                aria-label="Captions"
+                value={status.settings.captions ?? "off"}
+                options={[
+                  { value: "off", label: "Off" },
+                  { value: "muted", label: "When the sound is off" },
+                  { value: "always", label: "Always" },
+                ]}
+                onChange={(e) => void set({ ...status.settings, captions: e.target.value as FloatingCaptions })}
+              />
+            }
           />
         )}
       </Card>

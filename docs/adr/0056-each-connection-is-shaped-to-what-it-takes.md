@@ -49,15 +49,26 @@ sentence for the failure (`ghost_llm::spoken_failure`: "The model provider is li
 fast I can ask. Try again in a moment.") as the turn's reply, never a key, a body or an
 address. A run with nobody there keeps its own retries (ADR 0047).
 
-**A slow connection is said, with what would help.** When the model that answers a spoken
-turn first (the fast model if there is one) takes more than 1.5 s to its first word, by its
-latest check or by the operator's last ten spoken turns in `latency.jsonl` (the first model
-call's time to first byte, at least five turns), the waiting list carries one note
-(`model:slow`), and Settings shows it with the check. It says how slow, then what would help:
-a fast model on the connection, the fastest of the operator's other tested routes that was at
-least 0.3 s quicker, and that the connection sends replies all at once if it does. **Ghost
-never switches provider or model on the operator's behalf.** The note names options. The
-setting stays the operator's.
+**A slow connection is shown, with what would help, and never said.** When the model that
+answers a spoken turn first (the fast model if there is one) takes more than 1.5 s to its
+first word, by its latest check or by the operator's last ten spoken turns in `latency.jsonl`
+(the first model call's time to first byte, at least five turns), the waiting list carries one
+note (`model:slow`), and Settings shows it with the check. It is one line: how slow, then what
+would help (a fast model on the connection, the fastest of the operator's other tested routes
+that was at least 0.3 s quicker, that the fast model is slow too, or that the connection sends
+replies all at once), then "Test it in Settings › Model." **Ghost never switches provider or
+model on the operator's behalf.** The note names options. The setting stays the operator's.
+
+The note is for the screen (amended 2026-11-12, after a live run where two wakes in a row
+opened by reading it aloud and the operator asked not to be told every time): it is a
+waiting-list item that is shown and never told (`Response::Show`, `WaitingList::with_notes`).
+No route delivers it, the wake's digest never says it, and the count of what needs the
+operator leaves it out. It is one item under one key that updates in place: raised over 1.5 s,
+cleared only under 1.2 s (`QUICK_AGAIN_SECS`), and while it holds its words are kept unless
+the figure moves by half a second or the advice changes (`ghostd::model_check::settle`), so a
+connection near the line neither flaps nor turns up as new. Ghost's other problems (an app to
+sign in to again, a missing model, a locked keyring, a listener that did not start) are
+broken things the operator has to fix and are still said once at a wake, as before.
 
 **A conformance suite** (`crates/ghost-llm/tests/conformance.rs`): a local fake server for
 each shape the connection supports (Anthropic direct; a subscription proxy; OpenRouter on its

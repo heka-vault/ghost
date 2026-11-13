@@ -16,6 +16,7 @@ import { nameOf, useToday } from "../../app/today";
 import { Button, IconButton, Input, LineGlyph, Menu, PendingChange, cx, errorText, relativeTime, useLive, useToast } from "../../ui";
 import { clock, needLine } from "./model";
 import { actionFailure, canSend, expiresIn, sourceLabel, untilTomorrowMorning } from "./needs";
+import { bytes, count, tallyFor } from "./telemetry";
 
 type Act = (key: string, run: () => Promise<unknown>, done?: string) => Promise<void>;
 
@@ -134,6 +135,9 @@ export function Now() {
             {today.working.map((r) => {
               const who = nameOf(today.agents, r.agent);
               const started = r.started_at ?? r.scheduled_for;
+              // What the run is touching (ADR 0060): its calls so far and the latest one.
+              const reach = tallyFor(today.reachDay, today.calls, `run-${r.id}`);
+              const touching = [...today.calls].reverse().find((c) => c.session_id === `run-${r.id}`) ?? null;
               return (
                 <li key={r.id} className="now-work__item">
                   <span className="now-work__lane" aria-hidden>
@@ -145,8 +149,19 @@ export function Now() {
                       <strong>{who}</strong> is running <span data-user-content>{r.name}</span>
                     </span>
                     <span className="now-work__meta">
-                      {r.source.startsWith("watch:") ? `for the ${r.source.slice(6)} watch` : r.source === "run_now" ? "when asked" : "on its schedule"} · {r.model_calls} model · {r.tool_calls} tool {r.tool_calls === 1 ? "call" : "calls"}
+                      {r.source.startsWith("watch:") ? `for the ${r.source.slice(6)} watch` : r.source === "run_now" ? "when asked" : "on its schedule"}
+                      {reach.calls > 0 ? ` · ${count(reach.calls)} ${reach.calls === 1 ? "call" : "calls"} · ${count(reach.items)} items · ${bytes(reach.bytes)}` : " · no calls yet"}
                     </span>
+                    {(reach.apps.length > 0 || touching) && (
+                      <span className="now-work__reach">
+                        {touching && (
+                          <span className="now-work__touching">
+                            now <code>{touching.app}.{touching.tool}</code>
+                          </span>
+                        )}
+                        {reach.apps.length > 0 && <span className="now-work__apps">{reach.apps.join(" · ")}</span>}
+                      </span>
+                    )}
                   </span>
                   <span className="now-work__clock t-num" aria-label={`running for ${clock(started, now)}`}>
                     {r.status === "queued" ? "queued" : clock(started, now)}

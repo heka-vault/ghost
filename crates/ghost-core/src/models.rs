@@ -703,6 +703,9 @@ pub struct Create {
     /// The first memory: a handoff from a retired agent, or a summary of this session.
     #[serde(default)]
     pub memory: String,
+    /// `"<shape>:<colour>"`, or None for the look Ghost picks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub look: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -713,6 +716,9 @@ pub struct Rename {
     /// None: unchanged.
     #[serde(default)]
     pub job: Option<String>,
+    /// None: unchanged; empty: back to the look Ghost picks; else `"<shape>:<colour>"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub look: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1314,6 +1320,7 @@ mod tests {
                 speed: None,
                 persona: String::new(),
                 memory: "x".into(),
+                look: None,
             }
         });
         assert_eq!(

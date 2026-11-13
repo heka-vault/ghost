@@ -107,6 +107,9 @@ impl Ledger {
     }
 
     fn write(&self, s: &Spend) {
+        if let Some(dir) = self.path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
         let tmp = self.path.with_extension("json.tmp");
         if let Ok(text) = serde_json::to_string(s)
             && std::fs::write(&tmp, text).is_ok()
@@ -168,7 +171,7 @@ mod tests {
     #[test]
     fn the_day_adds_up_and_starts_again_tomorrow() {
         let dir = tempfile::tempdir().unwrap();
-        let l = Ledger::new(dir.path());
+        let l = Ledger::new(&dir.path().join("not-yet"));
         l.session_started("2026-11-12");
         l.add("2026-11-12", 0.25);
         let s = l.add("2026-11-12", 0.5);
