@@ -4,7 +4,7 @@
 //! appear in an error.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
@@ -29,18 +29,32 @@ fn home() -> PathBuf {
     std::env::var_os("HOME").map_or_else(|| PathBuf::from("/"), PathBuf::from)
 }
 
-/// Where the PipeWire installer and unit templates live: the repo's `infra/` for a binary
-/// built in a checkout (found above the executable), `/usr/share/heka-ghost` otherwise.
+/// Where the PipeWire installer and unit templates live (`<infra>/pipewire/install.sh`):
+/// the repo's `infra/` for a binary built in a checkout (found above the executable); the
+/// bundle's resources beside it otherwise (ADR 0066: `/usr/bin/ghostd` reads
+/// `/usr/lib/heka-ghost-desktop/pipewire/`, the AppImage the same under its mount);
+/// `/usr/share/heka-ghost` when neither has it.
 fn default_infra_dir() -> PathBuf {
-    if let Ok(exe) = std::env::current_exe() {
-        for dir in exe.ancestors().skip(1) {
-            let infra = dir.join("infra");
-            if infra.is_dir() && dir.join("Cargo.toml").is_file() {
-                return infra;
-            }
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| infra_dir_for(&exe))
+        .unwrap_or_else(|| PathBuf::from("/usr/share/heka-ghost"))
+}
+
+/// [`default_infra_dir`] for the executable at `exe`, pure but for the file checks.
+pub fn infra_dir_for(exe: &Path) -> Option<PathBuf> {
+    for dir in exe.ancestors().skip(1) {
+        let infra = dir.join("infra");
+        if infra.is_dir() && dir.join("Cargo.toml").is_file() {
+            return Some(infra);
         }
     }
-    PathBuf::from("/usr/share/heka-ghost")
+    let bundle = ghost_infer::runtime::resources_beside(exe.parent()?)?;
+    bundle
+        .join("pipewire")
+        .join("install.sh")
+        .is_file()
+        .then_some(bundle)
 }
 
 #[derive(Debug, Clone, PartialEq, Error)]
@@ -672,5 +686,40 @@ mod tests {
     fn the_runtime_dir_is_under_xdg_runtime_dir() {
         // Only the shape: the environment is the process's.
         assert!(runtime_dir().ends_with("ghost"));
+    }
+
+    /// ADR 0066: the installed bundle carries the echo canceller's installer beside its
+    /// binaries; a binary with neither a checkout nor the bundle above it finds none.
+    #[test]
+    fn the_bundle_carries_the_echo_cancellers_installer() {
+        let tmp = tempfile::tempdir().unwrap();
+        let usr = tmp.path().join("app.AppDir/usr");
+        std::fs::create_dir_all(usr.join("bin")).unwrap();
+        let exe = usr.join("bin/ghostd");
+        assert_eq!(infra_dir_for(&exe), None);
+        let pw = usr.join("lib/heka-ghost-desktop/pipewire");
+        std::fs::create_dir_all(&pw).unwrap();
+        std::fs::write(pw.join("install.sh"), "#!/bin/sh\n").unwrap();
+        assert_eq!(
+            infra_dir_for(&exe),
+            Some(usr.join("lib/heka-ghost-desktop"))
+        );
+    }
+
+    /// The unit the installer copies runs the system's PipeWire on a config under the
+    /// operator's home, so nothing it starts points into the bundle (an AppImage's mount
+    /// changes on every run).
+    #[test]
+    fn the_cancellers_unit_points_at_nothing_in_the_bundle() {
+        let unit = include_str!("../../../infra/pipewire/ghost-echo-cancel.service");
+        let exec = unit.lines().find(|l| l.starts_with("ExecStart=")).unwrap();
+        assert_eq!(
+            exec,
+            "ExecStart=/usr/bin/pipewire -c %h/.config/ghost/echo-cancel.conf"
+        );
+        let script = include_str!("../../../infra/pipewire/install.sh");
+        assert!(script.contains(r#"CONF_DIR="$HOME/.config/ghost""#));
+        assert!(script.contains(r#"UNIT_DIR="$HOME/.config/systemd/user""#));
+        assert!(!script.contains("sudo"), "no root");
     }
 }

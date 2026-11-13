@@ -38,7 +38,7 @@ impl Controller for Daemon {
     }
 
     async fn repair_microphone(&self) -> Result<String, String> {
-        self.repair_mic().await
+        self.repair_mic(true).await
     }
 
     /// `conversation`: the line the session opens in (the desktop's Call button); Ghost

@@ -21,6 +21,7 @@ pub mod capture;
 pub mod config;
 pub mod duck;
 pub mod frame;
+pub mod health;
 pub mod input;
 pub mod mixer;
 pub mod playback;
@@ -61,6 +62,11 @@ pub enum AudioError {
     /// The PipeWire thread went away (the stream errored or the daemon was stopped).
     #[error("audio: the stream is closed")]
     Closed,
+    /// The stream is open but nothing is taking its sound: it was never linked to a sink
+    /// (no session manager, no output device). Writes give up instead of waiting for ever
+    /// (issue #117) until it plays again.
+    #[error("audio out: the sound output isn't playing (nothing has taken sound for {secs} s)")]
+    Stalled { secs: u64 },
     #[error("audio: {0}")]
     Sound(#[from] SoundError),
 }

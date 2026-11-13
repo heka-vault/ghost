@@ -689,12 +689,15 @@ export default function SettingsScreen({ params: route }: RouteProps) {
     let msg: NonNullable<typeof echoMsg>;
     try {
       const r = await client.setupEchoCancel(uninstall);
+      // Reopen the microphone so Ghost's plan takes the change now, not at the next start;
+      // a session open, or listening off, keeps it for later (ADR 0066).
+      if (r.ok) await client.repairMicrophone().catch(() => undefined);
       msg = r.ok && !uninstall && installerNotNeeded(r.detail)
         ? { tone: "ok", title: "Echo cancellation isn’t needed here", text: "Your microphone cancels Ghost’s voice on its own chip, and Ghost plays through it, so Ghost listens to it directly. Nothing was installed." }
         : r.ok
         ? uninstall
-          ? { tone: "ok", title: "Echo cancellation removed", text: "Restart Ghost to apply.", offer: "default" }
-          : { tone: "ok", title: "Echo cancellation installed", text: "Use ghost.mic as the microphone, save, and restart Ghost.", offer: "ghost.mic" }
+          ? { tone: "ok", title: "Echo cancellation removed", text: "Ghost listens to the microphone directly now.", offer: "default" }
+          : { tone: "ok", title: "Echo cancellation installed", text: "Ghost listens through ghost.mic now, unless Microphone below names another device.", offer: "ghost.mic" }
         : { tone: "danger", title: uninstall ? "Couldn’t remove echo cancellation" : "Couldn’t install echo cancellation", text: r.detail ?? "Ghost didn’t say why. Run journalctl --user -u ghostd to see the log." };
     } catch (e) {
       msg = { tone: "danger", title: "Couldn’t reach Ghost", text: errorText(e) };
@@ -845,6 +848,8 @@ export default function SettingsScreen({ params: route }: RouteProps) {
   const mics = micOptions(devices, v.GHOST_INPUT_DEVICE ?? "");
   const wakeMics = wakeMicOptions(devices, v.GHOST_WAKE_INPUT_DEVICE ?? "");
   const micPath = devices?.microphone ?? null;
+  // ADR 0064: the canceller is the answer only where nothing else keeps Ghost's voice out.
+  const cancellerWanted = micPath?.case !== "on-chip" && micPath?.case !== "headset";
   const suggested = (micPath?.suggest ?? []).filter((x) => (v[x.key] ?? "") !== x.value);
   // A password saved on its own row (Passwords.tsx): one Ghost reads joins the restart pill, and
   // the setup list and the model page read set-or-not again.
@@ -1217,7 +1222,11 @@ export default function SettingsScreen({ params: route }: RouteProps) {
                                   <CommandCopy className="set-row-command" />
                                 </>
                               )
-                              : "Not installed. Without it, Ghost can hear itself through your speakers."
+                              : !cancellerWanted
+                                ? micPath?.case === "headset"
+                                  ? "Not needed: on a headset, Ghost’s voice doesn’t reach the microphone."
+                                  : "Not needed: your microphone cancels Ghost’s voice on its own chip."
+                                : "Not installed. Without it, Ghost can hear itself through your speakers."
                       }
                       meta={
                         echoBusy ? undefined : devices ? (
@@ -1259,7 +1268,7 @@ export default function SettingsScreen({ params: route }: RouteProps) {
                               items={[{ label: "Remove echo cancellation…", icon: <Trash2 />, danger: true, onSelect: () => void echo(true) }]}
                             />
                           </span>
-                        ) : (
+                        ) : cancellerWanted ? (
                           <Button
                             id={ECHO_IDS.install}
                             size="sm"
@@ -1270,6 +1279,10 @@ export default function SettingsScreen({ params: route }: RouteProps) {
                           >
                             Install
                           </Button>
+                        ) : (
+                          <Badge size="sm" tone="ok" dot>
+                            Not needed
+                          </Badge>
                         )
                       }
                     />

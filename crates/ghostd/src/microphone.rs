@@ -25,6 +25,7 @@
 //! itself while no session is open.
 
 use std::collections::{BTreeMap, VecDeque};
+use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -518,9 +519,8 @@ pub fn plan(
                 suggest.push(("GHOST_INPUT_DEVICE".into(), CANCELLER_SOURCE.into()));
             } else {
                 advice = Some(
-                    "Headphones help, or install Ghost's echo canceller \
-                     (infra/pipewire/install.sh) so it cleans the microphone against the \
-                     speakers."
+                    "Headphones help, or set up Ghost's echo canceller (Settings › Sound, or \
+                     Repair) so it cleans the microphone against the speakers."
                         .into(),
                 );
             }
@@ -777,10 +777,41 @@ pub fn note(problem: &Problem, plan: &Plan) -> String {
 
 // --- the repair ------------------------------------------------------------------------------
 
+/// What Repair does with Ghost's echo canceller (ADR 0064, ADR 0066).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CancellerStep {
+    /// It runs and Ghost listens through it: restart it.
+    Restart,
+    /// Ghost should listen through it and it isn't running (gone after a reinstall, its
+    /// unit removed), or nothing cancels Ghost's voice here: install it, from the bundle
+    /// or the checkout, and start it.
+    Install,
+    /// Not the canceller's to fix: a chip or a headset already keeps Ghost's voice out
+    /// (ADR 0064), or the case can't be read.
+    Leave,
+}
+
+/// The step for `plan`, with the canceller `running` or not, and whether the operator
+/// pressed Repair (`asked`): an automatic repair restarts, never installs.
+pub fn canceller_step(plan: &Plan, running: bool, asked: bool) -> CancellerStep {
+    let uses = plan.session.is_canceller() || plan.wake.is_canceller();
+    match (uses, running, plan.case) {
+        (true, true, _) => CancellerStep::Restart,
+        (true, false, _) if asked => CancellerStep::Install,
+        (false, false, Case::Unprotected) if asked => CancellerStep::Install,
+        _ => CancellerStep::Leave,
+    }
+}
+
 /// What a repair does to the sound stack; the listener's reopening is the daemon's.
 pub trait Repairer: Send + Sync {
     /// Restart Ghost's echo canceller and wait for `ghost.mic`. Err says why not.
     fn restart_canceller(&self) -> Result<(), String>;
+    /// Install and start it from the installer under `infra_dir` (ADR 0066). Ok says what
+    /// happened; Err why not, in words.
+    fn install_canceller(&self, infra_dir: &Path) -> Result<String, String>;
+    /// Whether its user unit is running.
+    fn canceller_running(&self) -> bool;
 }
 
 /// The workstation's: `systemctl --user restart` with the graph's rate held while the
@@ -813,6 +844,24 @@ fn set_forced_rate(rate: &str) -> bool {
 }
 
 impl Repairer for LiveRepairer {
+    fn canceller_running(&self) -> bool {
+        ghost_api::deps::unit_active(CANCELLER_UNIT)
+    }
+
+    fn install_canceller(&self, infra_dir: &Path) -> Result<String, String> {
+        let (ok, detail) = tokio::runtime::Handle::current()
+            .block_on(ghost_api::echo_cancel::run(infra_dir, false));
+        if !ok {
+            return Err(detail);
+        }
+        // The installer waits for ghost.mic; a chip that needs none says so and installs
+        // nothing.
+        if detail.contains("no host echo canceller is needed") {
+            return Ok("no echo canceller is needed here".into());
+        }
+        Ok("set up the echo canceller".into())
+    }
+
     fn restart_canceller(&self) -> Result<(), String> {
         if !ghost_api::deps::unit_active(CANCELLER_UNIT) {
             return Err("Ghost's echo canceller isn't running".into());
@@ -1185,6 +1234,29 @@ mod tests {
         );
         assert_eq!(p.wake, p.session);
         assert!(p.fell_back.is_some());
+    }
+
+    /// ADR 0064, ADR 0066: Repair sets the canceller up only where it is the right answer.
+    #[test]
+    fn repair_sets_the_canceller_up_only_where_it_belongs() {
+        use CancellerStep::*;
+        // A laptop and its speakers, nothing cancelling: the operator's Repair installs it,
+        // an automatic repair never does.
+        let bare = plan(None, None, None, Some(&laptop(false)));
+        assert_eq!(canceller_step(&bare, false, true), Install);
+        assert_eq!(canceller_step(&bare, false, false), Leave);
+        // Running and listened through: restarted.
+        let host = plan(None, None, None, Some(&laptop(true)));
+        assert_eq!(canceller_step(&host, true, false), Restart);
+        // Its source there but its unit gone (a reinstalled machine): set up again.
+        assert_eq!(canceller_step(&host, false, true), Install);
+        // A chip that cancels, or a headset: never.
+        let chip = plan(None, None, None, Some(&array_desk(false)));
+        assert_eq!(chip.case, Case::OnChip);
+        assert_eq!(canceller_step(&chip, false, true), Leave);
+        let head = plan(None, None, None, Some(&headset()));
+        assert_eq!(head.case, Case::Headset);
+        assert_eq!(canceller_step(&head, false, true), Leave);
     }
 
     #[test]

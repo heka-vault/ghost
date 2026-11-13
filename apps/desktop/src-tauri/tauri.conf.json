@@ -32,11 +32,15 @@
     "resources": {
       "resources/onnxruntime/": "onnxruntime/",
       "resources/models/": "models/",
-      "resources/ghost-build.json": "ghost-build.json"
+      "resources/ghost-build.json": "ghost-build.json",
+      "../../../infra/pipewire/install.sh": "pipewire/install.sh",
+      "../../../infra/pipewire/ghost-echo-cancel.conf.in": "pipewire/ghost-echo-cancel.conf.in",
+      "../../../infra/pipewire/ghost-echo-cancel.service": "pipewire/ghost-echo-cancel.service"
     },
     "linux": {
       "deb": {
-        "depends": ["libespeak-ng1"],
+        "depends": ["libespeak-ng1", "pulseaudio-utils"],
+        "recommends": ["pipewire-bin"],
         "section": "utils",
         "desktopTemplate": "./ghost.desktop"
       }

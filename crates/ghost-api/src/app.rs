@@ -1485,37 +1485,9 @@ async fn setup_echo_cancel(
     State(deps): State<SharedDeps>,
     Qs(q): Qs<EchoCancelQuery>,
 ) -> ApiResult<Json<Ack>> {
-    let script = deps.infra_dir.join("pipewire").join("install.sh");
-    if !script.exists() {
-        return Err(ApiError::internal(format!(
-            "installer not found at {}",
-            script.display()
-        )));
-    }
-    let mut cmd = tokio::process::Command::new(&script);
-    if q.uninstall.unwrap_or(false) {
-        cmd.arg("--uninstall");
-    }
-    cmd.env_clear()
-        .envs(ghost_core::redact::child_env(std::env::vars())) // never a password (ADR 0036)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-    let out = cmd
-        .output()
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-    let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
-    text.push_str(&String::from_utf8_lossy(&out.stderr));
-    let detail: String = text
-        .chars()
-        .rev()
-        .take(2000)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect();
+    let (ok, detail) = crate::echo_cancel::run(&deps.infra_dir, q.uninstall.unwrap_or(false)).await;
     Ok(Json(Ack {
-        ok: out.status.success(),
+        ok,
         detail: Some(detail),
     }))
 }

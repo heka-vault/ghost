@@ -648,9 +648,10 @@ pub fn waiting_place(source: &str, key: &str) -> Option<WaitingPlace> {
     let head = key.split(':').next().unwrap_or("");
     Some(match (head, key) {
         (_, "model:slow") => WaitingPlace::Model,
-        (_, "voice:realtime") | (_, "models:missing") | (_, "input:degraded") => {
-            WaitingPlace::Sound
-        }
+        (_, "voice:realtime")
+        | (_, "models:missing")
+        | (_, "input:degraded")
+        | (_, "output:unavailable") => WaitingPlace::Sound,
         (_, "ghost:outside-listener") => WaitingPlace::OutsideTools,
         ("passwords", _) => WaitingPlace::Passwords,
         ("app", _) => WaitingPlace::Apps,
@@ -2363,6 +2364,10 @@ mod tests {
         );
         assert_eq!(
             waiting_place("ghost", "models:missing"),
+            Some(WaitingPlace::Sound)
+        );
+        assert_eq!(
+            waiting_place("ghost", "output:unavailable"),
             Some(WaitingPlace::Sound)
         );
         assert_eq!(

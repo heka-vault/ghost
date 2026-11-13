@@ -11,6 +11,7 @@ pub mod floating;
 mod supervisor;
 mod tray;
 mod updater;
+mod webkit_exit;
 
 use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
@@ -199,7 +200,14 @@ pub fn run() {
         .expect("error while building Ghost");
     app.run(|app, event| match event {
         // Quit: the daemon goes down with the shell, before the process ends.
-        RunEvent::ExitRequested { .. } | RunEvent::Exit => stop_daemon(app),
+        RunEvent::ExitRequested { .. } => stop_daemon(app),
+        // Then the window's web-content process, which would otherwise abort in Mesa's exit
+        // handlers one quit in several (#115). An update's restart passes here too.
+        RunEvent::Exit => {
+            stop_daemon(app);
+            let ended = webkit_exit::end_web_processes();
+            eprintln!("ghost: exiting ({ended} web process(es) ended)");
+        }
         _ => {}
     });
 }

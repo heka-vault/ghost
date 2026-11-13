@@ -460,9 +460,16 @@ pub async fn desk_media(
             Err(e) => warn!("duck: {e}"),
         }
     }
+    // A speaker that takes nothing (#117) does not stop the session: the chime is skipped,
+    // the replies show on screen, and the waiting list says why there is no sound.
     if chime {
-        playback.write(&ghost_audio::chime(true)).await?;
-        playback.drain().await?;
+        let played = match playback.write(&ghost_audio::chime(true)).await {
+            Ok(()) => playback.drain().await,
+            Err(e) => Err(e),
+        };
+        if let Err(e) = played {
+            warn!("audio out: the chime didn't play: {e}");
+        }
     }
     Ok(Media {
         input,
