@@ -12,15 +12,17 @@
  * from its row, one entry of watches.json at a time; the operator's own and hooks.json
  * stay the file's.
  */
-import type { HookInfo, WatchInfo, WatchingView } from "@ghost/client-ts";
+import type { ConversationView, HookInfo, ScheduleInfo, ScheduleRunInfo, WatchInfo, WatchingView } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
-import { CloudOff, Eye, FolderOpen, MoreHorizontal, Trash2, Webhook } from "lucide-react";
+import { CloudOff, Eye, FolderOpen, History, MoreHorizontal, Plus, Trash2, Webhook } from "lucide-react";
 import { Fragment, useEffect, useState } from "react";
 
 import type { RouteProps } from "../../app/routes";
 import { navigate, usePath } from "../../app/router";
-import { Badge, Button, Card, EmptyState, IconButton, ListRow, Menu, Notice, Page, Section, Skeleton, Switch, agentName, errorText, relativeTime, useConfirm, useLive, useToast } from "../../ui";
+import { Badge, Button, Card, cx, EmptyState, IconButton, LineGlyph, ListRow, Menu, Notice, Page, Section, Skeleton, Switch, agentName, errorText, relativeTime, useConfirm, useLive, useToast } from "../../ui";
 import { CONFIG_DIR, RESPONSE, URGENCY, VERIFY, count, everyWords, folderOf, listWords, reasonWords, revealFolder, stepWords, sumOf } from "./model";
+import { AddWatchDialog } from "./AddWatch";
+import { RunCard, useAppTitles, useRunReach } from "./Runs";
 import { Schedules } from "./Schedules";
 import "./watching.css";
 
@@ -44,6 +46,29 @@ export default function WatchingScreen(_: RouteProps) {
   const [folder, setFolder] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+  /** The agent the page is showing, or everyone. */
+  const [only, setOnly] = useState<string | null>(null);
+  const [schedules, setSchedules] = useState<ScheduleInfo[]>([]);
+  const [agents, setAgents] = useState<ConversationView[]>([]);
+  const [runs, setRuns] = useState<ScheduleRunInfo[] | null>(null);
+  const [addingWatch, setAddingWatch] = useState(false);
+  const reach = useRunReach(runs);
+  const appTitle = useAppTitles();
+
+  useEffect(() => {
+    let on = true;
+    client
+      .conversations(false)
+      .then((l) => on && setAgents(l))
+      .catch(() => {});
+    client
+      .runs(12)
+      .then((r) => on && setRuns(r.runs))
+      .catch(() => on && setRuns([]));
+    return () => {
+      on = false;
+    };
+  }, [client, waitingVersion, attempt]);
 
   useEffect(() => {
     let on = true;
@@ -67,6 +92,11 @@ export default function WatchingScreen(_: RouteProps) {
   };
 
   const empty = view != null && view.watches.length === 0 && view.hooks.length === 0;
+  // Everyone who owns something here: a schedule, a watch it made or acts through, a run.
+  const owners = ownersOf(schedules, view?.watches ?? [], runs ?? []);
+  const watchShown = (w: WatchInfo) => !only || madeBySlug(w) === only || w.acts_through === only;
+  const runsShown = (runs ?? []).filter((r) => !only || r.agent === only);
+  const nameOf = (slug: string) => agentName(slug, agents.find((a) => a.slug === slug)?.name);
 
   /** One write to an agent's watch: the row is busy while it goes; a refusal is said above. */
   const act = async (w: WatchInfo, what: string, fn: () => Promise<WatchingView>) => {
@@ -126,7 +156,36 @@ export default function WatchingScreen(_: RouteProps) {
           </ul>
         </Notice>
       )}
-      <Schedules onProblems={setScheduleProblems} />
+      {owners.length > 1 && (
+        <div className="wat-owners" role="radiogroup" aria-label="Whose">
+          {[null, ...owners].map((slug) => (
+            <button key={slug ?? "all"} type="button" role="radio" aria-checked={only === slug} className={cx("wat-owner", only === slug && "is-on")} onClick={() => setOnly(slug)}>
+              {slug ? <LineGlyph slug={slug} name={nameOf(slug)} size="sm" /> : null}
+              {slug ? nameOf(slug) : "Everyone"}
+            </button>
+          ))}
+        </div>
+      )}
+      <Schedules onProblems={setScheduleProblems} agent={only} onSchedules={setSchedules} />
+      <Section id="wat-runs" title="Recent runs" description={only ? `What ${nameOf(only)} did on its own lately.` : "What your agents did on their own lately: how long, what they reached, what they said."} className="wat-rest">
+        {runs == null ? (
+          <Card aria-busy="true" aria-label="Loading">
+            <div className="wat-skel-row">
+              <Skeleton width={280} height={12} />
+            </div>
+          </Card>
+        ) : runsShown.length === 0 ? (
+          <Card>
+            <EmptyState size="compact" icon={<History />} title="No runs yet" description="A run shows here once a schedule or a watch starts one, with what it reached and said." />
+          </Card>
+        ) : (
+          <Card list>
+            {runsShown.slice(0, 6).map((r) => (
+              <RunCard key={r.id} r={r} reach={reach.get(r.id)} showAgent appTitle={appTitle} />
+            ))}
+          </Card>
+        )}
+      </Section>
       <div className="wat-rest">
       {loadError && view != null && (
         <Notice tone="danger" title="Couldn’t refresh what Ghost watches" onDismiss={() => setLoadError(null)} className="wat-notice">
@@ -186,7 +245,12 @@ export default function WatchingScreen(_: RouteProps) {
               <Section
                 id="wat-watches"
                 title="Watches"
-                description={<>Each reads a connected app on its own schedule and keeps only the fields it names. One failure is one item on Today, however often it is seen.</>}
+                description={<>Each reads a connected app on its own and keeps only the fields it names. One failure is one item on Today, however often it is seen.</>}
+                actions={
+                  <Button variant="secondary" size="sm" leadingIcon={<Plus />} onClick={() => setAddingWatch(true)} disabled={!online}>
+                    Add watch
+                  </Button>
+                }
               >
                 {view.watches.length === 0 ? (
                   <Card>
@@ -209,7 +273,7 @@ export default function WatchingScreen(_: RouteProps) {
                       </Notice>
                     )}
                     <Card list>
-                      {view.watches.map((w) => (
+                      {view.watches.filter(watchShown).map((w) => (
                         <WatchRow
                           key={w.name}
                           w={w}
@@ -277,9 +341,22 @@ export default function WatchingScreen(_: RouteProps) {
         </>
       )}
       </div>
+      <AddWatchDialog open={addingWatch} onClose={() => setAddingWatch(false)} agents={agents} />
       {confirmDialog}
     </Page>
   );
+}
+
+/** Every agent that owns a schedule, a watch (made or acted through) or a recent run, Ghost first. */
+export function ownersOf(schedules: readonly { agent: string }[], watches: readonly { made_by: string | null; acts_through?: string | null }[], runs: readonly { agent: string }[]): string[] {
+  const set = new Set<string>();
+  for (const s of schedules) set.add(s.agent);
+  for (const w of watches) {
+    if (w.made_by?.startsWith("agent:")) set.add(w.made_by.slice(6));
+    if (w.acts_through) set.add(w.acts_through);
+  }
+  for (const r of runs) set.add(r.agent);
+  return [...set].sort((a, b) => (a === "ghost" ? -1 : b === "ghost" ? 1 : a.localeCompare(b)));
 }
 
 /** The agent that made a watch, from `agent:<slug>`. */
