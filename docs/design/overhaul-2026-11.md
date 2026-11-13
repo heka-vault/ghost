@@ -223,3 +223,17 @@ the contract keeps for a waiting okay), the tray's native menu (Room, and Today'
 - Still to build: onboarding as a real first run, Settings' sections to one standard, the
   catalog and connecting as one flow, making a schedule or a watch without cron, and the agent's
   conversation on the record.
+
+## 6. Round three (2026-11-12, evening)
+
+Each screen against the owner's bar, before and after, honestly:
+
+| Screen | Before | After | What is still short |
+|---|---|---|---|
+| Onboarding | 5 | 8.5 | A real first run in every build (The first run in docs/design-system.md). Short of 9: the wake step proves the detector only by Ghost waking (its phase), not by showing it hearing a near miss; that needs a daemon event of the passive detector's score, which touches the idle-audio rule and wants an ADR of its own. The speech models' download has no progress API, so it is stated, not shown. |
+| Watching | 7.5 | 9 | Plain schedules, readable runs with their reach, Whose, Add watch through Ghost. A watch is still asked for, not edited in place: its one writer is Ghost's tool (ADR 0052). |
+| Apps | 8 | 9 | One connect flow ending on what the app lets Ghost do, plain words and limits, Lately, twins. Which account each twin is needs the app to say it (the daemon has no field for it). |
+| Settings | 7 | 8.5 | The model verdict, Permissions' Try it, no amber restarts, a way back to setup. Not done: search across settings (eleven pages; not yet earned), and Outside tools, Phone and Notifications were left as they were. |
+| Agents | 8.5 | 9 | The conversation is the record. |
+| Phone | 6 | 6.5 | Agents drawn in their shapes; Home is otherwise unchanged. |
+| Today | 9 | 9 | A note of Ghost's own leads to its place in the app (`WaitingItemView.place`). |
