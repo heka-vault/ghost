@@ -10,6 +10,8 @@
  */
 import type { AppView, AuditEntry, ConversationView, GhostClient, ModelCheckView, QuestionView, ReachCall, ReachView, ScheduleInfo, ScheduleRunInfo, WaitingItemView } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
+
+import { AgentLooksContext } from "../ui";
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 import { EMPTY_TALLY, type Tally, tallyOf } from "../screens/today/telemetry";
@@ -175,7 +177,13 @@ export function TodayProvider({ children }: { children: ReactNode }) {
     };
   }, [loaded, error, records, working, agents, schedules, apps, check, reload, reachDay, calls]);
 
-  return <TodayContext.Provider value={value}>{children}</TodayContext.Provider>;
+  // Every agent's look, for every LineGlyph under the shell.
+  const looks = useMemo(() => new Map(agents.map((a) => [a.slug, a.look ?? null])), [agents]);
+  return (
+    <TodayContext.Provider value={value}>
+      <AgentLooksContext.Provider value={looks}>{children}</AgentLooksContext.Provider>
+    </TodayContext.Provider>
+  );
 }
 
 /** Today's records. Outside the shell (a bare route) it is empty and never loads. */

@@ -91,6 +91,7 @@ pub fn conversation_view(
         retired_at: p.retired_at,
         active: active == Some(p.slug.as_str()),
         is_ghost: p.is_ghost(),
+        look: p.look.clone(),
     })
 }
 
@@ -236,6 +237,7 @@ async fn create_conversation(
         )));
     }
     let memory = seed_memory(convs, req.seed_from.as_deref())?;
+    let look = look_of(req.look.as_deref())?;
     apply(
         &deps,
         &slug,
@@ -248,6 +250,7 @@ async fn create_conversation(
             speed: req.speed,
             persona: req.persona,
             memory,
+            look: look.filter(|l| !l.is_empty()),
         }),
         None,
     )
@@ -304,7 +307,15 @@ async fn update_conversation(
     }
     let convs = need(&deps)?;
     let p = get(convs, &slug)?;
-    if req.name.is_some() || req.aliases.is_some() || req.job.is_some() {
+    let look = look_of(req.look.as_deref())?;
+    if look.is_some() && p.is_ghost() {
+        return Err(ApiError::invalid(
+            &["body", "look"],
+            "Ghost is always Wisp",
+            "value_error",
+        ));
+    }
+    if req.name.is_some() || req.aliases.is_some() || req.job.is_some() || look.is_some() {
         apply(
             &deps,
             &slug,
@@ -313,6 +324,7 @@ async fn update_conversation(
                 name: req.name.as_deref().unwrap_or(&p.name).trim().to_string(),
                 aliases: aliases_of(req.aliases.as_deref().unwrap_or(&p.aliases)),
                 job: req.job.as_deref().map(squeeze),
+                look,
             }),
             None,
         )
@@ -714,4 +726,21 @@ pub fn router() -> OpenApiRouter<SharedDeps> {
         .routes(routes!(conversation_compactions))
         .routes(routes!(voices))
         .routes(routes!(sample_voice))
+}
+
+/// A look from the desktop: `"<shape>:<colour>"`, or "" for the one picked from the slug.
+fn look_of(look: Option<&str>) -> ApiResult<Option<String>> {
+    match look.map(str::trim) {
+        None => Ok(None),
+        Some("") => Ok(Some(String::new())),
+        Some(l) => ghost_core::conversations::models::parse_look(l)
+            .map(Some)
+            .ok_or_else(|| {
+                ApiError::invalid(
+                    &["body", "look"],
+                    "a shape (wisp, drop, bell, hood, cloud, lantern, star, moth), a colon and a colour 0 to 7",
+                    "value_error",
+                )
+            }),
+    }
 }

@@ -1,22 +1,25 @@
 /**
  * The rail: the desk posture's one way around (docs/design-system.md, The two postures). Ghost
  * at the top, alive (Wisp in the voice phase, the way to the conversation), then Today,
- * Agents, Watching and Apps with their labels under them, then the room, the microphone and
- * Settings. No agent list: agents live on Agents and in the conversation (overhaul, step 1).
+ * Watching and Apps with their labels under them, then the agents themselves (each its mark
+ * and name, with its live state) and + to hire one, then the room, the microphone and Settings.
+ * Choosing an agent opens the conversation with it; its settings are under Settings › Agents
+ * (the owner, 2026-11-12).
  *
  * Every row is an icon over a label, so the rail reads at a glance and a screen reader hears
  * the label and the count: “Today, 2 need you”.
  */
 import { useGhost } from "@ghost/ui";
-import { AudioWaveform, Blocks, Eye, FlaskConical, MonitorUp, Settings2, Sun, Users } from "lucide-react";
+import { AudioWaveform, Blocks, Eye, FlaskConical, MonitorUp, Plus, Settings2, Sun } from "lucide-react";
 import { type ReactNode, Suspense, lazy, useRef, useState } from "react";
 
 import { useDesign } from "../design/context";
-import { type GhostPhase, IconButton, Mascot, Tooltip, cx, formatShortcut, liveLabel, useLive, versionLine } from "../ui";
+import { type GhostPhase, IconButton, LineGlyph, Mascot, Tooltip, cx, formatShortcut, liveLabel, useLive, versionLine } from "../ui";
+import { type RailAgent, railAgents } from "./railAgents";
 import { ListeningSwitch, useListeningShortcut } from "./ListeningSwitch";
 import { notListening, notListeningSub } from "./listening";
 import { usePostureControl } from "./PostureContext";
-import { hrefFor, usePath } from "./router";
+import { hrefFor, navigate, usePath } from "./router";
 import { navMatch } from "./routes";
 import { nameOf, useToday } from "./today";
 import { difference } from "./version";
@@ -35,9 +38,8 @@ interface Item {
 
 const MAIN: Item[] = [
   { id: "today", to: "/", label: "Today", icon: <Sun />, match: ["today"] },
-  { id: "agents", to: "/agents", label: "Agents", icon: <Users />, match: ["conversations"] },
   { id: "watching", to: "/watching", label: "Watching", icon: <Eye />, match: ["watching"] },
-  { id: "apps", to: "/settings/apps", label: "Apps", icon: <Blocks />, match: ["apps"] },
+  { id: "apps", to: "/apps", label: "Apps", icon: <Blocks />, match: ["apps"] },
 ];
 
 /** Wisp's pose for a voice phase (the mascot's own vocabulary). */
@@ -77,14 +79,22 @@ export function Rail() {
             : "Listening for its name";
   const needs = today.needs.decide.length + today.needs.answer.length;
   const working = today.working.length + (inSession ? 1 : 0);
-  const inSettings = path.startsWith("/settings") && current !== "apps";
+  const inSettings = path.startsWith("/settings");
+  const agents = railAgents({ agents: today.agents, working: today.working, needs: [...today.needs.decide, ...today.needs.answer], session: inSession ? (status?.conversation ?? "ghost") : null, phase });
+  const openAgent = path.startsWith("/agents/") ? decodeURIComponent(path.slice("/agents/".length)) : null;
+  const hire = () => {
+    // The roster's own dialog, opened from its address (?open=new, before the hash).
+    const q = new URLSearchParams(window.location.search);
+    q.set("open", "new");
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}?${q}${window.location.hash}`);
+    navigate("/settings/agents");
+  };
   const showSwitch = connection !== "offline" && connection !== "connecting";
   const version = useRef<{ line: string; other: string | null } | null>(null);
   if (status?.version) version.current = { line: versionLine(status.version, status.build), other: difference(status)?.window ?? null };
 
   const badge = (id: string): { n: number | null; label: string } | null => {
     if (id === "today" && needs) return { n: needs, label: `${needs} need${needs === 1 ? "s" : ""} you` };
-    if (id === "agents" && today.working.length) return { n: null, label: `${today.working.length} working now` };
     return null;
   };
 
@@ -135,6 +145,16 @@ export function Rail() {
             );
           })}
         </ul>
+        <div className="rail__agents" role="group" aria-label="Agents">
+          <IconButton label="Hire an agent" tooltipSide="right" icon={<Plus />} onClick={hire} className="rail__hire" />
+          <ul role="list">
+            {agents.map((a) => (
+              <li key={a.slug}>
+                <AgentRow a={a} on={openAgent === a.slug} />
+              </li>
+            ))}
+          </ul>
+        </div>
       </nav>
 
       <div className="rail__foot">
@@ -167,5 +187,25 @@ export function Rail() {
         )}
       </div>
     </aside>
+  );
+}
+
+/** One agent on the rail: its mark with its live state, its name under it; opens its conversation. */
+function AgentRow({ a, on }: { a: RailAgent; on: boolean }) {
+  return (
+    <Tooltip side="right" content={`${a.name}${a.stateWords ? ` · ${a.stateWords}` : ""}`} asChild>
+      <a
+        className={cx("rail__agent", on && "is-current", a.state && `is-${a.state}`)}
+        href={hrefFor(`/agents/${encodeURIComponent(a.slug)}`)}
+        aria-current={on ? "page" : undefined}
+        aria-label={`${a.name}${a.stateWords ? `, ${a.stateWords}` : ""}`}
+      >
+        <span className="rail__agent-mark">
+          <LineGlyph slug={a.slug} name={a.name} size="lg" />
+          {a.waiting > 0 ? <span className="rail__count t-num">{a.waiting}</span> : a.state === "working" ? <span className="rail__pulse" aria-hidden /> : null}
+        </span>
+        <span className="rail__label rail__agent-name">{a.name}</span>
+      </a>
+    </Tooltip>
   );
 }

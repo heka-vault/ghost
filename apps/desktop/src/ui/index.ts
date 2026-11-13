@@ -44,7 +44,7 @@ export { Tooltip } from "./Tooltip";
 export type { TooltipProps } from "./Tooltip";
 export { Page, PageChromeContext, PageHeader } from "./Page";
 export type { PageChrome, PageProps, PageHeaderProps, PageWidth } from "./Page";
-export { GhostGlyph, GhostMark, GlyphSizeContext, LineGlyph, lineHue, GHOST_PATH, GHOST_PATH_SMALL } from "./Brand";
+export { AgentLooksContext, AgentShapeGlyph, GhostGlyph, GhostMark, GlyphSizeContext, LineGlyph, lineHue, GHOST_PATH, GHOST_PATH_SMALL } from "./Brand";
 export type { LineGlyphProps } from "./Brand";
 export { Mascot } from "./Mascot";
 export type { MascotProps } from "./Mascot";

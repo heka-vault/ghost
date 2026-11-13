@@ -94,14 +94,27 @@ export const ROUTES: RouteDef[] = [
   },
   {
     id: "conversations",
-    patterns: ["/agents/:slug?"],
-    path: "/agents",
+    // The conversation with one agent; the rail lists them (the owner, 2026-11-12).
+    patterns: ["/agents/:slug"],
+    path: "/agents/ghost",
+    owner: "conversations",
+    title: "Agent",
+    kind: "screen",
+    chrome: "app",
+    needsDaemon: true,
+    component: lazy(() => import("../screens/conversations")),
+  },
+  {
+    id: "agents",
+    // Every agent and each one's settings: a page of Settings.
+    patterns: ["/settings/agents/:slug?"],
+    path: "/settings/agents",
     owner: "conversations",
     title: "Agents",
     kind: "screen",
     chrome: "app",
     needsDaemon: true,
-    nav: { label: "Agents", icon: MessagesSquare, group: "main" },
+    area: "settings",
     component: lazy(() => import("../screens/conversations")),
   },
   {
@@ -119,16 +132,15 @@ export const ROUTES: RouteDef[] = [
   },
   {
     id: "apps",
-    patterns: ["/settings/apps/:name?"],
-    path: "/settings/apps",
+    // Its own place, not a page of Settings: too important to hide there (the owner, 2026-11-12).
+    patterns: ["/apps/:name?"],
+    path: "/apps",
     owner: "apps",
     title: "Apps",
     kind: "screen",
     chrome: "app",
     needsDaemon: true,
-    // A page of Settings that keeps a one-click row in the main nav (the operator's call, 2026-10-28).
     nav: { label: "Apps", icon: Blocks, group: "main" },
-    area: "settings",
     component: lazy(() => import("../screens/apps")),
   },
   {
@@ -299,8 +311,8 @@ const page = (id: string, label: string, icon: LucideIcon): SettingsPage => ({ i
 export const SETTINGS_PAGES: SettingsPage[] = [
   page("general", "General", Settings),
   page("model", "Model", Cpu),
+  page("agents", "Agents", MessagesSquare),
   page("passwords", "Passwords", KeyRound),
-  page("apps", "Apps", Blocks),
   page("skills", "Skills", BookOpen),
   page("permissions", "Permissions", ShieldCheck),
   page("sound", "Sound", Volume2),
@@ -326,9 +338,12 @@ const REDIRECTS: { from: string; to: (p: Record<string, string>) => string }[] =
   { from: "/settings", to: () => SETTINGS_PAGES[0].path },
   // What needs you is Today's first block now (the combined direction, 2026-11-12).
   { from: "/waiting", to: () => "/" },
-  { from: "/apps/:name?", to: (p) => (p.name ? `/settings/apps/${encodeURIComponent(p.name)}` : "/settings/apps") },
+  // Apps was a page of Settings until the owner moved it out (2026-11-12).
+  { from: "/settings/apps/:name?", to: (p) => (p.name ? `/apps/${encodeURIComponent(p.name)}` : "/apps") },
+  // The agents' roster moved under Settings; an agent's own address is its conversation.
+  { from: "/agents", to: () => "/settings/agents" },
   // #/servers and #/policy were these screens' addresses before ADR 0034.
-  { from: "/servers", to: () => "/settings/apps" },
+  { from: "/servers", to: () => "/apps" },
   { from: "/skills", to: () => "/settings/skills" },
   { from: "/permissions", to: () => "/settings/permissions" },
   { from: "/policy", to: () => "/settings/permissions" },

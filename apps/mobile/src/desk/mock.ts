@@ -68,12 +68,12 @@ function seedAudit(): AuditEntry[] {
 export type MockAct = "ask" | "yes" | "no" | "talk" | "drop" | "deskDown" | "deskUp" | "deskSession" | "agentAsks";
 
 const MOCK_LINES: ConversationView[] = [
-  { id: "a0", slug: "ghost", name: "Ghost", aliases: [], job: "", voice: "af_heart", speed: 1, own_voice: false, created_at: "2026-10-01T09:00:00Z", last_active_at: "2026-10-20T13:00:00Z", retired_at: null, active: false, is_ghost: true },
-  { id: "a1", slug: "heka-workshop", name: "Heka workshop", aliases: ["workshop"], job: "the workshop", voice: "am_adam", speed: 1, own_voice: true, created_at: "2026-10-18T09:00:00Z", last_active_at: "2026-10-20T11:00:00Z", retired_at: null, active: false, is_ghost: false },
-  { id: "a2", slug: "quotient-research", name: "Quotient research", aliases: [], job: "", voice: "bf_emma", speed: 1, own_voice: true, created_at: "2026-10-19T09:00:00Z", last_active_at: "2026-10-19T18:00:00Z", retired_at: null, active: false, is_ghost: false },
+  { id: "a0", slug: "ghost", name: "Ghost", aliases: [], job: "", voice: "af_heart", speed: 1, own_voice: false, created_at: "2026-10-01T09:00:00Z", last_active_at: "2026-10-20T13:00:00Z", retired_at: null, active: false, is_ghost: true, look: null },
+  { id: "a1", slug: "heka-workshop", name: "Heka workshop", aliases: ["workshop"], job: "the workshop", voice: "am_adam", speed: 1, own_voice: true, created_at: "2026-10-18T09:00:00Z", last_active_at: "2026-10-20T11:00:00Z", retired_at: null, active: false, is_ghost: false, look: null },
+  { id: "a2", slug: "quotient-research", name: "Quotient research", aliases: [], job: "", voice: "bf_emma", speed: 1, own_voice: true, created_at: "2026-10-19T09:00:00Z", last_active_at: "2026-10-19T18:00:00Z", retired_at: null, active: false, is_ghost: false, look: null },
   // Two more agents, each its own key on the dial pad (ADR 0035).
-  { id: "a3", slug: "accounting", name: "Accounting", aliases: ["the books"], job: "the books", voice: "bm_george", speed: 1.05, own_voice: true, created_at: "2026-10-02T09:00:00Z", last_active_at: "2026-10-20T09:00:00Z", retired_at: null, active: false, is_ghost: false },
-  { id: "a4", slug: "q3-audit", name: "Q3 audit", aliases: ["the audit"], job: "the auditors’ questions", voice: "af_heart", speed: 1.05, own_voice: false, created_at: "2026-10-14T09:00:00Z", last_active_at: "2026-10-19T15:00:00Z", retired_at: null, active: false, is_ghost: false },
+  { id: "a3", slug: "accounting", name: "Accounting", aliases: ["the books"], job: "the books", voice: "bm_george", speed: 1.05, own_voice: true, created_at: "2026-10-02T09:00:00Z", last_active_at: "2026-10-20T09:00:00Z", retired_at: null, active: false, is_ghost: false, look: null },
+  { id: "a4", slug: "q3-audit", name: "Q3 audit", aliases: ["the audit"], job: "the auditors’ questions", voice: "af_heart", speed: 1.05, own_voice: false, created_at: "2026-10-14T09:00:00Z", last_active_at: "2026-10-19T15:00:00Z", retired_at: null, active: false, is_ghost: false, look: null },
 ];
 
 export class MockDesk implements Desk {

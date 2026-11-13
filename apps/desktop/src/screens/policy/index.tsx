@@ -374,7 +374,7 @@ export default function PermissionsScreen(_: RouteProps) {
       <OwnOperations sources={sources} />
 
       <p className="policy-foot t-small t-3">
-        These apply to Ghost and every agent alike. Each app’s tools, with these rules applied, are on its page under <Link to="/settings/apps">Apps</Link>.
+        These apply to Ghost and every agent alike. Each app’s tools, with these rules applied, are on its page under <Link to="/apps">Apps</Link>.
       </p>
     </>
   );

@@ -19,6 +19,8 @@ export interface Draft {
   persona: string;
   memory: string;
   notes: string[];
+  /** How it is drawn, `"<shape>:<colour>"`; "" for the one picked from its slug. */
+  look: string;
 }
 
 export type DraftKey = keyof Draft;
@@ -32,7 +34,7 @@ export type DraftKey = keyof Draft;
 export function fromDetail(d: ConversationDetail): Draft {
   const own = new Set([d.name.trim().toLowerCase(), d.slug]);
   const aliases = d.aliases.filter((a) => !own.has(a.trim().toLowerCase()));
-  return { name: d.name, aliases: aliases.join(", "), job: d.job ?? "", voice: d.own_voice ? d.voice : "", speed: d.speed, persona: d.persona, memory: d.memory, notes: [...d.notes] };
+  return { name: d.name, aliases: aliases.join(", "), job: d.job ?? "", voice: d.own_voice ? d.voice : "", speed: d.speed, persona: d.persona, memory: d.memory, notes: [...d.notes], look: d.look ?? "" };
 }
 
 export const splitAliases = (s: string) => s.split(",").map((a) => a.trim()).filter(Boolean);
@@ -47,11 +49,11 @@ function same(k: DraftKey, a: Draft, b: Draft): boolean {
   return a[k] === b[k];
 }
 
-const KEYS: DraftKey[] = ["name", "aliases", "job", "voice", "speed", "persona", "memory", "notes"];
+const KEYS: DraftKey[] = ["name", "aliases", "job", "voice", "speed", "persona", "memory", "notes", "look"];
 
-/** Ghost keeps its name, so its name and aliases can't be dirty. */
+/** Ghost keeps its name and its look (Wisp), so those can't be dirty. */
 export function dirtyKeys(draft: Draft, base: Draft, isGhost: boolean): DraftKey[] {
-  return KEYS.filter((k) => !(isGhost && (k === "name" || k === "aliases")) && !same(k, draft, base));
+  return KEYS.filter((k) => !(isGhost && (k === "name" || k === "aliases" || k === "look")) && !same(k, draft, base));
 }
 
 /** The PATCH body for the dirty fields. A voice of "" asks for Ghost's. */
@@ -93,6 +95,7 @@ export const FIELD_WORDS: Record<DraftKey, string> = {
   persona: "persona",
   memory: "memory",
   notes: "pinned notes",
+  look: "look",
 };
 
 /** "persona, voice and memory" */

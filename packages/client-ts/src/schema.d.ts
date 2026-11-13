@@ -2200,6 +2200,8 @@ export interface components {
         ConversationCreate: {
             aliases: string[];
             job: string;
+            /** @description How it is drawn, `"<shape>:<colour>"`; empty or left out for the one picked from its slug. */
+            look?: string | null;
             name: string;
             persona: string;
             /**
@@ -2239,6 +2241,8 @@ export interface components {
         ConversationUpdate: {
             aliases?: string[] | null;
             job?: string | null;
+            /** @description `"<shape>:<colour>"`, or "" for the one picked from its slug. Not Ghost's: Ghost is Wisp. */
+            look?: string | null;
             memory?: string | null;
             name?: string | null;
             notes?: string[] | null;
@@ -2260,6 +2264,11 @@ export interface components {
             job: string;
             /** Format: date-time */
             last_active_at: string | null;
+            /**
+             * @description How it is drawn, `"<shape>:<colour>"` (shapes: wisp, drop, bell, hood, cloud,
+             *     lantern, star, moth; colours 0 to 7). Null: the one the desktop picks from its slug.
+             */
+            look: string | null;
             name: string;
             /** @description True when the voice is the agent's own. */
             own_voice: boolean;
