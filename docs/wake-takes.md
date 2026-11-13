@@ -57,12 +57,12 @@ make wake-train
 It reads your labelled takes, the takes recorded on 2026-10-30 (`tools/wake-train/sets.txt`),
 synthetic voices it makes with Kokoro and some music, adds level, noise, room, speed and
 compression changes, and trains a small head beside the shipped detector on the CPU (about
-10 to 20 minutes the first time; the features are cached in
+40 minutes here, half of it only the first time; the features are cached in
 `~/.local/share/ghost/wake/train-work/`). Whole recordings are held out and scored by a model
 that never heard them. It picks the threshold from the new detector's own curve: the lowest
 at which it wakes no more often than the shipped detector at 0.6 on the training negatives.
 It writes `~/.local/share/ghost/wake/detectors/<name>/` (`hey_ghost.onnx`, `card.json`,
-`report.md`) and installs nothing.
+`report.md`) and installs nothing. When no threshold of the new detector wakes no more often and asks Parakeet no more often than the shipped one, it says so and writes only `report.md`: keep labelling and run it again. On the 21 takes of 2026-10-30 alone it does not beat the shipped detector ([2026-11-13](benchmarks/2026-11-13-wake-takes.md)).
 
 ## Switching, and back
 
