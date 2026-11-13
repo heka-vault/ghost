@@ -6,6 +6,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 
+import type { Sharing } from "../floating/scene";
 import { inTauri } from "../transport";
 
 export type MonitorPref = "other" | "here" | { named: string };
@@ -14,6 +15,8 @@ export type MonitorPref = "other" | "here" | { named: string };
 export type FloatingPlacement = "beside" | "centre" | "corner";
 /** When Ghost's spoken words are written under it. */
 export type FloatingCaptions = "off" | "muted" | "always";
+/** While the screen is shared: kept out (default), shown with the shared mark, or asked each time. */
+export type WhileShared = "hide" | "show" | "ask";
 
 export interface FloatingSettings {
   on: boolean;
@@ -21,6 +24,8 @@ export interface FloatingSettings {
   /** Older shells don't send these: beside the work, no captions. */
   placement?: FloatingPlacement;
   captions?: FloatingCaptions;
+  /** Older shells don't send it: hidden while shared. */
+  while_shared?: WhileShared;
 }
 
 export interface FloatingStatus {
@@ -28,13 +33,17 @@ export interface FloatingStatus {
   settings: FloatingSettings;
   running: boolean;
   capture: "yes" | "no" | "unknown";
+  /** What the floating room does about a share now; older shells don't send it. */
+  sharing?: Sharing;
   monitors: { name: string; geometry: { x: number; y: number; width: number; height: number }; primary: boolean }[];
   helper: boolean;
 }
 
-/** The posture rule's `floating` input: on, up, and nothing capturing the screen. */
+/** The posture rule's `floating` input: on, up, and not kept out of a share. */
 export function canFloat(s: FloatingStatus | null): boolean {
-  return !!s && s.settings.on && s.running && s.capture !== "yes";
+  if (!s || !s.settings.on || !s.running) return false;
+  const sharing = s.sharing ?? (s.capture === "yes" ? "hidden" : "none");
+  return sharing === "none" || sharing === "shown";
 }
 
 /** The monitor choice as the select's value: `other`, `here`, or `named:HDMI-3`. */
@@ -50,11 +59,14 @@ function mockStatus(): FloatingStatus {
   const p = new URLSearchParams(window.location.search);
   const f = p.get("floating");
   const c = p.get("capture");
+  const sh = p.get("sharing");
+  const ws = p.get("while_shared");
   return {
     support: f === "refused" ? { kind: "no", why: "The floating room needs XWayland, and this desktop isn't running it." } : { kind: "xwayland" },
-    settings: { on: f === "on", monitor: "other", placement: "beside", captions: "off" },
+    settings: { on: f === "on", monitor: "other", placement: "beside", captions: "off", while_shared: ws === "show" || ws === "ask" ? ws : "hide" },
     running: f === "on",
     capture: c === "yes" ? "yes" : c === "unknown" ? "unknown" : "no",
+    sharing: c !== "yes" ? "none" : sh === "shown" || sh === "asking" ? sh : "hidden",
     monitors: [
       { name: "HDMI-1", geometry: { x: 0, y: 0, width: 1920, height: 1080 }, primary: true },
       { name: "HDMI-3", geometry: { x: 1920, y: 0, width: 1920, height: 1080 }, primary: false },

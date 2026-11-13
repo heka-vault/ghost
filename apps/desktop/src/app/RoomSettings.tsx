@@ -3,12 +3,14 @@
  * floating room (ADR 0059). Kept beside this window, not in Ghost's settings: it is how this
  * desk shows Ghost, and it takes effect at once, so these are switches, not part of the page's
  * draft. The room's choices are this window's storage; the floating room's are the shell's
- * (`floating.json`), since the shell starts the surface before any window opens.
+ * (`floating.json`), since the shell starts the surface before any window opens. Ghost on
+ * stage opens the stage window, the floating room on its own backdrop for showing Ghost.
  */
 import { useState } from "react";
 
 import { Button, Card, Kbd, ListRow, Notice, SegmentedControl, Select, Switch } from "../ui";
-import { type FloatingCaptions, type FloatingPlacement, prefOf, prefValue, useFloating } from "./floating";
+import { inTauri } from "../transport";
+import { type FloatingCaptions, type FloatingPlacement, prefOf, prefValue, useFloating, type WhileShared } from "./floating";
 import { AWAY_CHOICES, readAway, readSessionRoom, writeAway, writeSessionRoom } from "./posture";
 import { usePosture } from "./PostureContext";
 
@@ -71,7 +73,35 @@ export function RoomSettings() {
       />
     </Card>
     <FloatingSettings />
+    <StageSettings />
     </>
+  );
+}
+
+/** Open the stage window: the floating room on its own backdrop (`stage.html`). */
+async function openStage(): Promise<void> {
+  if (!inTauri) {
+    window.open("/stage.html?mock=floating", "_blank");
+    return;
+  }
+  const { invoke } = await import("@tauri-apps/api/core");
+  await invoke("stage_open").catch(() => undefined);
+}
+
+/** Ghost on stage: a window made to be shared or recorded, for showing Ghost to people. */
+function StageSettings() {
+  return (
+    <Card list>
+      <ListRow
+        title="Ghost on stage"
+        description="Ghost in a window of its own, on a dark stage, made for showing Ghost to people: in a meeting, share this window (it is called “Ghost · Stage”), or record it. It shows what the floating room shows, with Ghost’s words written under it for people who can’t hear it, and it never hides from a share. Also in the tray."
+        trailing={
+          <Button size="sm" variant="secondary" onClick={() => void openStage()}>
+            Open the stage
+          </Button>
+        }
+      />
+    </Card>
   );
 }
 
@@ -150,10 +180,33 @@ function FloatingSettings() {
             }
           />
         )}
+        {on && (
+          <ListRow
+            title="While my screen is shared"
+            description="When a meeting or a recording takes your whole screen, Ghost floating over it would be in it. Hide Ghost keeps it out until the share ends. Show Ghost puts it in, with a “Screen shared” mark on it so you know. Ask each time shows a small Show or Hide card when a share starts. Whatever you pick, the tray’s Show Ghost in this share changes it for that share only. Sharing a single window never includes the floating room."
+            trailing={
+              <Select
+                size="sm"
+                aria-label="While my screen is shared"
+                value={status.settings.while_shared ?? "hide"}
+                options={[
+                  { value: "hide", label: "Hide Ghost" },
+                  { value: "show", label: "Show Ghost" },
+                  { value: "ask", label: "Ask each time" },
+                ]}
+                onChange={(e) => void set({ ...status.settings, while_shared: e.target.value as WhileShared })}
+              />
+            }
+          />
+        )}
       </Card>
       {on && status.capture === "yes" && (
         <Notice tone="info" title="Your screen is being shared or recorded">
-          Ghost stays out of it until the share ends; a spoken session shows in this window meanwhile.
+          {status.sharing === "shown"
+            ? "Ghost is in the share, marked “Screen shared”. The tray’s Show Ghost in this share takes it out."
+            : status.sharing === "asking"
+              ? "Ghost is asking on the screen whether to show itself in this share."
+              : "Ghost stays out of it until the share ends; a spoken session shows in this window meanwhile. The tray’s Show Ghost in this share puts it in."}
         </Notice>
       )}
       {on && status.capture === "unknown" && (

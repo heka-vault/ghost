@@ -125,10 +125,12 @@ pub fn run() {
             daemon_state,
             daemon_start,
             floating::floating_status,
-            floating::floating_set
+            floating::floating_set,
+            floating::stage::stage_open
         ])
         .setup(|app| {
             let floating = floating::setup(app.handle());
+            floating::stage::capability(app.handle())?;
             tray::build(app, &floating.status())?;
             if let Some(w) = app.get_webview_window("main") {
                 floating.main_active(w.is_focused().unwrap_or(false));
@@ -164,8 +166,9 @@ pub fn run() {
                 .app_handle()
                 .try_state::<std::sync::Arc<floating::Host>>();
             match event {
-                // Closing the window keeps the tray alive; Quit in the tray exits.
-                tauri::WindowEvent::CloseRequested { api, .. } => {
+                // Closing the window keeps the tray alive; Quit in the tray exits. The stage
+                // closes for good.
+                tauri::WindowEvent::CloseRequested { api, .. } if window.label() == "main" => {
                     let _ = window.hide();
                     api.prevent_close();
                     if let Some(h) = host {

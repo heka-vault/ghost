@@ -17,6 +17,8 @@
 
 pub mod capture;
 pub mod place;
+pub mod share;
+pub mod stage;
 
 #[cfg(target_os = "linux")]
 pub mod desktop;
@@ -34,6 +36,7 @@ use tokio::sync::mpsc;
 
 use capture::Capture;
 use place::{Monitor, MonitorPref};
+use share::{Share, Sharing, WhileShared};
 
 /// The argument that makes this binary the surface.
 pub const ARG: &str = "--floating";
@@ -53,6 +56,8 @@ pub struct Settings {
     pub placement: Placement,
     /// Ghost's words on screen, for when the sound can't carry them. Off by default.
     pub captions: Captions,
+    /// While the screen is shared: hide Ghost (default), show it, or ask each time.
+    pub while_shared: WhileShared,
 }
 
 /// Where on the monitor the floating room comes forward (docs/design-system.md, the layout
@@ -176,6 +181,10 @@ pub enum ToSurface {
     },
     Capture {
         capture: Capture,
+        /// What the surface does about it (`share.rs`). Absent from an older shell: as a capture
+        /// always was, hidden.
+        #[serde(default = "hidden_if_older")]
+        sharing: Sharing,
     },
     Settings {
         settings: Settings,
@@ -191,6 +200,14 @@ pub enum FromSurface {
     },
     /// "Open the app": bring the main window to this workspace and to the front.
     OpenApp,
+    /// The share card's answer: show Ghost in this share, or keep it out.
+    Share {
+        show: bool,
+    },
+}
+
+fn hidden_if_older() -> Sharing {
+    Sharing::Hidden
 }
 
 /// What Settings and the posture rule in the main window read (`floating_status`, and the
@@ -202,6 +219,8 @@ pub struct Status {
     /// The surface is up.
     pub running: bool,
     pub capture: Capture,
+    /// What the floating room does about a share now (`share.rs`).
+    pub sharing: Sharing,
     /// The monitors the surface can come forward on, once it has started.
     pub monitors: Vec<Monitor>,
     /// The optional GNOME Shell helper is answering (it says where the operator is working).
@@ -209,15 +228,17 @@ pub struct Status {
 }
 
 impl Status {
-    /// The posture rule's `floating` input: on, up, and nothing capturing the screen.
+    /// The posture rule's `floating` input: on, up, and not kept out of a share.
     pub fn can_float(&self) -> bool {
-        self.settings.on && self.running && self.capture != Capture::Yes
+        self.settings.on && self.running && self.sharing.lets_ghost_show()
     }
 }
 
 struct Inner {
     status: Status,
     main_active: bool,
+    /// The share now on, if any, and the operator's word for it.
+    share: Share,
     /// The surface's stdin, while it runs.
     tx: Option<mpsc::UnboundedSender<String>>,
     /// Bumped on every start and stop, so an old surface's exit doesn't restart a new one.
@@ -248,10 +269,12 @@ impl Host {
                     settings,
                     running: false,
                     capture: Capture::Unknown,
+                    sharing: Sharing::None,
                     monitors: Vec::new(),
                     helper: false,
                 },
                 main_active: false,
+                share: Share::default(),
                 tx: None,
                 generation: 0,
                 restarts: 0,
@@ -269,7 +292,7 @@ impl Host {
 
     fn changed(&self) {
         let s = self.status();
-        crate::tray::show_floating(&self.app, s.settings.on);
+        crate::tray::show_floating(&self.app, &s);
         let _ = self.app.emit("ghost://floating", s);
     }
 
@@ -291,8 +314,47 @@ impl Host {
         };
         self.send(&ToSurface::Settings { settings });
         self.apply(was_on);
+        self.reshare(std::time::Instant::now());
         self.changed();
         Ok(self.status())
+    }
+
+    /// Work out what the surface does about a share now; tell it when that changed. True when
+    /// it did.
+    fn reshare(&self, now: std::time::Instant) -> bool {
+        let (capture, sharing, moved) = {
+            let mut i = self.lock();
+            let sharing = i.share.sharing(i.status.settings.while_shared, now);
+            let moved = i.status.sharing != sharing;
+            i.status.sharing = sharing;
+            (i.status.capture, sharing, moved)
+        };
+        if moved {
+            eprintln!("ghost: floating: while shared, {sharing:?}");
+            self.send(&ToSurface::Capture { capture, sharing });
+        }
+        moved
+    }
+
+    /// The share card's answer, or the tray's choice, for the share now on.
+    pub fn share_answer(&self, show: bool) {
+        self.lock().share.answer(show);
+        if self.reshare(std::time::Instant::now()) {
+            self.changed();
+        }
+    }
+
+    /// The tray: show Ghost in this share if it is out of it, and the other way.
+    pub fn share_toggle(&self) {
+        let now = std::time::Instant::now();
+        {
+            let mut i = self.lock();
+            let choice = i.status.settings.while_shared;
+            i.share.toggle(choice, now);
+        }
+        if self.reshare(now) {
+            self.changed();
+        }
     }
 
     pub fn set_on(self: &Arc<Self>, on: bool) {
@@ -380,6 +442,7 @@ impl Host {
                 },
                 ToSurface::Capture {
                     capture: i.status.capture,
+                    sharing: i.status.sharing,
                 },
             ];
             for m in first {
@@ -415,6 +478,7 @@ impl Host {
                             .app
                             .run_on_main_thread(move || crate::tray::show_window(&app));
                     }
+                    Ok(FromSurface::Share { show }) => host.share_answer(show),
                     Err(_) => eprintln!("ghost: floating: {line}"),
                 }
             }
@@ -462,16 +526,28 @@ impl Host {
                     Some(c) => (capture::probe(c).await, desktop_helper_present(c).await),
                     None => (Capture::Unknown, false),
                 };
+                let now = std::time::Instant::now();
                 let moved = {
                     let mut i = host.lock();
                     let moved = i.status.capture != capture || i.status.helper != helper;
                     i.status.capture = capture;
                     i.status.helper = helper;
+                    i.share.seen(capture, now);
                     moved
                 };
                 if moved {
                     eprintln!("ghost: floating: screen capture {capture:?}, helper {helper}");
-                    host.send(&ToSurface::Capture { capture });
+                }
+                // The share's word may change with no new capture: the card's time runs out.
+                let reshared = host.reshare(now);
+                if moved && !reshared {
+                    let (capture, sharing) = {
+                        let i = host.lock();
+                        (i.status.capture, i.status.sharing)
+                    };
+                    host.send(&ToSurface::Capture { capture, sharing });
+                }
+                if moved || reshared {
                     host.changed();
                 }
             }
@@ -554,6 +630,7 @@ mod tests {
             monitor: MonitorPref::Named("HDMI-3".into()),
             placement: Placement::Corner,
             captions: Captions::Muted,
+            while_shared: WhileShared::Ask,
         };
         save(&path, &s).unwrap();
         assert_eq!(load(&path), s);
@@ -563,21 +640,24 @@ mod tests {
         // A file from a later build with more fields keeps what it knows.
         std::fs::write(&path, r#"{"on":true,"monitor":"here","later":1}"#).unwrap();
         assert_eq!(load(&path).monitor, MonitorPref::Here);
-        // A file from before the placement and captions: beside the work, no captions.
+        // A file from before the placement, captions and the share choice: beside the work, no
+        // captions, hidden while shared.
         let old = load(&path);
         assert_eq!(
-            (old.placement, old.captions),
-            (Placement::Beside, Captions::Off)
+            (old.placement, old.captions, old.while_shared),
+            (Placement::Beside, Captions::Off, WhileShared::Hide)
         );
         let line = serde_json::to_string(&s).unwrap();
         assert!(
-            line.contains(r#""placement":"corner""#) && line.contains(r#""captions":"muted""#),
+            line.contains(r#""placement":"corner""#)
+                && line.contains(r#""captions":"muted""#)
+                && line.contains(r#""while_shared":"ask""#),
             "{line}"
         );
     }
 
     #[test]
-    fn it_floats_only_when_on_up_and_not_captured() {
+    fn it_floats_only_when_on_up_and_not_kept_out_of_a_share() {
         let mut s = Status {
             support: Support::Xwayland,
             settings: Settings {
@@ -587,6 +667,7 @@ mod tests {
             },
             running: true,
             capture: Capture::No,
+            sharing: Sharing::None,
             monitors: vec![],
             helper: false,
         };
@@ -594,8 +675,15 @@ mod tests {
         s.capture = Capture::Unknown;
         assert!(s.can_float());
         s.capture = Capture::Yes;
+        s.sharing = Sharing::Hidden;
         assert!(!s.can_float());
+        s.sharing = Sharing::Asking;
+        assert!(!s.can_float());
+        // The operator chose to show Ghost in this share.
+        s.sharing = Sharing::Shown;
+        assert!(s.can_float());
         s.capture = Capture::No;
+        s.sharing = Sharing::None;
         s.running = false;
         assert!(!s.can_float());
         s.running = true;
@@ -626,6 +714,7 @@ mod tests {
             ToSurface::MainActive { active: true },
             ToSurface::Capture {
                 capture: Capture::Yes,
+                sharing: Sharing::Shown,
             },
             ToSurface::Settings {
                 settings: Settings::default(),
@@ -637,5 +726,15 @@ mod tests {
         }
         let line = serde_json::to_string(&FromSurface::OpenApp).unwrap();
         assert_eq!(line, r#"{"t":"open_app"}"#);
+        let line = serde_json::to_string(&FromSurface::Share { show: true }).unwrap();
+        assert_eq!(line, r#"{"t":"share","show":true}"#);
+        // A capture line from a shell before the share choice: hidden, as it always was.
+        assert_eq!(
+            serde_json::from_str::<ToSurface>(r#"{"t":"capture","capture":"yes"}"#).unwrap(),
+            ToSurface::Capture {
+                capture: Capture::Yes,
+                sharing: Sharing::Hidden
+            }
+        );
     }
 }
