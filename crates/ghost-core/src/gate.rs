@@ -127,7 +127,12 @@ pub struct WriteGate {
     log: DecisionLog,
     ops: RwLock<HashMap<(String, String), Arc<Operation>>>,
     last_classification: Mutex<Option<Classification>>,
+    /// Told of each call's counts and sizes as it is kept (ADR 0060): the daemon's event.
+    on_reach: RwLock<Option<OnReach>>,
 }
+
+/// Called with each call's counts and sizes once it is kept. Must not block.
+pub type OnReach = Arc<dyn Fn(&crate::reach::ReachRow) + Send + Sync>;
 
 impl WriteGate {
     pub fn new(store: Arc<Store>) -> Self {
@@ -138,6 +143,7 @@ impl WriteGate {
             log: Arc::new(|_| {}),
             ops: RwLock::new(HashMap::new()),
             last_classification: Mutex::new(None),
+            on_reach: RwLock::new(None),
         }
     }
 
@@ -159,6 +165,36 @@ impl WriteGate {
 
     pub fn store(&self) -> &Store {
         &self.store
+    }
+
+    /// Who hears of each call kept (`reach`): the daemon, for its event stream.
+    pub fn on_reach(&self, hook: OnReach) {
+        *self.on_reach.write().unwrap_or_else(|e| e.into_inner()) = Some(hook);
+    }
+
+    /// Keep one call's counts and sizes (ADR 0060), off the caller's task: one insert,
+    /// never on the turn's path. Then whoever listens is told.
+    pub fn record_reach(&self, row: crate::reach::ReachRow) {
+        let store = self.store.clone();
+        let hook = self
+            .on_reach
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        let keep = move || {
+            if let Err(e) = store.add_reach(&row) {
+                tracing::warn!("reach: not kept: {e}");
+            }
+            if let Some(h) = hook {
+                h(&row);
+            }
+        };
+        match tokio::runtime::Handle::try_current() {
+            Ok(rt) => {
+                rt.spawn_blocking(keep);
+            }
+            Err(_) => keep(),
+        }
     }
 
     pub fn last_classification(&self) -> Option<Classification> {

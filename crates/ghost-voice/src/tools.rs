@@ -290,7 +290,28 @@ impl ToolDispatcher {
     /// One call by the model: `name` with `args`; `call_id` labels its steps in the
     /// latency record.
     pub async fn call(&self, name: &str, args: Map<String, Value>, call_id: &str) -> CallResult {
-        let r = self.call_inner(name, args, call_id).await;
+        let reach = self.reach_of(name, &args);
+        let began = Instant::now();
+        let (r, measured) = ghost_core::reach::measured(self.call_inner(name, args, call_id)).await;
+        if let Some((app, tool, read)) = reach {
+            // Counts and sizes only (ADR 0060): what the app sent, as it arrived, or what
+            // the model got when the call was made on another task (a change the gate ran).
+            let m = measured
+                .unwrap_or_else(|| ghost_core::reach::measure(&Value::Object(r.result.clone())));
+            let ok = r.error_text().is_none();
+            self.gate.record_reach(ghost_core::reach::ReachRow {
+                at: chrono::Utc::now(),
+                session_id: self.session_id.clone(),
+                agent: self.agent().unwrap_or_else(|| GHOST.to_string()),
+                app,
+                tool,
+                read,
+                ok,
+                items: if ok { m.items } else { None },
+                bytes: if ok { m.bytes } else { 0 },
+                ms: began.elapsed().as_millis() as u64,
+            });
+        }
         // The session's own tools (hang up, hold, a transfer) return nothing to see.
         if let Some(on) = self.on_result.get()
             && !matches!(name, SWITCH_TOOL | BRING_UP_TOOL | HANG_UP_TOOL | HOLD_TOOL)
@@ -361,6 +382,44 @@ impl ToolDispatcher {
                 }
             }
             _ => self.dispatch(name, args, call_id).await,
+        }
+    }
+
+    /// The app, the tool as the app names it, and whether it is a read, for a call the
+    /// model makes to an app's tool or Ghost's own (`reach`); None for the session's own
+    /// tools (hang up, hold, a transfer) and for a name nothing offers.
+    fn reach_of(&self, name: &str, args: &Map<String, Value>) -> Option<(String, String, bool)> {
+        match name {
+            SWITCH_TOOL | BRING_UP_TOOL | HANG_UP_TOOL | HOLD_TOOL => None,
+            CHANGE_TOOL => {
+                let app = args
+                    .get("ability")
+                    .or_else(|| args.get("skill"))
+                    .map(py_str)
+                    .unwrap_or_default();
+                let op = args.get("operation").map(py_str).unwrap_or_default();
+                let (app, op) = match op.rsplit_once('.') {
+                    Some((head, tail)) if app.is_empty() || app == head => {
+                        (head.to_string(), tail.to_string())
+                    }
+                    _ => (app, op),
+                };
+                (!app.is_empty() && !op.is_empty()).then_some((app, op, false))
+            }
+            _ => match self.offering.lookup(&self.active_sources(), name)? {
+                Offered::Read { tool, source } => Some((
+                    source.name.clone(),
+                    if tool.operation.is_empty() {
+                        tool.name.clone()
+                    } else {
+                        tool.operation.clone()
+                    },
+                    true,
+                )),
+                Offered::Change { operation, source } => {
+                    Some((source.to_string(), operation.name.clone(), false))
+                }
+            },
         }
     }
 

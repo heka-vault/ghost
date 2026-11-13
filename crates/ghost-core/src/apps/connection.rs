@@ -1372,6 +1372,9 @@ impl App {
         // Every password Ghost holds is replaced before anything reads the result: the
         // model, the audit, a watch (ADR 0036). Then it is fitted to the app's budget.
         let data = redact_json(&data);
+        // What Ghost read, as it arrived and before it was fitted to the model's budget:
+        // counts and a size, never the contents (ADR 0060).
+        crate::reach::note(crate::reach::measure(&data));
         let data = if trim {
             tools::fit(&data, self.result_chars())
         } else {
