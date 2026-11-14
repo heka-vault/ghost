@@ -1721,6 +1721,11 @@ pub fn turn_failure(e: &LlmError, model: &str) -> ghost_reports::Failure {
         LlmError::Stream(_) => f.error("ghost_llm::LlmError::Stream"),
         LlmError::Headers(_) => f.error("ghost_llm::LlmError::Headers"),
         LlmError::Client(_) => f.error("ghost_llm::LlmError::Client"),
+        // ADR 0069: the provider and the kind, never the program's text.
+        LlmError::Program(p) => f
+            .error("ghost_llm::LlmError::Program")
+            .fact("provider", ghost_core::connection::CLAUDE_CODE)
+            .fact("reason", p.as_str()),
     }
 }
 

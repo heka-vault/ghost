@@ -149,6 +149,8 @@ pub fn transient(e: &LlmError) -> bool {
             k.contains("overloaded") || k.contains("rate_limit") || k == "api_error"
         }
         LlmError::Headers(_) | LlmError::Client(_) => false,
+        // A process that died is started fresh by the next try; the rest wait on the operator.
+        LlmError::Program(p) => *p == ghost_llm::ProgramFailure::Died,
     }
 }
 

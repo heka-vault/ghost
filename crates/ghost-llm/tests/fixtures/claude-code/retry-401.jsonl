@@ -1,0 +1,9 @@
+{"type":"control_response","response":{"subtype":"success","request_id":"ghost-init","response":{"models":[{"value":"default","resolvedModel":"claude-opus-5-5","displayName":"Default (recommended)"},{"value":"opus","resolvedModel":"claude-opus-5-5","displayName":"Opus"},{"value":"claude-fable-5-1[1m]","resolvedModel":"claude-fable-5-1","displayName":"Fable"},{"value":"sonnet","resolvedModel":"claude-sonnet-5-5","displayName":"Sonnet"},{"value":"haiku","resolvedModel":"claude-haiku-5-5","displayName":"Haiku"}]},"pending_permission_requests":[],"pending_user_dialog_requests":[]}}
+{"type":"system","subtype":"init","tools":["mcp__ghost__lookup"],"mcp_servers":[{"name":"ghost","status":"connected","source":"dynamic"}],"model":"claude-haiku-5-5","claude_code_version":"2.1.325"}
+{"type":"system","subtype":"status","status":"requesting"}
+{"type":"system","subtype":"api_retry","attempt":1,"max_retries":10,"retry_delay_ms":532,"error_status":401,"error":"authentication_failed"}
+{"type":"system","subtype":"api_retry","attempt":2,"max_retries":10,"retry_delay_ms":1065,"error_status":401,"error":"authentication_failed"}
+{"type":"system","subtype":"api_retry","attempt":3,"max_retries":10,"retry_delay_ms":2018,"error_status":401,"error":"authentication_failed"}
+{"type":"system","subtype":"api_retry","attempt":4,"max_retries":10,"retry_delay_ms":4866,"error_status":401,"error":"authentication_failed"}
+{"type":"system","subtype":"api_retry","attempt":5,"max_retries":10,"retry_delay_ms":9736,"error_status":401,"error":"authentication_failed"}
+{"type":"system","subtype":"api_retry","attempt":6,"max_retries":10,"retry_delay_ms":16357,"error_status":401,"error":"authentication_failed"}

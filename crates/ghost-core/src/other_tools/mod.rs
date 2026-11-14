@@ -19,6 +19,7 @@ pub mod claude;
 pub mod entries;
 pub mod link;
 pub mod models;
+pub mod program;
 pub mod read;
 #[cfg(test)]
 mod tests;
