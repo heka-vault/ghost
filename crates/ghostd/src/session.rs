@@ -180,6 +180,16 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
     // request for the model (2026-11-12: 1.5 to 2.8 s for a made-up opening).
     let first_utterance =
         first_utterance.filter(|first| typed || !ghost_voice::intents::only_the_name(first));
+    // The first run's moment (ADR 0059 as amended 2026-11-14): the first desk session with
+    // Ghost after the first run armed it takes it, once, and opens with Ghost's own line.
+    let meeting = crate::first_meeting::takes(phone.is_some(), &start_in, raised.is_some())
+        && d.state.take_first_meeting();
+    let model_ready = !meeting || d.model_ready();
+    if meeting {
+        info!("session: the first meeting (model ready: {model_ready})");
+    }
+    let first_utterance =
+        first_utterance.filter(|_| crate::first_meeting::keeps_request(model_ready));
     let origin = if phone.is_some() {
         SessionOrigin::Phone
     } else {
@@ -279,7 +289,9 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
     // (ADR 0029), so a voice that failed or "and two more" leaves them alerting.
     let routes = d.routes();
     let waiting_now = match &routes {
-        Some(r) if start_in == GHOST && first_utterance.is_none() && raised.is_none() => {
+        Some(r)
+            if !meeting && start_in == GHOST && first_utterance.is_none() && raised.is_none() =>
+        {
             r.digest(None).unwrap_or_default()
         }
         _ => Vec::new(),
@@ -296,7 +308,12 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
         .and_then(|p| p.item.as_deref())
         .and_then(|key| d.waiting().and_then(|w| w.items.get(key).ok().flatten()))
         .filter(|i| i.resolved_at.is_none());
-    let (greeting, context_note) = if let Some(r) = &raised {
+    let (greeting, context_note) = if meeting {
+        (
+            crate::first_meeting::greeting(model_ready, first_utterance.is_some()),
+            None,
+        )
+    } else if let Some(r) = &raised {
         (
             Greeting::Text(r.policy.greeting.clone()),
             Some(context_note(&r.items)),
@@ -490,7 +507,14 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
             })
         })
     };
-    let model = match d.model() {
+    // A first meeting with no model connected: every turn is answered with Ghost's own
+    // sentence about the model, never a call that fails.
+    let no_model = meeting && !model_ready;
+    let model = match if no_model {
+        Ok(crate::first_meeting::no_model())
+    } else {
+        d.model()
+    } {
         Ok(m) => m,
         Err(e) => {
             error!("session: no model client: {e}");
@@ -530,7 +554,7 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
         settings: voice.clone(),
         models,
         model,
-        fast_model: d.fast_model(),
+        fast_model: if no_model { None } else { d.fast_model() },
         sources,
         gate: gate.clone(),
         events: Some(events.clone()),

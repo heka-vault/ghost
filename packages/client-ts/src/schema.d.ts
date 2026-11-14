@@ -455,6 +455,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/first-meeting": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Whether the next session is the first meeting */
+        get: operations["get_first_meeting_first_meeting_get"];
+        /** Open or close the first run's moment */
+        put: operations["put_first_meeting_first_meeting_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/hear": {
         parameters: {
             query?: never;
@@ -2609,6 +2627,18 @@ export interface components {
             microphone?: components["schemas"]["MicrophoneView"] | null;
             output_device: string | null;
         };
+        /**
+         * @description `PUT /first-meeting`: the first run opens (or closes) its moment (ADR 0059 as amended
+         *     2026-11-14). Armed, the next desk session with Ghost opens with Ghost's own first line,
+         *     once. The operator's window only: no tool, outside client or phone reaches it.
+         */
+        FirstMeetingRequest: {
+            armed: boolean;
+        };
+        /** @description What `GET` and `PUT /first-meeting` answer: whether the next session is the first meeting. */
+        FirstMeetingView: {
+            armed: boolean;
+        };
         /** @description An app another tool uses, as Ghost would connect it. Never a secret's value. */
         FoundAppView: {
             /** @description The address, without its query or user-info. */
@@ -4580,6 +4610,8 @@ export type SchemaConversationUpdate = components['schemas']['ConversationUpdate
 export type SchemaConversationView = components['schemas']['ConversationView'];
 export type SchemaDeviceInfo = components['schemas']['DeviceInfo'];
 export type SchemaDevicesView = components['schemas']['DevicesView'];
+export type SchemaFirstMeetingRequest = components['schemas']['FirstMeetingRequest'];
+export type SchemaFirstMeetingView = components['schemas']['FirstMeetingView'];
 export type SchemaFoundAppView = components['schemas']['FoundAppView'];
 export type SchemaFoundModelView = components['schemas']['FoundModelView'];
 export type SchemaHearBlock = components['schemas']['HearBlock'];
@@ -5636,6 +5668,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StatusEvent"] | components["schemas"]["TurnEvent"] | components["schemas"]["PendingEvent"] | components["schemas"]["OutcomeEvent"] | components["schemas"]["LogEvent"] | components["schemas"]["ConversationEvent"] | components["schemas"]["WaitingEvent"] | components["schemas"]["QuestionEvent"] | components["schemas"]["AppsEvent"] | components["schemas"]["VoiceEvent"] | components["schemas"]["ActivityEvent"] | components["schemas"]["HeardEvent"] | components["schemas"]["SayingEvent"] | components["schemas"]["HearEvent"] | components["schemas"]["RunEvent"] | components["schemas"]["ReachEvent"] | components["schemas"]["ShowAppEvent"];
+                };
+            };
+        };
+    };
+    get_first_meeting_first_meeting_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FirstMeetingView"];
+                };
+            };
+        };
+    };
+    put_first_meeting_first_meeting_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FirstMeetingRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FirstMeetingView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

@@ -256,6 +256,16 @@ export class GhostClient {
   sleep() {
     return unwrap(this.api.POST("/sleep"));
   }
+  /**
+   * The first run's moment (ADR 0059 as amended 2026-11-14): armed, the next desk session with
+   * Ghost opens with Ghost's own first line, once.
+   */
+  firstMeeting() {
+    return unwrap(this.api.GET("/first-meeting"));
+  }
+  setFirstMeeting(armed: boolean) {
+    return unwrap(this.api.PUT("/first-meeting", { body: { armed } }));
+  }
   /** Whether Ghost's microphone is open (ADR 0057). */
   listening() {
     return unwrap(this.api.GET("/listening"));

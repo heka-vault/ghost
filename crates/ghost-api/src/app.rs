@@ -37,14 +37,15 @@ use crate::error::{
     ApiError, ApiResult, Body, HTTPValidationError, OptionalBody, check_len, check_range,
 };
 use crate::models::{
-    API_VERSION, Ack, AuditEntry, AuditEventView, AuditPage, Carry, DevicesView, HookInfo, ItemKey,
-    Level, ListeningRequest, ListeningView, MicrophoneRepairView, Mode, ModelsView, NotListening,
-    OperationInfo, OutcomeStatus, OutcomeView, OutputInfo, PendingProposal, PermissionsView,
-    PhonePairing, PhoneView, PolicyResult, PolicyUpdate, PolicyView, ReadToolInfo,
-    Response as WatchResponse, RouteName, RoutesView, RuleAdd, RulesView, SayRequest, SecretState,
-    SettingsResult, SettingsUpdate, SettingsView, SkillAdd, SkillBody, SkillInfo, SnoozeRequest,
-    SourceInfo, Status, Turn, Urgency, Verify, WaitingItemView, WaitingState, WaitingView,
-    WakeRequest, WatchInfo, WatchingView,
+    API_VERSION, Ack, AuditEntry, AuditEventView, AuditPage, Carry, DevicesView,
+    FirstMeetingRequest, FirstMeetingView, HookInfo, ItemKey, Level, ListeningRequest,
+    ListeningView, MicrophoneRepairView, Mode, ModelsView, NotListening, OperationInfo,
+    OutcomeStatus, OutcomeView, OutputInfo, PendingProposal, PermissionsView, PhonePairing,
+    PhoneView, PolicyResult, PolicyUpdate, PolicyView, ReadToolInfo, Response as WatchResponse,
+    RouteName, RoutesView, RuleAdd, RulesView, SayRequest, SecretState, SettingsResult,
+    SettingsUpdate, SettingsView, SkillAdd, SkillBody, SkillInfo, SnoozeRequest, SourceInfo,
+    Status, Turn, Urgency, Verify, WaitingItemView, WaitingState, WaitingView, WakeRequest,
+    WatchInfo, WatchingView,
 };
 use crate::passwords::{
     SECRET_KEYS_SET, password_check, referenced, revive_apps_using, save_passwords, secret_states,
@@ -444,6 +445,33 @@ async fn wake(
 async fn sleep(State(deps): State<SharedDeps>) -> Json<Ack> {
     let ok = deps.control.sleep().await;
     Json(if ok { Ack::ok() } else { Ack::no("no session") })
+}
+
+/// Whether the next desk session with Ghost is the first meeting (ADR 0059 as amended
+/// 2026-11-14).
+#[utoipa::path(get, path = "/first-meeting", operation_id = "get_first_meeting_first_meeting_get", tag = "session",
+    summary = "Whether the next session is the first meeting",
+    responses((status = 200, description = "Successful Response", body = FirstMeetingView)))]
+async fn get_first_meeting(State(deps): State<SharedDeps>) -> Json<FirstMeetingView> {
+    Json(FirstMeetingView {
+        armed: deps.state.first_meeting(),
+    })
+}
+
+/// The first run opens its moment: the next desk session with Ghost opens with Ghost's own
+/// first line, said before the model is asked anything, once. The operator's window only.
+#[utoipa::path(put, path = "/first-meeting", operation_id = "put_first_meeting_first_meeting_put", tag = "session",
+    summary = "Open or close the first run's moment", request_body = FirstMeetingRequest,
+    responses((status = 200, description = "Successful Response", body = FirstMeetingView),
+              (status = 422, description = "Validation Error", body = HTTPValidationError)))]
+async fn put_first_meeting(
+    State(deps): State<SharedDeps>,
+    Body(req): Body<FirstMeetingRequest>,
+) -> Json<FirstMeetingView> {
+    deps.state.set_first_meeting(req.armed);
+    Json(FirstMeetingView {
+        armed: deps.state.first_meeting(),
+    })
 }
 
 fn listening_view(not_listening: Option<NotListening>) -> ListeningView {
@@ -1609,6 +1637,7 @@ pub fn create_app(deps: SharedDeps) -> (axum::Router, utoipa::openapi::OpenApi) 
         .routes(routes!(wake))
         .routes(routes!(sleep))
         .routes(routes!(get_listening, put_listening))
+        .routes(routes!(get_first_meeting, put_first_meeting))
         .routes(routes!(say))
         .routes(routes!(turns))
         .routes(routes!(pending))

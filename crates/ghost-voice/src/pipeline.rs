@@ -444,6 +444,19 @@ pub enum Greeting {
     Text(String),
     /// No greeting: the model runs on the context (a context note, a phone that connects).
     None,
+    /// The first meeting (ADR 0059 as amended 2026-11-14): Ghost's own words, said first in
+    /// every case, before a first utterance's turn too, so the first thing a newcomer hears
+    /// never waits on the model.
+    Intro(String),
+}
+
+/// What a session says before anything else, whatever opens it: the first meeting's line.
+/// Never the model's: it is the greeting's own text.
+pub fn intro_frame(greeting: &Greeting) -> Option<Frame> {
+    match greeting {
+        Greeting::Intro(t) => Some(Frame::Speak(t.clone())),
+        _ => None,
+    }
 }
 
 pub struct SessionParams {
@@ -1213,6 +1226,9 @@ pub fn build_session(p: SessionParams) -> GhostSession {
     if let Some(note) = &p.context_note {
         opening.push(Frame::user_text(note, false));
     }
+    if let Some(intro) = intro_frame(&p.greeting) {
+        opening.push(intro);
+    }
     if let Some(first) = &p.first_utterance {
         if let Some(rt) = &runtime {
             rt.record("user", first);
@@ -1240,6 +1256,8 @@ pub fn build_session(p: SessionParams) -> GhostSession {
             }
             Greeting::Text(t) => opening.push(Frame::Speak(t.clone())),
             Greeting::None => opening.push(Frame::RunLlm),
+            // Said above, before everything.
+            Greeting::Intro(_) => {}
         }
     }
 
@@ -1284,6 +1302,18 @@ pub fn default_start_in() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_the_first_meeting_speaks_before_everything_and_its_words_are_the_greetings_own() {
+        let line = "Hi, I'm Ghost.";
+        match intro_frame(&Greeting::Intro(line.into())) {
+            Some(Frame::Speak(t)) => assert_eq!(t, line),
+            other => panic!("expected the line itself, got {other:?}"),
+        }
+        assert!(intro_frame(&Greeting::Varied).is_none());
+        assert!(intro_frame(&Greeting::Text(line.into())).is_none());
+        assert!(intro_frame(&Greeting::None).is_none());
+    }
 
     #[test]
     fn test_a_windowed_voice_with_its_files_missing_falls_back_and_says_so() {

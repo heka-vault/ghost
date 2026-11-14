@@ -11,6 +11,7 @@ pub mod controller;
 pub mod daemon;
 pub mod deciders;
 pub mod dictation;
+pub mod first_meeting;
 pub mod ghost_app;
 pub mod hear;
 pub mod hooks_listener;

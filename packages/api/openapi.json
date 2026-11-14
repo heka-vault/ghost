@@ -1447,6 +1447,30 @@
         ],
         "type": "object"
       },
+      "FirstMeetingRequest": {
+        "description": "`PUT /first-meeting`: the first run opens (or closes) its moment (ADR 0059 as amended\n2026-11-14). Armed, the next desk session with Ghost opens with Ghost's own first line,\nonce. The operator's window only: no tool, outside client or phone reaches it.",
+        "properties": {
+          "armed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "armed"
+        ],
+        "type": "object"
+      },
+      "FirstMeetingView": {
+        "description": "What `GET` and `PUT /first-meeting` answer: whether the next session is the first meeting.",
+        "properties": {
+          "armed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "armed"
+        ],
+        "type": "object"
+      },
       "FoundAppView": {
         "description": "An app another tool uses, as Ghost would connect it. Never a secret's value.",
         "properties": {
@@ -8859,6 +8883,66 @@
         "summary": "Events Schema",
         "tags": [
           "events"
+        ]
+      }
+    },
+    "/first-meeting": {
+      "get": {
+        "operationId": "get_first_meeting_first_meeting_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FirstMeetingView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Whether the next session is the first meeting",
+        "tags": [
+          "session"
+        ]
+      },
+      "put": {
+        "operationId": "put_first_meeting_first_meeting_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FirstMeetingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FirstMeetingView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Open or close the first run's moment",
+        "tags": [
+          "session"
         ]
       }
     },
