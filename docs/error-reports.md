@@ -26,7 +26,7 @@ The same failure goes at most once an hour, and at most 30 reports a day.
 | `event` | Always `$exception`. |
 | `distinct_id` | A random id made for error reports on this computer; deleted when you turn them off. |
 | `timestamp` | When it happened. |
-| `$exception_list` | The error: its type, its message after scrubbing (or nothing, when the message is not Ghost's own), and the stack: function names and `file:line` in Ghost's code. |
+| `$exception_list` | The error: its type, its message after scrubbing (or nothing, when the message is not Ghost's own), and the stack: function names and `file:line` in Ghost's code. A frame of the app's pages names the bundled script it ran in (`assets/index-<hash>.js`), its line and column, and the id of that script's source map (`chunk_id`), which PostHog uses to show the TypeScript file and line; the source maps themselves are sent to PostHog once per release by the project, never by your computer, and never ship in the app. |
 | `$exception_fingerprint` | A hash that groups the same failure. |
 | `$process_person_profile`, `$geoip_disable` | `false` and `true`: no profile is made of you and the address the request came from is not looked up for a place. |
 | `ghost_kind` | `panic`, `page`, `failure` or `test`. |

@@ -110,12 +110,39 @@ spool by renaming a report before sending it. Quitting never waits for it.
 the journal's panic locations) and the bundle does not strip them, so a backtrace has function
 names and `file:line` for Ghost's own frames, kept relative to the workspace
 (`crates/ghostd/src/daemon.rs`); a dependency's is `<crate>-<version>/…`, the standard
-library's `rustc/…`. Pages: the release bundle is minified and its frames are sent as they
-are (`assets/index-<hash>.js:1:2345`, `resolved: false`) with the version; the hash in the
-file name names the bundle. Readable page frames need the source maps uploaded to PostHog at
-release time (`posthog-cli sourcemap inject` and `upload` in release.yml), which takes a
-PostHog personal API key with the error tracking write scope as a second repository secret;
-not yet.
+library's `rustc/…`.
+
+Pages: the release bundle is minified, and a frame names TypeScript only through a source map
+PostHog holds. PostHog ties a frame to its map by a **chunk id**: `posthog-cli sourcemap inject`
+appends `//# chunkId=<uuid>` to each built script and writes `"chunk_id"` into its map, and
+posthog-js reads the ids back at capture (a prepended snippet records
+`window._posthogChunkIds[<load stack>] = <id>`) and puts each on its frames as `chunk_id`, with
+`platform: "web:javascript"`; PostHog's resolver (cymbal's `RawJSFrame`) then finds the map
+by the id alone, and never fetches a URL that is not `http(s)`. Ghost has no posthog-js, so:
+
+- **The release build writes the ids itself** (`tools/report_chunks.py`, run by
+  `tauri.release.conf.json`'s `build:release` after `vite build` writes hidden maps): the CLI's
+  two marks, in its chunk-id-only form, with the id derived as the CLI derives it (UUIDv5 of
+  the script in its namespace), and no snippet, so nothing in a script moves and the map stays
+  exact. The CLI's own `inject` was not used: it needs the personal key, resolves (and
+  creates) a release over the API from git, and its `--dry-run` skips it; a build step and a dry
+  run must have no key and talk to nobody.
+- **The shell knows the ids from a manifest** the same step writes into the bundle,
+  `report-chunks.json` (`assets/<name>.js` to its id), read from the app's own embedded assets
+  at start in both processes and held to a closed shape (`ghost_reports::chunks::PageChunks`:
+  at most 256 entries and 64 KB, each key a script under `assets/`, each value a UUID; anything
+  else refused whole). The page hands over nothing new. A frame in a listed script goes as
+  posthog-js sends it (`web:javascript`, `filename`, `function`, `lineno`, `colno`, `in_app`,
+  `chunk_id`); any other frame, and every frame of a build with no manifest (`make dev`, `make
+  bundle`), goes as before: `custom`, minified, with the version. The filename stays the
+  bundle's relative path and the function name passes the scrubber either way.
+- **The maps never ship.** The step moves each map, with its script as injected, out of
+  `dist` before the shell embeds it, and refuses to finish while a `.map` is left; the
+  workflow checks that neither package nor the shell's embedded assets carry one. For a tag
+  only, `posthog-cli sourcemap upload` (0.20.0, pinned by SHA-256, `scripts/posthog-cli.sh`)
+  sends them with the personal key (`POSTHOG_API_KEY`, error tracking write and organization
+  read), in its own step, as the release `ghost-desktop` at Ghost's version. A dry run builds
+  and checks the same files and uploads nothing.
 
 **Not yet:** the Android app and the website send no reports.
 
