@@ -407,6 +407,7 @@ export class MockDaemon {
     this.playPieces();
     this.playFloating();
     this.playFloatingTour();
+    this.playFloatingSite();
     return () => this.listeners.delete(l);
   }
   /**
@@ -753,6 +754,79 @@ export class MockDaemon {
       this.pushStatus({ ending: true });
       this.reply("Okay.", 1000);
     });
+  }
+  /**
+   * `?mock=floating-site`: the site's hero (heyghost.app, docs/site.md), a cut of the tour that
+   * repeats with no long quiet stretch: the wake at 0.6 s, the README hero's six places from
+   * 2.6 s, the reply from 5.6 s, a change waiting for a yes from 9.2 s, the yes at 13.2 s, the
+   * goodbye at 14.8 s, at rest by about 17 s, and again from 18.5 s. Synthetic words only.
+   */
+  private sitePlayed = false;
+  private playFloatingSite() {
+    if (!this.scenario.floatingSite || this.sitePlayed) return;
+    this.sitePlayed = true;
+    let n = 0;
+    const loop = () => {
+      const id = () => `site${n++}`;
+      const at = (ms: number, f: () => void) => this.later(ms, f);
+      const call = (ms: number, name: string, cid: string) => at(ms, () => this.act("call", { name, id: cid }));
+      const done = (ms: number, name: string, cid: string) => at(ms, () => this.act("result", { name, id: cid }));
+      const turn = (from: number, to: number, words: string) => {
+        at(from, () => this.act("you_started"));
+        at(to, () => {
+          this.act("you_stopped");
+          this.addTurn("user", words, "voice");
+          this.heard(words);
+          this.pushStatus({ phase: "thinking" });
+        });
+      };
+      at(600, () => this.wake("ghost"));
+      turn(1300, 2400, "Get me ready for the launch review.");
+      // The README hero's places: GitHub, Calendar, Memory, Agents, Docs, Linear.
+      const six: [string, number, number][] = [
+        ["github_pull_requests_list", 2600, 4800],
+        ["calendar_events_today", 2750, 4300],
+        ["ghost_recall", 2900, 4100],
+        ["ghost_ask_agent", 3100, 5300],
+        ["ghost_docs_search", 3300, 4600],
+        ["linear_issues_search", 3450, 5000],
+      ];
+      for (const [name, out, back] of six) {
+        const cid = id();
+        call(out, name, cid);
+        done(back, name, cid);
+      }
+      at(5600, () => this.reply("Three issues are still open, two pull requests wait on review, and the review is at four.", 2800));
+      const g = id();
+      call(8600, "github_issue_list", g);
+      done(8600 + 400, "github_issue_list", g);
+      at(9200, () => {
+        this.propose({
+          source: "github",
+          operation: "github_issue_write",
+          target: "ghost-mock/app#151",
+          summary: "Close app#151 as a duplicate of #148",
+          rationale: "Same login bug; 148 has the fix in review.",
+        });
+        this.reply("One more: app 151 duplicates 148. Close it?", 2400);
+      });
+      at(12_400, () => {
+        if (this.pending) this.act("you_started");
+      });
+      at(13_200, () => {
+        if (!this.pending) return;
+        this.act("you_stopped");
+        this.addTurn("user", "Yes.", "voice");
+        this.heard("Yes.");
+        this.confirm();
+      });
+      at(14_800, () => {
+        this.pushStatus({ ending: true });
+        this.reply("Talk soon.", 1200);
+      });
+      at(18_500, loop);
+    };
+    loop();
   }
   private emit(e: GhostEvent) {
     for (const l of this.listeners) l(e);

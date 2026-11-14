@@ -6,19 +6,31 @@ page links to them.
 
 ## What it is made of
 
-- **The hero is the app's own floating room.** `site/src/pages/float.astro` mounts
-  `FloatingRoom` from `apps/desktop/src/floating` with the desktop's in-memory mock daemon
-  (`apps/desktop/src/design/mock`, the `floating` scenario) over a synthetic desktop
-  (`site/src/components/Desktop.astro`). The front page loads that page into a frame only once
-  it has loaded and the frame is on screen, empties the frame after two seconds off screen,
-  and shows a still instead under reduced motion (with a Play button) or with JavaScript off.
-  When the floating room changes, the site changes with it: a pull request touching
-  `apps/desktop/src/**` builds the site too.
-- **The stills** (`site/src/assets/float-*.webp`, `site/public/og.jpg`,
-  `site/public/apple-touch-icon.png`) are taken from that page:
+- **The hero is the app's own floating room over the README's desktop.** The first screen is
+  that desktop edge to edge, with the words over its quiet left side; on a phone (or any screen
+  taller than wide) the float takes the top of the screen, centred, with the words under it.
+  `site/src/pages/float.astro` mounts `FloatingRoom` from `apps/desktop/src/floating` with the
+  desktop's in-memory mock daemon on the `floating-site` scenario (a cut of the README's tour
+  that repeats every 18.5 s: the wake at 0.6 s, six places from 2.6 s, the reply from 5.6 s, a
+  yes from 9.2 s) over `apps/desktop/shots/world.{ts,css}`, the same made-up desktop
+  `shots/desktop.html` puts under the README's pictures, its windows moved right of the middle
+  (`?arrange=site`). The front page shows a still first, loads that page behind it once the
+  page has loaded and the hero is on screen, and shows it the moment Ghost first comes forward
+  (the page posts `ghost:forward`). It empties the frame after two seconds off screen, and stays
+  a still under reduced motion (with a Play button) or with JavaScript off. When the floating
+  room, the mock or the world changes, the site changes with it: a pull request touching
+  `apps/desktop/src/**` or `apps/desktop/shots/**` builds the site too.
+- **The pictures below the hero** are the README's stills of Wisp's states
+  (`docs/screenshots/floating-{hero,speaking,yes}.webp`) and one of the site's own
+  (`site/src/assets/float-listening.webp`, the README's desk and crop), and the desktop app's
+  screenshots, all straight from `docs/screenshots/`.
+- **The site's stills** (`site/src/assets/float-{wide,tall,listening}.webp`,
+  `site/public/og.jpg`, `site/public/apple-touch-icon.png`) are taken from the float page:
   `pnpm --dir site site:build && pnpm --dir site site:stills` (Chrome or Chromium and
-  ImageMagick, like `make screenshots`). The desktop app's screenshots come straight from
-  `docs/screenshots/`, the README's.
+  ImageMagick, like `make screenshots`).
+- **The version** on the page (the Download button, the file names) is the repository's own,
+  read from the root `package.json` at build time, which `scripts/version.py` keeps with every
+  other copy; the button goes to the latest release.
 - **The favicon** is Wisp's glyph from `packages/ui` (`wispGlyph`), rendered at build time
   (`site/src/pages/favicon.svg.ts`).
 - **Nothing is fetched from anyone else**: fonts are self-hosted (fontsource), no analytics,

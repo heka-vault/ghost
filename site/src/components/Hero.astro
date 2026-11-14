@@ -1,82 +1,81 @@
 ---
 /**
- * The float, first. A still of it is the first paint (and all there is with JavaScript off or
- * reduced motion); once the page has loaded and the frame is on screen, the live float page
- * (/float/: the app's own floating room on its mock daemon) is loaded into the frame and takes
- * over as Ghost arrives. Off screen for two seconds, the frame is emptied, so nothing runs while
- * nobody watches; back on screen, the session starts again. The frame is a monitor of its own:
- * 1600x1000 on a wide screen, 1100x1100 on a phone, scaled to fit, so the room lays itself out
- * as it does on a real monitor.
+ * The first screen is the desktop, edge to edge, with Ghost floating in over it beside the work
+ * and the words over the quiet side (the slot). On a phone, or any screen taller than wide, the
+ * float takes the top of the screen, centred, with the words under it.
+ *
+ * A still of the float is the first paint, and all there is with JavaScript off or reduced
+ * motion (with a Play button). Once the page has loaded and gone quiet, and the hero is on
+ * screen, the live float page (/float/: the app's own floating room on its mock daemon over the
+ * README's desktop) is loaded behind the still, and takes its place the moment Ghost first comes
+ * forward. Off screen for two seconds, the frame is emptied, so nothing runs while nobody
+ * watches; back on screen, the loop starts again.
  */
 import wide from "../assets/float-wide.webp?url";
-import square from "../assets/float-square.webp?url";
+import tall from "../assets/float-tall.webp?url";
 
-const alt = "Ghost floating beside an editor on a desktop, a beam out to GitHub, Calendar and a second GitHub account while it looks in three places";
+const STACKED = "(max-width: 899px), (max-aspect-ratio: 1/1)";
+const alt = "Ghost floating beside the work on a desktop at night, a beam out to each of the six places it is looking in: GitHub, Calendar, Memory, Agents, Docs and Linear";
 ---
 
-<div class="screen" data-hero>
-  <div class="screen__glass">
+<section class="hero" data-hero data-stacked-query={STACKED} aria-labelledby="hero-title">
+  <div class="hero__float">
     <picture>
-      <source media="(max-width: 640px)" srcset={square} width="1100" height="1100" />
-      <img class="screen__still" src={wide} width="1600" height="1000" alt={alt} fetchpriority="high" decoding="async" />
+      <source media={STACKED} srcset={tall} width="780" height="1040" />
+      <img class="hero__still" src={wide} width="1680" height="1000" alt={alt} fetchpriority="high" decoding="async" />
     </picture>
   </div>
-  <p class="screen__credit">
-    <span class="screen__live" aria-hidden="true"></span>
+  <div class="hero__shade" aria-hidden="true"></div>
+  <div class="hero__copy"><slot /></div>
+  <p class="hero__note">
+    <span class="hero__live" aria-hidden="true"></span>
     <span data-credit>A still of the floating room.</span>
-    <button type="button" class="screen__play" data-play hidden>Play it</button>
+    <button type="button" class="hero__play" data-play hidden>Play it</button>
   </p>
-</div>
+</section>
 
 <script>
   const root = document.querySelector<HTMLElement>("[data-hero]");
-  const glass = root?.querySelector<HTMLElement>(".screen__glass");
+  const float = root?.querySelector<HTMLElement>(".hero__float");
   const credit = root?.querySelector<HTMLElement>("[data-credit]");
   const play = root?.querySelector<HTMLButtonElement>("[data-play]");
   const reduced = matchMedia("(prefers-reduced-motion: reduce)");
-  const phone = matchMedia("(max-width: 640px)");
-  /** Ghost wakes 2.5 s into the mock session: keep the still until it is about to arrive. */
-  const ARRIVES_MS = 2300;
+  const stacked = matchMedia(root?.dataset.stackedQuery ?? "(max-width: 899px)");
 
   let frame: HTMLIFrameElement | null = null;
   let away = 0;
   let chosen = false;
 
-  const size = () => (phone.matches ? { w: 1100, h: 1100 } : { w: 1600, h: 1000 });
-  function fit() {
-    if (!frame || !glass) return;
-    const { w, h } = size();
-    frame.style.width = `${w}px`;
-    frame.style.height = `${h}px`;
-    frame.style.transform = `scale(${glass.clientWidth / w})`;
-  }
-
   function start() {
-    if (!glass || frame) return;
+    if (!float || frame) return;
     frame = document.createElement("iframe");
-    frame.className = "screen__live-frame";
-    frame.title = "Ghost's floating room, playing a synthetic session";
+    frame.className = "hero__frame";
+    frame.title = "Ghost's floating room, playing a made-up session";
     frame.setAttribute("aria-hidden", "true");
     frame.tabIndex = -1;
-    frame.loading = "eager";
-    fit();
-    frame.addEventListener("load", () => {
-      window.setTimeout(() => root?.setAttribute("data-live", "1"), ARRIVES_MS);
-    });
-    frame.src = "/float/";
-    glass.append(frame);
-    if (credit) credit.textContent = "Live: the app's own floating room, running a made-up session in your browser. No sound, nothing sent.";
+    frame.src = `/float/?latency=0${stacked.matches ? "&placement=centre" : ""}`;
+    // If the page never says Ghost came forward, show it anyway once it has had its time.
+    const mine = frame;
+    frame.addEventListener("load", () => window.setTimeout(() => mine === frame && live(), 4000));
+    float.append(frame);
   }
-
+  function live() {
+    if (!frame || root?.hasAttribute("data-live")) return;
+    root?.setAttribute("data-live", "1");
+    if (credit) credit.textContent = "Live: the app's own floating room on a made-up session. No sound, nothing sent.";
+  }
   function stop() {
     root?.removeAttribute("data-live");
     frame?.remove();
     frame = null;
   }
 
-  if (root && glass) {
-    new ResizeObserver(fit).observe(glass);
-    phone.addEventListener("change", () => {
+  addEventListener("message", (e) => {
+    if (e.origin === location.origin && e.source === frame?.contentWindow && e.data?.ghost === "forward") live();
+  });
+
+  if (root && float) {
+    stacked.addEventListener("change", () => {
       if (frame) {
         stop();
         start();
@@ -91,13 +90,13 @@ const alt = "Ghost floating beside an editor on a desktop, a beam out to GitHub,
           away = window.setTimeout(stop, 2000);
         }
       },
-      { threshold: 0.2 },
+      { threshold: 0.15 },
     );
     // After the page has loaded and gone quiet: the float never competes with the first paint.
-    const begin = () => seen.observe(root);
-    const idle = () => ("requestIdleCallback" in window ? requestIdleCallback(begin, { timeout: 1500 }) : window.setTimeout(begin, 300));
+    const begin = () => seen.observe(float);
+    const idle = () => ("requestIdleCallback" in window ? requestIdleCallback(begin, { timeout: 1200 }) : window.setTimeout(begin, 300));
     if (document.readyState === "complete") idle();
-    else window.addEventListener("load", idle, { once: true });
+    else addEventListener("load", idle, { once: true });
 
     if (reduced.matches && play) {
       play.hidden = false;

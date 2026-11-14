@@ -2,12 +2,13 @@
 /**
  * The site's stills, taken from its own float page (the app's floating room on the mock), so the
  * picture a visitor sees first, the one with JavaScript off or reduced motion, and the card a
- * link unfurls into are the moving hero caught at one moment: Ghost looking in three places.
+ * link unfurls into are the moving hero caught at one moment: Ghost looking in six places.
  *
  *   pnpm --dir site site:build && node site/scripts/stills.mjs
  *
  * Needs Chrome or Chromium (CHROME=/path) and ImageMagick for WebP and JPEG. Writes
- * src/assets/float-wide.webp (1600x1000), src/assets/float-square.webp (1100x1100),
+ * src/assets/float-wide.webp (1680x1000), src/assets/float-tall.webp (780x1040, a phone's top),
+ * src/assets/float-listening.webp (1440x810, the README's desk and crop, beside its stills),
  * public/og.jpg (1200x630) and public/apple-touch-icon.png (180x180). Nothing leaves the
  * machine: the pages are served from dist on loopback.
  */
@@ -49,25 +50,35 @@ const tmp = mkdtempSync(join(tmpdir(), "ghost-stills-"));
 const magick = (args) => execFileSync(existsSync("/usr/bin/magick") ? "magick" : "convert", args);
 const browser = await chromium.launch({ executablePath: chrome, args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"] });
 
-/** The float page at this size, held at the moment Ghost is looking in three places. */
-async function float(width, height, png) {
-  const page = await browser.newPage({ viewport: { width, height } });
-  await page.goto(`${base}/float/`);
-  await page.waitForFunction(() => document.querySelectorAll(".flt-node").length >= 3 && document.querySelector('.flt-root[data-scene="thinking"]'), null, { timeout: 60_000, polling: 100 });
-  await page.waitForTimeout(650);
-  await page.screenshot({ path: png });
+/** The float page held at a moment of the `floating-site` loop, as a PNG at `png`. */
+async function float({ width, height, scale = 1, query = "", when, clip }, png) {
+  const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: scale });
+  await page.goto(`${base}/float/?latency=0${query}`);
+  await page.waitForFunction(when, null, { timeout: 60_000, polling: 50 });
+  await page.waitForTimeout(450);
+  await page.screenshot({ path: png, clip });
   await page.close();
 }
 
+/** Six places out, the first answers on their way back: the hero's moment. */
+const reaching = () => document.querySelectorAll(".flt-node").length >= 6 && !!document.querySelector('.flt-root[data-scene="thinking"]');
+/** The operator speaking, Ghost listening: the green ring. */
+const listening = () => !!document.querySelector('.flt-root[data-scene="you"]');
+
 const shots = [
-  [1600, 1000, "src/assets/float-wide.webp", ["-quality", "78"]],
-  [1100, 1100, "src/assets/float-square.webp", ["-quality", "78"]],
-  [1200, 630, "public/og.jpg", ["-quality", "86"]],
+  // The hero on a wide screen: Ghost beside the work, the left quiet for the words.
+  [{ width: 1680, height: 1000, when: reaching }, "src/assets/float-wide.webp", ["-quality", "80"]],
+  // The hero on a phone: the top of the screen, Ghost in the middle.
+  [{ width: 390, height: 520, scale: 2, query: "&placement=centre", when: reaching }, "src/assets/float-tall.webp", ["-quality", "78"]],
+  // Listening, on the README's own desk and crop, to sit beside its stills.
+  [{ width: 1280, height: 720, scale: 2, query: "&arrange=readme", when: listening, clip: { x: 560, y: 28, width: 720, height: 405 } }, "src/assets/float-listening.webp", ["-resize", "1440x810", "-quality", "80"]],
+  // The card a link unfurls into.
+  [{ width: 1200, height: 630, when: reaching }, "public/og.jpg", ["-quality", "86"]],
 ];
-for (const [w, h, out, opts] of shots) {
-  const png = join(tmp, `${w}x${h}.png`);
-  await float(w, h, png);
-  magick([png, ...opts, join(site, out)]);
+for (const [opts, out, args] of shots) {
+  const png = join(tmp, out.replace(/\W/g, "_") + ".png");
+  await float(opts, png);
+  magick([png, ...args, join(site, out)]);
   console.log(`stills: ${out}`);
 }
 
