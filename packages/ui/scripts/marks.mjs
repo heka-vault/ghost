@@ -11,7 +11,7 @@
  *   node packages/ui/scripts/marks.mjs site         the site's icons and social card, the README's header and the organisation's avatar (committed)
  *   node packages/ui/scripts/marks.mjs dock <file>  a review sheet: the icon at its real pixels on a dock, a tray and a tab
  *
- * `make marks` runs the first two. Everything is rendered at its own pixel size (no downscaling a
+ * `make marks` runs desktop, mobile and site. Everything is rendered at its own pixel size (no downscaling a
  * master), so the ladder's levels of detail land on whole pixels.
  */
 import { registerHooks } from "node:module";

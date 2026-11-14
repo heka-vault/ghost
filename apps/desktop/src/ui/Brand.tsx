@@ -138,12 +138,18 @@ export function AgentShapeGlyph({ shape, size = 16, className, title }: { shape:
 
 /**
  * An agent's tile: its shape in its colour on its soft hue (the operator's call, 2026-11-12:
- * shapes as well as colours). Ghost is Wisp; an agent without a look is Wisp in the colour its
- * slug picks.
+ * shapes as well as colours). Ghost is the mark, the lit tile at the tile's size, as on the
+ * phone (`AgentMark`): never Wisp flat in the accent's indigo. An agent without a look is Wisp
+ * in the colour its slug picks.
  */
 export function LineGlyph({ slug, size: own = "md", hue, shape, className }: LineGlyphProps) {
   const size = useContext(GlyphSizeContext) ?? own;
   const looks = useContext(AgentLooksContext);
+  if (slug === "ghost" && hue === undefined && shape === undefined) {
+    const tile = { sm: 20, md: 24, lg: 32, xl: 48 }[size];
+    // The tile's own corners (22.5%), not an agent tile's radius.
+    return <GhostChip size={tile} className={className} />;
+  }
   const look = lookOf(slug, looks.get(slug));
   const h = hue ?? look.hue;
   const s = shape ?? look.shape;
