@@ -997,6 +997,8 @@ impl LlmStage {
                 Err(e) => {
                     // Never silence (ADR 0056): what failed, said in plain words.
                     warn!("model: {e}");
+                    // ADR 0067: by kind, never the provider's words.
+                    ghost_reports::failure(turn_failure(&e, &answering));
                     let line = ghost_llm::spoken_failure(&e);
                     let line = if reply.text.is_empty() {
                         line
@@ -1701,6 +1703,54 @@ fn async_stream_words(
             Some((Ok(ev), (it, taken, done)))
         },
     )
+}
+
+/// A failed turn as an error report carries it (ADR 0067): the error's kind, the status's
+/// class, the model's name; never what the provider said.
+pub fn turn_failure(e: &LlmError, model: &str) -> ghost_reports::Failure {
+    use ghost_reports::{Failure, FailureKind, status_class};
+    let f = Failure::new(FailureKind::TurnFailed).fact("model", model);
+    match e {
+        LlmError::Unreachable { kind, .. } => f
+            .error("ghost_llm::LlmError::Unreachable")
+            .fact("reason", kind),
+        LlmError::Status { status, .. } => f
+            .error("ghost_llm::LlmError::Status")
+            .fact("status", status_class(*status)),
+        LlmError::Api { kind, .. } => f.error("ghost_llm::LlmError::Api").fact("reason", kind),
+        LlmError::Stream(_) => f.error("ghost_llm::LlmError::Stream"),
+        LlmError::Headers(_) => f.error("ghost_llm::LlmError::Headers"),
+        LlmError::Client(_) => f.error("ghost_llm::LlmError::Client"),
+    }
+}
+
+#[cfg(test)]
+mod turn_failure_tests {
+    use super::*;
+
+    #[test]
+    fn a_failed_turn_is_reported_by_kind_without_the_providers_words() {
+        let e = LlmError::Status {
+            status: 402,
+            detail: "Your card ending 4242 for alice@example.com was declined".into(),
+        };
+        let f = turn_failure(&e, "claude-haiku-5-5");
+        assert_eq!(f.kind, ghost_reports::FailureKind::TurnFailed);
+        assert_eq!(f.error, Some("ghost_llm::LlmError::Status"));
+        assert_eq!(f.facts["status"], "4xx");
+        assert_eq!(f.facts["model"], "claude-haiku-5-5");
+        let all = format!("{f:?}");
+        assert!(!all.contains("4242") && !all.contains("declined"), "{all}");
+        let api = turn_failure(
+            &LlmError::Api {
+                kind: "overloaded_error".into(),
+                message: "the provider's own sentence".into(),
+            },
+            "m",
+        );
+        assert_eq!(api.facts["reason"], "overloaded_error");
+        assert!(!format!("{api:?}").contains("sentence"));
+    }
 }
 
 #[cfg(test)]

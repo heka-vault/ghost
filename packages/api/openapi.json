@@ -2729,6 +2729,38 @@
         ],
         "type": "object"
       },
+      "KeptReportView": {
+        "description": "One report this install sent.",
+        "properties": {
+          "body": {
+            "description": "The request's body exactly as sent, the project's key shown as a placeholder."
+          },
+          "component": {
+            "description": "`daemon`, `shell`, `floating` or `page`.",
+            "type": "string"
+          },
+          "kind": {
+            "description": "`panic`, `page`, `failure` or `test`.",
+            "type": "string"
+          },
+          "sent_at": {
+            "description": "RFC 3339.",
+            "type": "string"
+          },
+          "title": {
+            "description": "The exception's type and message, as sent.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sent_at",
+          "kind",
+          "component",
+          "title",
+          "body"
+        ],
+        "type": "object"
+      },
       "LinkView": {
         "description": "What letting the tool use Ghost would do, shown before it is done.",
         "properties": {
@@ -5016,6 +5048,57 @@
           "password_set",
           "providers",
           "spend"
+        ],
+        "type": "object"
+      },
+      "ReportsChoice": {
+        "properties": {
+          "send": {
+            "description": "Send error reports. Off sends nothing, keeps nothing waiting, and deletes the\ninstall's id.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "send"
+        ],
+        "type": "object"
+      },
+      "ReportsView": {
+        "properties": {
+          "available": {
+            "description": "This build can send error reports at all: a released build carries the project's\nkey; a build from the checkout does not.",
+            "type": "boolean"
+          },
+          "install_id": {
+            "description": "This install's random id while reports are on.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kept": {
+            "description": "The last reports sent, newest first (at most 20).",
+            "items": {
+              "$ref": "#/components/schemas/KeptReportView"
+            },
+            "type": "array"
+          },
+          "pending": {
+            "description": "Reports waiting to be sent.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "send": {
+            "description": "The operator's switch: on unless they turned it off.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "available",
+          "send",
+          "install_id",
+          "pending",
+          "kept"
         ],
         "type": "object"
       },
@@ -10545,6 +10628,68 @@
         "summary": "Reach",
         "tags": [
           "session"
+        ]
+      }
+    },
+    "/reports": {
+      "get": {
+        "operationId": "reports_view_reports_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Error reports",
+        "tags": [
+          "reports"
+        ]
+      }
+    },
+    "/reports/choice": {
+      "put": {
+        "operationId": "reports_choice_reports_choice_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReportsChoice"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Send error reports",
+        "tags": [
+          "reports"
         ]
       }
     },

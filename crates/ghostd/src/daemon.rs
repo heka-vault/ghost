@@ -1167,6 +1167,16 @@ impl Daemon {
     /// The note for the waiting list, while the input has a problem.
     pub(crate) fn mic_note(&self) -> Option<String> {
         let problem = lock(&self.mic_health).problem(Instant::now())?;
+        // ADR 0067: by kind; `failure` drops a repeat within the hour.
+        ghost_reports::failure(
+            ghost_reports::Failure::new(ghost_reports::FailureKind::InputUnhealthy).fact(
+                "problem",
+                match problem {
+                    crate::microphone::Problem::Dropping { .. } => "dropping",
+                    crate::microphone::Problem::Deaf { .. } => "deaf",
+                },
+            ),
+        );
         let plan = lock(&self.mic_plan)
             .as_ref()
             .map(|(_, p)| p.clone())
@@ -2188,6 +2198,12 @@ impl Daemon {
         ghost_audio::health::on_output_change({
             let weak = Arc::downgrade(d);
             Arc::new(move || {
+                // ADR 0067: the output stopped playing, by kind.
+                if ghost_audio::health::output_problem().is_some() {
+                    ghost_reports::failure(ghost_reports::Failure::new(
+                        ghost_reports::FailureKind::OutputUnavailable,
+                    ));
+                }
                 if let Some(d) = weak.upgrade() {
                     d.refresh_waiting_now();
                 }
@@ -2276,6 +2292,13 @@ impl Daemon {
                     // ADR 0066: files that are simply not here yet are said as that, with
                     // where to get them, not as the loader's error.
                     let missing = crate::speech_models::missing(&d.voice());
+                    // ADR 0067: files not yet downloaded are not a failure; a load that
+                    // fails with them all here is.
+                    if missing.is_empty() {
+                        ghost_reports::failure(ghost_reports::Failure::new(
+                            ghost_reports::FailureKind::SpeechModelsLoad,
+                        ));
+                    }
                     *lock(&d.models_problem) = Some(if missing.is_empty() {
                         format!("Ghost's speech models are not loaded: {e}")
                     } else {
@@ -2717,6 +2740,11 @@ impl Daemon {
             model_net: Arc::new(LiveModelNet),
             model_sign_in: ghost_api::deps::ModelSignIn::default(),
             hear: Some(self.hear_desk()),
+            // ADR 0067: the process's reporter, which `ghostd run` installs.
+            reports: ghost_reports::global().map(|r| {
+                Arc::new(crate::reports::ReportsDesk(r.clone()))
+                    as Arc<dyn ghost_api::reports::ReportsPort>
+            }),
             wake_takes: Some(crate::wake_takes::WakeTakesDesk::new(
                 self.wake_takes(),
                 Arc::downgrade(self),

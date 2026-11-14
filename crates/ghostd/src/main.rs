@@ -4,6 +4,7 @@
 //! a signed delivery to the webhook listener (ADR 0027). `ghostd latency`: where the
 //! turns' time went (ADR 0018). `ghostd llm test`: the provider check of the saved
 //! connection (ADR 0056). `ghostd api-schema`: the control API's document.
+//! `ghostd reports`: the operator's switch for error reports (ADR 0067).
 //! `ghostd mcp`: the outside tools connected to Ghost, and the bridge one of them runs
 //! (ADR 0048). `ghostd version`: what this build is. `ghostd restore-volumes`: what the shell runs
 //! before a start and after a stop (ADR 0038).
@@ -167,6 +168,11 @@ fn main() -> anyhow::Result<()> {
         Some("llm") => std::process::exit(llm(&args[1..])),
         // ADR 0068: the AI tools already on this computer, for the operator or a coding agent
         Some("setup") => std::process::exit(setup(&args[1..])),
+        // ADR 0067: the operator's switch for error reports, and a test report
+        Some("reports") => {
+            let cfg = GhostdSettings::load()?;
+            std::process::exit(reports(&args[1..], &cfg))
+        }
         // ADR 0066: the speech models the bundle does not carry, for a desk with no display
         Some("models") => std::process::exit(speech_models(&args[1..])),
         // ADR 0064, ADR 0066: the echo canceller, from the checkout or the bundle
@@ -197,7 +203,7 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Some(other) => anyhow::bail!(
-            "unknown command {other:?}; commands: run, status, wake, say, sleep, check, models, echo-cancel, push, latency, llm, perf, restore-volumes, passwords, mcp, setup, api-schema, version"
+            "unknown command {other:?}; commands: run, status, wake, say, sleep, check, models, echo-cancel, reports, push, latency, llm, perf, restore-volumes, passwords, mcp, setup, api-schema, version"
         ),
     }
 }
@@ -233,6 +239,11 @@ fn log_settings_file(path: &std::path::Path, s: &ghost_core::environment::Settin
 #[tokio::main]
 async fn run(mirror: LogMirror) -> anyhow::Result<()> {
     let base = GhostdSettings::load()?;
+    // ADR 0067: error reports first, so a panic anywhere after this is spooled. Redaction
+    // reads the vault's values as they are loaded.
+    ghostd::reports::start(Arc::new(ghostd::reports::reporter(&base.data_dir, |k| {
+        std::env::var(k).ok()
+    })));
     let environ: SharedEnviron = Arc::new(Mutex::new(HashMap::new()));
     // Off this runtime's thread: the keyring is a blocking client with a runtime of its
     // own (crates/ghost-core passwords), as every later open and unlock already is.
@@ -398,6 +409,18 @@ async fn echo_cancel(args: &[String], infra_dir: &std::path::Path) -> i32 {
             2
         }
     }
+}
+
+/// `ghostd reports on|off|status|test` (ADR 0067). The vault is opened only so a test
+/// report is redacted as the daemon's would be.
+#[tokio::main]
+async fn reports(args: &[String], cfg: &GhostdSettings) -> i32 {
+    let _vault = (args.first().map(String::as_str) == Some("test")).then(|| {
+        let environ: SharedEnviron = Arc::new(Mutex::new(HashMap::new()));
+        open_passwords(cfg, operator_keyring(), environ)
+    });
+    let r = ghostd::reports::reporter(&cfg.data_dir, |k| std::env::var(k).ok());
+    ghostd::reports::cli(args, &r, &mut std::io::stdout()).await
 }
 
 /// `ghostd mcp serve`: a tool's stdin and stdout to the running daemon (ADR 0048).

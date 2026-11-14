@@ -816,6 +816,20 @@ async fn no_tool_reads_or_writes_the_other_tools_on_this_computer() {
 }
 
 #[tokio::test]
+async fn no_tool_reaches_error_reports() {
+    // ADR 0067: sending error reports is the operator's switch, and what was sent is theirs
+    // to read. No agent turns it on or off, reads the reports, or makes one: a model told by
+    // an app's text to "send a report" would have a way off the machine.
+    let w = world().await;
+    for t in w.server.tools() {
+        let said = format!("{} {}", t.name, t.description.as_deref().unwrap_or("")).to_lowercase();
+        for word in ["error report", "report_", "_report", "telemetry", "posthog"] {
+            assert!(!said.contains(word), "{} mentions {word}", t.name);
+        }
+    }
+}
+
+#[tokio::test]
 async fn no_tool_turns_listening_on_or_off() {
     // ADR 0057: the microphone is the operator's switch. An agent never turns it back on,
     // and never off either: a model told by an app's text to mute Ghost would leave the

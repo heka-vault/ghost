@@ -19,6 +19,7 @@ ghost-llm = { path = "crates/ghost-llm" }
 ghost-audio = { path = "crates/ghost-audio" }
 ghost-voice = { path = "crates/ghost-voice" }
 ghost-rtc = { path = "crates/ghost-rtc" }
+ghost-reports = { path = "crates/ghost-reports" }
 
 anyhow = "1"
 thiserror = "2"

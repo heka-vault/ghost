@@ -58,6 +58,7 @@ import { pairLink } from "@ghost/client-ts";
 import { DESKTOP_BUILD, DESKTOP_VERSION } from "../../app/version";
 import { HttpError } from "./errors";
 import { type HearDesign, MockHear } from "./hear";
+import { MockReports } from "./reports";
 import { MockWakeTakes } from "./wakeTakes";
 import { isConnectionKey, isModelOnly, MockModel } from "./model";
 import { MockOtherTools } from "./otherTools";
@@ -263,6 +264,7 @@ export class MockDaemon {
   /** The Hearing test (ADR 0042): the recorder, its takes, sessions and runs. */
   private hear: MockHear;
   private wakeTakes = new MockWakeTakes();
+  private reports = new MockReports();
   /** What the agents do on their own (ADR 0047): the schedules and their runs. */
   private schedules: MockSchedules;
   /** The AI tools already on this computer (ADR 0068), from the scenario. */
@@ -1725,6 +1727,10 @@ export class MockDaemon {
     if (method === "GET" && path === "/status") return this.snapshot();
     if (path.startsWith("/hear")) {
       const answer = await this.hear.handle(method, path, query, b);
+      if (answer !== undefined) return answer;
+    }
+    if (path.startsWith("/reports")) {
+      const answer = this.reports.handle(method, path, b);
       if (answer !== undefined) return answer;
     }
     if (path.startsWith("/wake/takes")) {

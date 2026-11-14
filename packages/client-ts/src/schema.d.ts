@@ -1280,6 +1280,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Error reports */
+        get: operations["reports_view_reports_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/reports/choice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Send error reports */
+        put: operations["reports_choice_reports_choice_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/rules": {
         parameters: {
             query?: never;
@@ -2956,6 +2990,19 @@ export interface components {
         ItemKey: {
             key: string;
         };
+        /** @description One report this install sent. */
+        KeptReportView: {
+            /** @description The request's body exactly as sent, the project's key shown as a placeholder. */
+            body: unknown;
+            /** @description `daemon`, `shell`, `floating` or `page`. */
+            component: string;
+            /** @description `panic`, `page`, `failure` or `test`. */
+            kind: string;
+            /** @description RFC 3339. */
+            sent_at: string;
+            /** @description The exception's type and message, as sent. */
+            title: string;
+        };
         /** @description What letting the tool use Ghost would do, shown before it is done. */
         LinkView: {
             /** @description command (the tool's own) or file (Ghost writes it, after a backup). */
@@ -3684,6 +3731,28 @@ export interface components {
             providers: components["schemas"]["RealtimeProviderView"][];
             spend: components["schemas"]["RealtimeSpendView"];
             voice: string;
+        };
+        ReportsChoice: {
+            /**
+             * @description Send error reports. Off sends nothing, keeps nothing waiting, and deletes the
+             *     install's id.
+             */
+            send: boolean;
+        };
+        ReportsView: {
+            /**
+             * @description This build can send error reports at all: a released build carries the project's
+             *     key; a build from the checkout does not.
+             */
+            available: boolean;
+            /** @description This install's random id while reports are on. */
+            install_id: string | null;
+            /** @description The last reports sent, newest first (at most 20). */
+            kept: components["schemas"]["KeptReportView"][];
+            /** @description Reports waiting to be sent. */
+            pending: number;
+            /** @description The operator's switch: on unless they turned it off. */
+            send: boolean;
         };
         /** @description `[routes]` in the policy file (ADR 0031): how Ghost reaches the operator. */
         RoutesView: {
@@ -4542,6 +4611,7 @@ export type SchemaHookInfo = components['schemas']['HookInfo'];
 export type SchemaHttpValidationError = components['schemas']['HTTPValidationError'];
 export type SchemaImportSourceView = components['schemas']['ImportSourceView'];
 export type SchemaItemKey = components['schemas']['ItemKey'];
+export type SchemaKeptReportView = components['schemas']['KeptReportView'];
 export type SchemaLinkView = components['schemas']['LinkView'];
 export type SchemaListeningRequest = components['schemas']['ListeningRequest'];
 export type SchemaListeningView = components['schemas']['ListeningView'];
@@ -4603,6 +4673,8 @@ export type SchemaRealtimeModelView = components['schemas']['RealtimeModelView']
 export type SchemaRealtimeProviderView = components['schemas']['RealtimeProviderView'];
 export type SchemaRealtimeSpendView = components['schemas']['RealtimeSpendView'];
 export type SchemaRealtimeView = components['schemas']['RealtimeView'];
+export type SchemaReportsChoice = components['schemas']['ReportsChoice'];
+export type SchemaReportsView = components['schemas']['ReportsView'];
 export type SchemaRoutesView = components['schemas']['RoutesView'];
 export type SchemaRuleAdd = components['schemas']['RuleAdd'];
 export type SchemaRuleSet = components['schemas']['RuleSet'];
@@ -7088,6 +7160,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReachView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reports_view_reports_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportsView"];
+                };
+            };
+        };
+    };
+    reports_choice_reports_choice_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReportsChoice"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportsView"];
                 };
             };
             /** @description Validation Error */

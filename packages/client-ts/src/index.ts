@@ -138,6 +138,8 @@ export type ScheduleRunsView = Schemas["ScheduleRunsView"];
 export type HearView = Schemas["HearView"];
 /** Kept wake takes (ADR 0065). */
 export type WakeTakesView = Schemas["WakeTakesView"];
+export type ReportsView = Schemas["ReportsView"];
+export type KeptReportView = Schemas["KeptReportView"];
 export type WakeTakeView = Schemas["WakeTakeView"];
 export type WakeTakesChoice = Schemas["WakeTakesChoice"];
 export type WakeTakeLabel = Schemas["WakeTakeLabel"];
@@ -793,6 +795,15 @@ export class GhostClient {
   }
   stopWakeTake() {
     return unwrap(this.api.POST("/wake/takes/play/stop"));
+  }
+  // ------------------------------------------------------------------ error reports (ADR 0067)
+  /** The switch, this install's id, and the last reports sent exactly as sent. */
+  reports() {
+    return unwrap(this.api.GET("/reports"));
+  }
+  /** Off sends nothing, keeps nothing waiting, and deletes the install's id. */
+  setReportsChoice(send: boolean) {
+    return unwrap(this.api.PUT("/reports/choice", { body: { send } }));
   }
   hearRuns() {
     return unwrap(this.api.GET("/hear/runs"));

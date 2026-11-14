@@ -2329,6 +2329,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "ghost-reports"
+version = "2026.11.0"
+dependencies = [
+ "chrono",
+ "hex",
+ "regex",
+ "reqwest 0.13.5",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "uuid",
+ "wiremock",
+]
+
+[[package]]
 name = "ghost-rtc"
 version = "2026.11.0"
 dependencies = [
@@ -2369,6 +2387,7 @@ dependencies = [
  "ghost-core",
  "ghost-infer",
  "ghost-llm",
+ "ghost-reports",
  "hex",
  "hound",
  "indexmap 2.14.2",
@@ -2405,6 +2424,7 @@ dependencies = [
  "ghost-core",
  "ghost-infer",
  "ghost-llm",
+ "ghost-reports",
  "ghost-rtc",
  "ghost-voice",
  "hex",
@@ -2430,6 +2450,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "wiremock",
  "zbus",
  "zeroize",
 ]
@@ -2643,6 +2664,7 @@ version = "2026.11.0"
 dependencies = [
  "futures-util",
  "ghost-api",
+ "ghost-reports",
  "gtk",
  "http-body-util",
  "hyper",
