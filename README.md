@@ -77,6 +77,9 @@ see [What's rough](#whats-rough). Linux only today.
   (see Privacy for what is kept and how to delete it).
 - **It acts.** Connected apps are used for real: by default Ghost makes the changes you ask for
   and tells you; set what it must ask about first in Settings › Permissions.
+- **It works best with, and has only been tested with, one microphone:** a reSpeaker XVF3800
+  USB microphone array with the speakers plugged into it. Other microphones work, but a
+  laptop's built-in one hears much worse, above all in a noisy room. See [Sound](#sound).
 - **It is early software**, built on one desk. Linux only. See [What's rough](#whats-rough).
 
 ## Install
@@ -313,8 +316,10 @@ right there. Its voice, an app, an agent and a first question follow, each optio
   speech-to-text.
 - **Reply speed** is mostly the model: a slow provider or a large local model on a CPU makes
   Ghost pause. `ghostd llm test` shows it, and Ghost says on its list when it is too slow.
-- **Hardware**: Ghost has been tuned on one setup, a microphone array. Other setups work through the
-  default devices but haven't been tuned; open speakers without cancellation echo (see
+- **Hardware**: Ghost works best with, and has only been tested with, a reSpeaker XVF3800 USB
+  microphone array with the speakers on its output. Other setups work through the default
+  devices but haven't been tested: a laptop's built-in microphone takes a noisy room's sound
+  for yours, and open speakers without cancellation echo (see
   [Sound](#sound)). The Hearing test's recorder (`docs/hear-recording.md`) needs `ghost.mic`.
 - **The floating room** needs X11 or XWayland and hides during screen sharing; there is no
   native Wayland, KDE or wlroots version yet.
