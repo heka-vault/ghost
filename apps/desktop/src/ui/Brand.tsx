@@ -1,6 +1,6 @@
 import { createContext, useContext } from "react";
 
-import { type AgentShape, GHOST_PATH, GHOST_PATH_SMALL, SHAPES, lineHue, lookOf, wavePose } from "@ghost/ui";
+import { type AgentShape, ARCS, GHOST_PATH, GHOST_PATH_SMALL, MARK_STATES, type MarkState, SHAPES, type VoiceLevel, WISP, lineHue, lookOf } from "@ghost/ui";
 
 import { cx } from "./cx";
 import { Mascot } from "./Mascot";
@@ -8,36 +8,91 @@ import { Mascot } from "./Mascot";
 export { GHOST_PATH, GHOST_PATH_SMALL, lineHue };
 
 /**
- * The ghost glyph: Wisp saying hello (grinning, mid-wave), drawn still, at every size. The
- * mascot only draws its arms at 40px and up, so smaller glyphs are the 40px drawing scaled
- * down: the plain body at small sizes read as the old icon (the operator, 2026-10-20).
+ * The ghost glyph: Wisp at rest (`WISP.rest`, figure.ts), flat in the current colour, the eyes
+ * cut out; the mitts from 32 px, the plain hem under that. No smile, no stick arms: the still
+ * mark. An agent drawn as Wisp is this, in its own colour; the lit look is Ghost's alone
+ * (`GhostChip`).
  */
-const GLYPH_MIN = 40;
 export function GhostGlyph({ size = 16, className, title }: { size?: number; className?: string; title?: string }) {
-  if (size >= GLYPH_MIN) return <Mascot size={size} frame={wavePose()} title={title} className={cx("g-ghost-glyph", className)} />;
-  const k = size / GLYPH_MIN;
+  return <Mascot size={size} frame={WISP.rest} title={title} className={cx("g-ghost-glyph", className)} />;
+}
+
+/** Ghost's state as the mark shows it: the light's colour and the ring's lit arc. */
+export type { MarkState };
+
+export interface GhostChipProps {
+  /** The tile's size in px. */
+  size?: number;
+  state?: MarkState;
+  /** The hairline ring with the state's lit arc (the rail's chip), or none (the welcome's mark). */
+  ring?: "arc" | "none";
+  /** The live mascot inside: a voice phase's mood, hover, a tap, the idle loop, Ghost's voice. */
+  mood?: string | null;
+  hovered?: boolean;
+  trigger?: number;
+  idle?: boolean;
+  level?: VoiceLevel;
+  className?: string;
+  title?: string;
+}
+
+/**
+ * The mark in the app (docs/design-system.md, The mark): Wisp lit from within on the night tile,
+ * the tile's light and, with `ring="arc"`, one arc of a hairline ring in the state's colour (the
+ * whole ring while speaking; grey and struck through when not listening). The same drawing as
+ * the app's icon (`markSvg`), with the live mascot inside so it can move. On a light page it is
+ * a dark chip: never a bare white ghost, never on an indigo slab.
+ */
+export function GhostChip({ size = 40, state = "idle", ring = "none", mood, hovered, trigger, idle, level, className, title }: GhostChipProps) {
+  const tint = MARK_STATES[state].tint;
+  const off = state === "off";
+  const wisp = Math.round(size * (ring === "arc" ? 0.66 : 0.84));
+  const live = mood !== undefined || hovered || (trigger ?? 0) > 0 || idle;
+  const [a0, a1] = ARCS[state];
+  const R = 39;
+  const pt = (deg: number) => [50 + R * Math.cos((deg * Math.PI) / 180), 50 + R * Math.sin((deg * Math.PI) / 180)].map((v) => v.toFixed(2)).join(" ");
+  const hair = 100 / size;
   return (
-    <span className={cx("g-ghost-glyph", className)} style={{ display: "inline-block", width: size, height: size, overflow: "visible", lineHeight: 0 }} aria-hidden={title ? undefined : true} role={title ? "img" : undefined} aria-label={title}>
-      <span style={{ display: "inline-block", transform: `scale(${k})`, transformOrigin: "top left", width: GLYPH_MIN, height: GLYPH_MIN, lineHeight: 0 }}>
-        <Mascot size={GLYPH_MIN} frame={wavePose()} />
+    <span
+      className={cx("g-chip", off && "is-off", className)}
+      style={{ width: size, height: size, ["--chip-tint" as string]: off ? "#7d8796" : tint }}
+      role={title ? "img" : undefined}
+      aria-label={title}
+      aria-hidden={title ? undefined : true}
+    >
+      {ring === "arc" && (
+        <svg className="g-chip__ring" viewBox="0 0 100 100" aria-hidden>
+          <circle cx="50" cy="50" r={R} fill="none" stroke="#eafcff" strokeOpacity={0.3} strokeWidth={hair} />
+          {state === "speaking" ? (
+            <circle cx="50" cy="50" r={R} fill="none" stroke={tint} strokeWidth={hair * 2} />
+          ) : (
+            !off && <path d={`M${pt(a0)}A${R} ${R} 0 0 1 ${pt(a1)}`} fill="none" stroke={tint} strokeWidth={hair * 2} strokeLinecap="round" />
+          )}
+        </svg>
+      )}
+      <span className="g-chip__wisp">
+        {live ? (
+          <Mascot size={wisp} lit={off ? "#9aa3b2" : tint} mood={mood} hovered={hovered} trigger={trigger} idle={idle} level={level} />
+        ) : (
+          <Mascot size={wisp} lit={off ? "#9aa3b2" : tint} frame={WISP.rest} />
+        )}
       </span>
+      {off && (
+        <svg className="g-chip__strike" viewBox="0 0 100 100" aria-hidden>
+          <line x1="20" y1="80" x2="80" y2="20" stroke="#05060a" strokeWidth={Math.max(hair * 3.5, 7)} strokeLinecap="round" />
+          <line x1="20" y1="80" x2="80" y2="20" stroke="#ff4d5e" strokeWidth={Math.max(hair * 1.6, 3.2)} strokeLinecap="round" />
+        </svg>
+      )}
     </span>
   );
 }
 
 /**
- * The app mark: Wisp saying hello, bare, no tile (the tile read as the old icon; the
- * operator, 2026-10-20). Pass `hovered` (and optionally `trigger`) to make it the live
- * mascot, which plays and settles back to this mark.
+ * The app mark: the lit tile at rest (`GhostChip` with no ring). Pass `hovered` (and
+ * optionally `trigger`) to make Wisp in it the live mascot, which plays and settles back.
  */
 export function GhostMark({ size = 24, hovered, trigger, className }: { size?: number; hovered?: boolean; trigger?: number; className?: string }) {
-  const glyph = size;
-  return (
-    <span className={cx("g-mark", className)} style={{ width: size, height: size }} aria-hidden>
-      {/* Still: Wisp saying hello at any size. While hovered (or playing), the live mascot. */}
-      {hovered || (trigger !== undefined && trigger > 0) ? <Mascot size={glyph} hovered={hovered} trigger={trigger} /> : <GhostGlyph size={glyph} />}
-    </span>
-  );
+  return <GhostChip size={size} hovered={hovered || undefined} trigger={trigger} className={cx("g-mark", className)} />;
 }
 
 export interface LineGlyphProps {

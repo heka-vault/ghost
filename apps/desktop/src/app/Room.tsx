@@ -8,14 +8,14 @@
  * the room (the shell only takes the rail away). Anywhere else the shell lays this over the desk,
  * which stays mounted underneath, so a draft or a dialog survives a trip to the room.
  */
-import { useGhost } from "@ghost/ui";
+import { MARK_STATES, useGhost } from "@ghost/ui";
 import { ArrowRight, MicOff, MonitorDown } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { Button, LineGlyph, Mascot, VoiceWave, cx, formatShortcut, useLive } from "../ui";
 import { notListening, notListeningSub, sessionWords, typedSession } from "./listening";
 import { usePosture } from "./PostureContext";
-import { moodOf } from "./mood";
+import { markStateOf, moodOf } from "./mood";
 import { hrefFor } from "./router";
 import { nameOf, useToday } from "./today";
 import { clock, needLine } from "../screens/today/model";
@@ -73,7 +73,7 @@ export function Room() {
         <div className="room-layer__presence">
           <span className="room-layer__glow" aria-hidden />
           <span className="room-layer__wisp">
-            <Mascot size={200} mood={moodOf(connection === "online" ? phase : "offline", !!off, typed)} idle title="" />
+            <Mascot size={200} mood={moodOf(connection === "online" ? phase : "offline", !!off, typed)} idle title="" lit={MARK_STATES[markStateOf(connection === "online" ? phase : "passive", !!off || connection !== "online", !!status?.pending)].tint} />
           </span>
           <h2 className="room-layer__word" aria-live="polite">
             {off && <MicOff aria-hidden className="room-layer__off" />}

@@ -13,7 +13,7 @@ import { createElement, type ReactNode, useEffect, useId, useLayoutEffect, useMe
 import { createMotion, detailFor, type MascotAttrs as Attrs, type MascotEl as El, type MascotFrame, stillPose, type VoiceLevel, WISP } from "@ghost/ui";
 
 export interface MascotProps {
-  /** Pixel size of the square. Under 24 draws the simple body; 40 and up adds the arms. */
+  /** Pixel size of the square. Under 24 draws the larger eyes; 32 and up adds the mitts. */
   size?: number;
   hovered?: boolean;
   /** Increment to play once (a tap, a click, Ghost calling for attention). */
@@ -41,6 +41,12 @@ export interface MascotProps {
    * copied through XWayland). Unset: every display frame.
    */
   maxFps?: number;
+  /**
+   * Lit from within, as the brand's mark (`@ghost/ui` mark.ts): the body and mitts a white-hot
+   * core cooling to this colour at the edge, instead of one flat colour. Ghost's own look only
+   * (the floating room, the room view, Presence, the rail's chip); an agent's Wisp stays flat.
+   */
+  lit?: string;
 }
 
 /** A level older than this is stale: the voice stopped before its last 0 arrived. */
@@ -57,12 +63,13 @@ function usePrefersReducedMotion(): boolean {
   return reduced;
 }
 
-function draw(el: El, attrs: Attrs, key: number): ReactNode {
+function draw(el: El, attrs: Attrs, key: number, light?: string): ReactNode {
   const live = el.part ? attrs[el.part] : undefined;
-  return createElement(el.tag, { key, "data-part": el.part, ...el.props, ...live }, el.children?.map((c, i) => draw(c, attrs, i)));
+  const lit = light && el.props?.["data-flesh"] ? { fill: light } : undefined;
+  return createElement(el.tag, { key, "data-part": el.part, ...el.props, ...live, ...lit }, el.children?.map((c, i) => draw(c, attrs, i)));
 }
 
-export function Mascot({ size = 96, hovered = false, trigger = 0, idle = false, mood = null, still, frame, clock = 0, title, className, level, maxFps }: MascotProps) {
+export function Mascot({ size = 96, hovered = false, trigger = 0, idle = false, mood = null, still, frame, clock = 0, title, className, level, maxFps, lit }: MascotProps) {
   const detail = detailFor(size);
   const { simple, props } = detail;
   const d = useMemo(() => ({ simple, props }), [simple, props]);
@@ -215,9 +222,18 @@ export function Mascot({ size = 96, hovered = false, trigger = 0, idle = false, 
           <rect x={-24} y={-24} width={72} height={72} fill="#fff" />
           {scene.holes.map((el, i) => draw(el, attrs, i))}
         </mask>
+        {lit && (
+          // The mark's light (mark.ts litFigure): white in the head, the state's colour at the edge.
+          <radialGradient id={`${maskId}-lit`} cx={11.4} cy={9} r={13} gradientUnits="userSpaceOnUse">
+            <stop offset={0} stopColor="#ffffff" />
+            <stop offset={0.38} stopColor="#f4feff" />
+            <stop offset={0.72} stopColor="#eafcff" />
+            <stop offset={1} stopColor={lit} />
+          </radialGradient>
+        )}
       </defs>
       <g data-part="root" transform={attrs.root?.transform as string | undefined}>
-        <g mask={`url(#${maskId})`}>{scene.body.map((el, i) => draw(el, attrs, i))}</g>
+        <g mask={`url(#${maskId})`}>{scene.body.map((el, i) => draw(el, attrs, i, lit ? `url(#${maskId}-lit)` : undefined))}</g>
         {scene.over.map((el, i) => draw(el, attrs, i))}
       </g>
       {scene.free.map((el, i) => draw(el, attrs, i))}

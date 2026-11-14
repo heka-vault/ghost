@@ -130,6 +130,11 @@ fn update_tray(app: &AppHandle, payload: &str) {
     if let Some(off) = status.get("not_listening") {
         crate::tray::show_listening(app, !off.is_null());
     }
+    // The mark's state in the tray: the phase, and amber while a change waits for a yes.
+    let pending = status.get("pending").map(|p| !p.is_null());
+    if phase.is_some() || pending.is_some() {
+        crate::tray::show_phase(app, phase, pending);
+    }
     let quiet = crate::tray::NOT_LISTENING.load(std::sync::atomic::Ordering::SeqCst);
     if let (Some(phase), Some(tray)) = (phase, app.tray_by_id("main")) {
         let label = match phase {

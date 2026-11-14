@@ -614,7 +614,7 @@ function draw(
   ctx.translate(cx - 12 * scale, cy - 12.5 * scale + lift);
   ctx.scale(scale, scale);
   ctx.fillStyle = s.phase === "passive" ? alpha(p.text1, 0.78) : p.text1;
-  ctx.fill(glyph, "evenodd");
+  ctx.fill(glyph, "nonzero");
   ctx.restore();
 
   // What needs you: a thread from who asked to where it waits at the front.

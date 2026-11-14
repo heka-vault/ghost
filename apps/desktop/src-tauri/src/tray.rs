@@ -2,6 +2,10 @@
 //! hides it; Quit in the tray is the one off switch (ADR 0038). Stop listening closes
 //! Ghost's microphone (ADR 0057): the item turns into Listen again, and the tray's icon
 //! is struck through in red, as a smart speaker's mic-off light, until it is turned back on.
+//! The icon is Ghost's mark as a one-colour glyph (docs/design-system.md, The mark; drawn by
+//! `packages/ui/src/mark.ts`, written by `make marks`): the cool ink at rest, the state's
+//! colour in a session (green listening, violet reaching, cyan speaking, amber for a yes), grey
+//! and struck through when not listening.
 //! Float over the desktop turns the floating room on and off (ADR 0059): the quick way to hide
 //! it, where a screen share can't be seen. During a share, Show Ghost in this share puts it in
 //! the share or takes it out, for that share only; Ghost on stage opens the stage window, the
@@ -21,12 +25,51 @@ use crate::bridge::api_request;
 /// What the daemon last said of its microphone; the tray's item and icon follow it.
 pub static NOT_LISTENING: AtomicBool = AtomicBool::new(false);
 
-/// The tray's parts that change with the switch.
+/// The tray's icon, by what it shows (`look`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Look {
+    Rest,
+    Listening,
+    Reaching,
+    Speaking,
+    Waiting,
+    Off,
+}
+
+/// What the tray shows: not listening first, then a change waiting for a yes, then the phase.
+pub fn look(not_listening: bool, phase: Option<&str>, pending: bool) -> Look {
+    if not_listening {
+        return Look::Off;
+    }
+    if pending {
+        return Look::Waiting;
+    }
+    match phase {
+        Some("listening") => Look::Listening,
+        Some("thinking") => Look::Reaching,
+        Some("speaking") => Look::Speaking,
+        _ => Look::Rest,
+    }
+}
+
+fn image(l: Look) -> Image<'static> {
+    match l {
+        Look::Rest => tauri::include_image!("icons/tray/rest.png"),
+        Look::Listening => tauri::include_image!("icons/tray/listening.png"),
+        Look::Reaching => tauri::include_image!("icons/tray/reaching.png"),
+        Look::Speaking => tauri::include_image!("icons/tray/speaking.png"),
+        Look::Waiting => tauri::include_image!("icons/tray/waiting.png"),
+        Look::Off => tauri::include_image!("icons/tray/off.png"),
+    }
+}
+
+/// The tray's parts that change with the switch and the session.
 pub struct ListenTray {
     item: MenuItem<Wry>,
-    on: Image<'static>,
-    off: Image<'static>,
     shown: Mutex<Option<bool>>,
+    /// The last phase and pending the daemon said, and the icon on show.
+    phase: Mutex<(Option<String>, bool)>,
+    icon: Mutex<Option<Look>>,
 }
 
 /// The floating room's items, where the desktop has it: the switch, and the share's toggle.
@@ -78,15 +121,14 @@ pub fn build(app: &App, floating: &crate::floating::Status) -> tauri::Result<()>
     items.push(&quit);
     let menu = Menu::with_items(app, &items)?;
     app.manage(FloatTray(float.clone(), share.clone()));
-    let icon = app.default_window_icon().unwrap().clone().to_owned();
     app.manage(ListenTray {
         item: listen,
-        off: struck(&icon),
-        on: icon.clone(),
         shown: Mutex::new(None),
+        phase: Mutex::new((None, false)),
+        icon: Mutex::new(Some(Look::Rest)),
     });
     TrayIconBuilder::with_id("main")
-        .icon(icon)
+        .icon(image(Look::Rest))
         .menu(&menu)
         .tooltip("Ghost")
         .on_menu_event(move |app, event| match event.id.as_ref() {
@@ -134,52 +176,54 @@ pub fn show_listening(app: &AppHandle, not_listening: bool) {
     let Some(parts) = app.try_state::<ListenTray>() else {
         return;
     };
-    let mut shown = parts.shown.lock().unwrap_or_else(|e| e.into_inner());
-    if *shown == Some(not_listening) {
-        return;
-    }
-    *shown = Some(not_listening);
-    let _ = parts.item.set_text(if not_listening {
-        "Listen again"
-    } else {
-        "Stop listening"
-    });
-    if let Some(tray) = app.tray_by_id("main") {
-        let _ = tray.set_icon(Some(if not_listening {
-            parts.off.clone()
-        } else {
-            parts.on.clone()
-        }));
-        if not_listening {
-            let _ = tray.set_tooltip(Some("Ghost: not listening (mic off)"));
-        }
-    }
-}
-
-/// The icon faded to gray with a red stroke corner to corner: the mic-off light.
-pub fn struck(icon: &Image<'_>) -> Image<'static> {
-    let (w, h) = (icon.width() as usize, icon.height() as usize);
-    let mut px = icon.rgba().to_vec();
-    for p in px.as_chunks_mut::<4>().0 {
-        let gray =
-            ((u32::from(p[0]) * 30 + u32::from(p[1]) * 59 + u32::from(p[2]) * 11) / 100) as u8;
-        p[0] = gray;
-        p[1] = gray;
-        p[2] = gray;
-        p[3] = (u32::from(p[3]) * 3 / 5) as u8;
-    }
-    let half = (w.min(h) / 14).max(1) as i64;
-    for y in 0..h {
-        for x in 0..w {
-            // distance from the diagonal, scaled to the shorter side
-            let d = (x as i64 * h as i64 - y as i64 * w as i64).abs() / w.max(h) as i64;
-            if d <= half {
-                let i = (y * w + x) * 4;
-                px[i..i + 4].copy_from_slice(&[0xd3, 0x2f, 0x2f, 0xff]);
+    {
+        let mut shown = parts.shown.lock().unwrap_or_else(|e| e.into_inner());
+        if *shown != Some(not_listening) {
+            *shown = Some(not_listening);
+            let _ = parts.item.set_text(if not_listening {
+                "Listen again"
+            } else {
+                "Stop listening"
+            });
+            if not_listening && let Some(tray) = app.tray_by_id("main") {
+                let _ = tray.set_tooltip(Some("Ghost: not listening (mic off)"));
             }
         }
     }
-    Image::new_owned(px, w as u32, h as u32)
+    show_look(app, &parts);
+}
+
+/// The daemon said its phase (and whether a change waits for a yes): the icon follows it.
+/// `None` leaves what was said before.
+pub fn show_phase(app: &AppHandle, phase: Option<&str>, pending: Option<bool>) {
+    let Some(parts) = app.try_state::<ListenTray>() else {
+        return;
+    };
+    {
+        let mut p = parts.phase.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(phase) = phase {
+            p.0 = Some(phase.to_owned());
+        }
+        if let Some(pending) = pending {
+            p.1 = pending;
+        }
+    }
+    show_look(app, &parts);
+}
+
+fn show_look(app: &AppHandle, parts: &ListenTray) {
+    let next = {
+        let p = parts.phase.lock().unwrap_or_else(|e| e.into_inner());
+        look(NOT_LISTENING.load(Ordering::SeqCst), p.0.as_deref(), p.1)
+    };
+    let mut icon = parts.icon.lock().unwrap_or_else(|e| e.into_inner());
+    if *icon == Some(next) {
+        return;
+    }
+    *icon = Some(next);
+    if let Some(tray) = app.tray_by_id("main") {
+        let _ = tray.set_icon(Some(image(next)));
+    }
 }
 
 /// The share's item: usable only while the floating room is on and a share is seen, checked
@@ -232,16 +276,49 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_struck_icon_is_gray_with_a_red_diagonal() {
-        let icon = Image::new_owned([0, 120, 255, 255].repeat(32 * 32), 32, 32);
-        let off = struck(&icon);
-        let at = |x: usize, y: usize| {
-            let i = (y * 32 + x) * 4;
-            off.rgba()[i..i + 4].to_vec()
-        };
-        assert_eq!(at(16, 16), vec![0xd3, 0x2f, 0x2f, 0xff]); // on the stroke
-        let corner = at(30, 2);
-        assert_eq!(corner[0], corner[1]); // gray
-        assert!(corner[3] < 255); // faded
+    fn the_tray_shows_not_listening_then_a_yes_then_the_phase() {
+        assert_eq!(look(true, Some("speaking"), true), Look::Off);
+        assert_eq!(look(false, Some("listening"), true), Look::Waiting);
+        assert_eq!(look(false, Some("listening"), false), Look::Listening);
+        assert_eq!(look(false, Some("thinking"), false), Look::Reaching);
+        assert_eq!(look(false, Some("speaking"), false), Look::Speaking);
+        assert_eq!(look(false, Some("passive"), false), Look::Rest);
+        assert_eq!(look(false, None, false), Look::Rest);
+    }
+
+    /// Pixel (x, y) of a tray icon, RGBA.
+    fn px(i: &Image<'_>, x: u32, y: u32) -> [u8; 4] {
+        let k = ((y * i.width() + x) * 4) as usize;
+        i.rgba()[k..k + 4].try_into().unwrap()
+    }
+
+    #[test]
+    fn every_tray_icon_is_the_glyph_in_its_own_colour() {
+        let looks = [
+            Look::Rest,
+            Look::Listening,
+            Look::Reaching,
+            Look::Speaking,
+            Look::Waiting,
+            Look::Off,
+        ];
+        let mut middles = Vec::new();
+        for l in looks {
+            let i = image(l);
+            assert_eq!((i.width(), i.height()), (32, 32), "{l:?}");
+            // The corners are clear: a glyph, not a tile.
+            assert_eq!(px(&i, 0, 0)[3], 0, "{l:?}");
+            // The body at the forehead, above the eyes.
+            middles.push(px(&i, 16, 6));
+        }
+        for (a, ma) in middles.iter().enumerate() {
+            assert!(ma[3] > 200, "{:?} is drawn", looks[a]);
+            for (b, mb) in middles.iter().enumerate().skip(a + 1) {
+                assert_ne!(ma[..3], mb[..3], "{:?} and {:?} differ", looks[a], looks[b]);
+            }
+        }
+        // Not listening carries the red stroke through the middle.
+        let off = px(&image(Look::Off), 16, 16);
+        assert!(off[0] > 150 && off[1] < 100, "red at the middle: {off:?}");
     }
 }

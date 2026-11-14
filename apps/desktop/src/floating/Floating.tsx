@@ -67,6 +67,9 @@ const TINT: Record<Scene, [number, number, number]> = {
   ending: [0.35, 0.85, 1.0],
 };
 
+/** A scene's light as CSS, for Wisp's lit edge (the mark's light, `Mascot`'s `lit`). */
+const tintCss = (s: Scene) => `rgb(${TINT[s].map((v) => Math.round(v * 255)).join(" ")})`;
+
 const MOOD: Record<Scene, string | null> = {
   hidden: null, line: null, hold: "hold", you: "listening", listening: "listening", thinking: "thinking",
   speaking: "speaking", okay: "listening", question: "listening", ending: "speaking",
@@ -509,7 +512,7 @@ export function FloatingRoom({ stage = false }: { stage?: boolean } = {}) {
       {/* On stage, at rest: Ghost waits in the middle for its name, not as a line. */}
       {stage && !shown && (
         <div className="flt-rest" aria-hidden style={{ left: layout.core[0], top: layout.core[1] }}>
-          <div className="flt-rest__wisp">{DRAW_WISP && <Mascot size={Math.round(layout.wisp * 0.8)} mood={scene === "hold" ? "hold" : null} idle maxFps={30} />}</div>
+          <div className="flt-rest__wisp">{DRAW_WISP && <Mascot size={Math.round(layout.wisp * 0.8)} mood={scene === "hold" ? "hold" : null} idle maxFps={30} lit={tintCss("hold")} />}</div>
           <p className="flt-rest__say">{micOff ? "Mic off" : scene === "hold" ? "On hold · say “Ghost” to pick up" : "Say “Ghost”"}</p>
         </div>
       )}
@@ -541,7 +544,7 @@ export function FloatingRoom({ stage = false }: { stage?: boolean } = {}) {
       {shown && (
         <div className="flt-stage" style={{ left: layout.core[0], top: layout.core[1] }}>
           <div ref={wisp} className="flt-wisp" aria-hidden>
-            {DRAW_WISP && <Mascot size={layout.wisp} mood={leaving ? null : scene === "listening" && typed ? "passive" : MOOD[scene]} trigger={trigger} level={voice} idle maxFps={fpsOf(scene, arriving) || 60} />}
+            {DRAW_WISP && <Mascot size={layout.wisp} mood={leaving ? null : scene === "listening" && typed ? "passive" : MOOD[scene]} trigger={trigger} level={voice} idle maxFps={fpsOf(scene, arriving) || 60} lit={tintCss(scene)} />}
           </div>
           <div className="flt-under">
             {sharedMark && <SharedMark />}
