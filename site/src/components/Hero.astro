@@ -10,6 +10,13 @@
  * README's desktop) is loaded behind the still, and takes its place the moment Ghost first comes
  * forward. Off screen for two seconds, the frame is emptied, so nothing runs while nobody
  * watches; back on screen, the loop starts again.
+ *
+ * Sound only on request: "Hear it" turns it on and off, and nothing of it (the clip, its
+ * timeline, the captions) is fetched before the first press. On, the turn starts again from the
+ * wake, the clip (site/public/audio/hero-turn.*, `pnpm --dir site site:audio`) plays from its
+ * start each time the float says its turn starts (`ghost:loop`), and the words show as captions
+ * at the hero's foot. With no float (reduced motion, or not loaded yet) the clip loops by itself
+ * over the still. It pauses while the hero is off screen. The choice is not remembered.
  */
 import wide from "../assets/float-wide.webp?url";
 import tall from "../assets/float-tall.webp?url";
@@ -27,7 +34,12 @@ const alt = "Ghost floating beside the work on a desktop at night, a beam out to
   </div>
   <div class="hero__shade" aria-hidden="true"></div>
   <div class="hero__copy"><slot /></div>
+  <p class="hero__caption" data-caption hidden><b data-caption-who></b><span data-caption-words></span></p>
   <p class="hero__note">
+    <button type="button" class="hero__hear" data-hear aria-pressed="false">
+      <span class="hero__wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+      <span data-hear-label>Hear it</span>
+    </button>
     <span class="hero__live" aria-hidden="true"></span>
     <span data-credit>A still of the floating room.</span>
     <button type="button" class="hero__play" data-play hidden>Play it</button>
@@ -41,6 +53,8 @@ const alt = "Ghost floating beside the work on a desktop at night, a beam out to
   const play = root?.querySelector<HTMLButtonElement>("[data-play]");
   const reduced = matchMedia("(prefers-reduced-motion: reduce)");
   const stacked = matchMedia(root?.dataset.stackedQuery ?? "(max-width: 899px)");
+  const LIVE_QUIET = "Live: the app's own floating room on a made-up session. Nothing sent.";
+  const LIVE_SOUND = "Live, with sound: a made-up session, every voice synthetic. Nothing sent.";
 
   let frame: HTMLIFrameElement | null = null;
   let away = 0;
@@ -62,7 +76,7 @@ const alt = "Ghost floating beside the work on a desktop at night, a beam out to
   function live() {
     if (!frame || root?.hasAttribute("data-live")) return;
     root?.setAttribute("data-live", "1");
-    if (credit) credit.textContent = "Live: the app's own floating room on a made-up session. No sound, nothing sent.";
+    if (credit) credit.textContent = sound.on ? LIVE_SOUND : LIVE_QUIET;
   }
   function stop() {
     root?.removeAttribute("data-live");
@@ -70,8 +84,121 @@ const alt = "Ghost floating beside the work on a desktop at night, a beam out to
     frame = null;
   }
 
+  // ------------------------------------------------------------------ the sound, on request
+  type Turn = {
+    loop_ms: number;
+    wake: number;
+    think: number[];
+    sleep: number;
+    lines: { who: "you" | "ghost"; text: string; at: number; ms: number }[];
+    voice: { window_ms: number; levels: number[] };
+  };
+  const hear = root?.querySelector<HTMLButtonElement>("[data-hear]");
+  const hearLabel = root?.querySelector<HTMLElement>("[data-hear-label]");
+  const caption = root?.querySelector<HTMLElement>("[data-caption]");
+  const captionWho = root?.querySelector<HTMLElement>("[data-caption-who]");
+  const captionWords = root?.querySelector<HTMLElement>("[data-caption-words]");
+  const bars = [...(root?.querySelectorAll<HTMLElement>(".hero__wave i") ?? [])];
+
+  const sound = {
+    on: false,
+    audio: null as HTMLAudioElement | null,
+    turn: null as Turn | null,
+    raf: 0,
+    onScreen: true,
+    /**
+     * The float's turn starts: the clip from its start, in step. It starts 60 ms in, the time a
+     * clip takes to sound again after the jump (measured in Chrome and Firefox: the float led the
+     * clip by 40 to 90 ms without it; site:sound-check).
+     */
+    fromTheTop() {
+      if (!this.on || !this.audio || !this.onScreen) return;
+      this.audio.currentTime = 0.06;
+      this.audio.play().catch(() => this.set(false));
+    },
+    set(on: boolean) {
+      this.on = on;
+      hear?.setAttribute("aria-pressed", String(on));
+      if (hearLabel) hearLabel.textContent = on ? "Sound on" : "Hear it";
+      root?.toggleAttribute("data-sound", on);
+      if (root?.hasAttribute("data-live") && credit) credit.textContent = on ? LIVE_SOUND : LIVE_QUIET;
+      if (!on) {
+        this.audio?.pause();
+        cancelAnimationFrame(this.raf);
+        if (caption) caption.hidden = true;
+        for (const b of bars) b.style.removeProperty("--l");
+      }
+    },
+    /** The press itself: play inside the gesture, as every browser's autoplay rule asks. */
+    press() {
+      if (this.on) return this.set(false);
+      if (!this.audio) {
+        const a = new Audio();
+        a.preload = "auto";
+        a.loop = true; // with no float to follow, the clip is the loop
+        a.src = a.canPlayType('audio/webm; codecs="opus"') ? "/audio/hero-turn.webm" : "/audio/hero-turn.m4a";
+        a.addEventListener("playing", () => this.tick());
+        this.audio = a;
+        import("../../../apps/desktop/src/design/mock/fixtures/floating-site-turn.json").then((m) => {
+          this.turn = m.default as Turn;
+        });
+      }
+      this.set(true);
+      this.audio.currentTime = 0;
+      this.audio.play().catch(() => {
+        this.set(false);
+        if (hearLabel) hearLabel.textContent = "No sound here";
+      });
+      // The turn again from the wake, so the visitor hears a whole one; the float says when it starts.
+      if (frame) frame.contentWindow?.postMessage({ ghost: "restart" }, location.origin);
+      else if (this.onScreen && (!reduced.matches || chosen)) start();
+    },
+    /** Captions and the button's wave, from the clip's own clock, while it plays. */
+    tick() {
+      cancelAnimationFrame(this.raf);
+      const step = () => {
+        const a = this.audio;
+        if (!this.on || !a || a.paused) return;
+        const t = this.turn;
+        const ms = a.currentTime * 1000;
+        if (t && caption && captionWho && captionWords) {
+          const line = t.lines.find((l) => ms >= l.at - 80 && ms < l.at + l.ms + 700);
+          const cue =
+            line ? null
+            : ms >= t.wake && ms < t.wake + 500 ? "a chime"
+            : ms >= t.think[0] && ms < t.think[1] ? "Ghost's thinking sound"
+            : ms >= t.sleep && ms < t.sleep + 800 ? "a falling chime"
+            : null;
+          caption.hidden = !line && !cue;
+          caption.dataset.who = line?.who ?? "cue";
+          captionWho.textContent = line ? (line.who === "ghost" ? "Ghost" : "You") : "";
+          captionWords.textContent = line ? line.text : cue ? `(${cue})` : "";
+          const level = t.voice.levels[Math.floor(ms / t.voice.window_ms)] ?? 0;
+          const you = !!line && line.who === "you" && ms >= line.at && ms < line.at + line.ms;
+          bars.forEach((b, i) => {
+            const l = you ? 0.3 + 0.3 * Math.abs(Math.sin(ms / 90 + i * 1.7)) : Math.max(0.14, level * (0.6 + 0.4 * Math.abs(Math.sin(i * 2.1 + ms / 120))));
+            b.style.setProperty("--l", l.toFixed(2));
+          });
+        }
+        this.raf = requestAnimationFrame(step);
+      };
+      this.raf = requestAnimationFrame(step);
+    },
+    /** Off screen the sound pauses; back on, it picks up with the float (or from the top, with none). */
+    seen(visible: boolean) {
+      this.onScreen = visible;
+      if (!this.on || !this.audio) return;
+      if (!visible) this.audio.pause();
+      else if (frame) frame.contentWindow?.postMessage({ ghost: "restart" }, location.origin);
+      else if (reduced.matches && !chosen) this.fromTheTop();
+    },
+  };
+  hear?.addEventListener("click", () => sound.press());
+
   addEventListener("message", (e) => {
-    if (e.origin === location.origin && e.source === frame?.contentWindow && e.data?.ghost === "forward") live();
+    if (e.origin !== location.origin || e.source !== frame?.contentWindow) return;
+    if (e.data?.ghost === "forward") live();
+    if (e.data?.ghost === "loop") sound.fromTheTop();
   });
 
   if (root && float) {
@@ -84,6 +211,7 @@ const alt = "Ghost floating beside the work on a desktop at night, a beam out to
     const seen = new IntersectionObserver(
       ([e]) => {
         window.clearTimeout(away);
+        sound.seen(e.isIntersecting);
         if (e.isIntersecting) {
           if (!reduced.matches || chosen) start();
         } else if (frame) {

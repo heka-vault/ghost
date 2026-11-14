@@ -6,6 +6,7 @@
 import { parseLook, wordEnds } from "@ghost/ui";
 
 import { speechEnvelope } from "../../ui/VoiceWave";
+import siteTurnJson from "./fixtures/floating-site-turn.json";
 import type {
   Ack,
   ActivityView,
@@ -148,7 +149,20 @@ function mockBuild(kind: MockOptions["build"]): Pick<Status, "version" | "build"
   }
 }
 
+/** The site's turn with sound (site/audio/turn.json, rendered): the floating-site loop's clock. */
+export interface SiteTurn {
+  loop_ms: number;
+  wake: number;
+  think: number[];
+  sleep: number;
+  lines: { id: string; who: "you" | "ghost"; text: string; at: number; ms: number }[];
+  voice: { window_ms: number; levels: number[] };
+}
+export const SITE_TURN = siteTurnJson as SiteTurn;
+
 export interface MockOptions {
+  /** Called as the `floating-site` loop starts each turn (the site keeps its sound in step). */
+  onSiteLoop?: () => void;
   /**
    * The catalog (?catalog=…): `slow`, the first copy takes 4 seconds (as on a first run);
    * `problem`, the copy is three days old and the refresh failed; `empty`, the first copy
@@ -422,7 +436,8 @@ export class MockDaemon {
     this.voiceTimer = setInterval(() => {
       const now = this.status.phase === "speaking";
       if (now && !speaking) from = performance.now();
-      if (now) this.emit({ type: "voice", level: Math.round(speechEnvelope((performance.now() - from) / 1000) * 1000) / 1000 });
+      const site = now ? this.siteLevel() : null;
+      if (now) this.emit({ type: "voice", level: site ?? Math.round(speechEnvelope((performance.now() - from) / 1000) * 1000) / 1000 });
       else if (speaking) this.emit({ type: "voice", level: 0 });
       speaking = now;
     }, 50);
@@ -756,51 +771,64 @@ export class MockDaemon {
     });
   }
   /**
-   * `?mock=floating-site`: the site's hero (heyghost.app, docs/site.md), a cut of the tour that
-   * repeats with no long quiet stretch: the wake at 0.6 s, the README hero's six places from
-   * 2.6 s, the reply from 5.6 s, a change waiting for a yes from 9.2 s, the yes at 13.2 s, the
-   * goodbye at 14.8 s, at rest by about 17 s, and again from 18.5 s. Synthetic words only.
+   * `?mock=floating-site`: the site's hero (heyghost.app, docs/site.md), one turn on the clock
+   * of the site's sound (`fixtures/floating-site-turn.json`, written by `pnpm --dir site
+   * site:audio` from site/audio/turn.json), so the beams, the light and the words line up with
+   * what the visitor hears: the wake as "Hey Ghost" ends, the request, the README hero's six
+   * places while Ghost thinks, the reply, a change waiting for a yes, the yes, "Done", the
+   * goodbye, a rest, and again. Ghost's voice level is the clip's own, window by window.
+   * Synthetic words only.
    */
   private sitePlayed = false;
+  /** When the site's loop last started (Date.now()), for the voice level; null when not playing. */
+  private siteLoopAt: number | null = null;
   private playFloatingSite() {
     if (!this.scenario.floatingSite || this.sitePlayed) return;
     this.sitePlayed = true;
+    const t = SITE_TURN;
+    const line = (id: string) => {
+      const l = t.lines.find((x) => x.id === id);
+      if (!l) throw new Error(`floating-site-turn.json has no line "${id}"`);
+      return l;
+    };
+    const [request, reply, ask, yes, done, bye] = ["request", "reply", "ask", "yes", "done", "bye"].map(line);
     let n = 0;
     const loop = () => {
+      this.siteLoopAt = Date.now();
+      this.options.onSiteLoop?.();
       const id = () => `site${n++}`;
       const at = (ms: number, f: () => void) => this.later(ms, f);
       const call = (ms: number, name: string, cid: string) => at(ms, () => this.act("call", { name, id: cid }));
-      const done = (ms: number, name: string, cid: string) => at(ms, () => this.act("result", { name, id: cid }));
-      const turn = (from: number, to: number, words: string) => {
-        at(from, () => this.act("you_started"));
-        at(to, () => {
-          this.act("you_stopped");
-          this.addTurn("user", words, "voice");
-          this.heard(words);
-          this.pushStatus({ phase: "thinking" });
-        });
-      };
-      at(600, () => this.wake("ghost"));
-      turn(1300, 2400, "Get me ready for the launch review.");
-      // The README hero's places: GitHub, Calendar, Memory, Agents, Docs, Linear.
+      const done_ = (ms: number, name: string, cid: string) => at(ms, () => this.act("result", { name, id: cid }));
+      at(t.wake, () => this.wake("ghost"));
+      at(request.at, () => this.act("you_started"));
+      at(request.at + request.ms, () => {
+        this.act("you_stopped");
+        this.addTurn("user", "Get me ready for the launch review.", "voice");
+        this.heard("Get me ready for the launch review.");
+        this.pushStatus({ phase: "thinking" });
+      });
+      // The README hero's places, reached while Ghost thinks: GitHub, Calendar, Memory, Agents, Docs, Linear.
+      const from = request.at + request.ms + 200;
+      const span = reply.at - 300 - from;
       const six: [string, number, number][] = [
-        ["github_pull_requests_list", 2600, 4800],
-        ["calendar_events_today", 2750, 4300],
-        ["ghost_recall", 2900, 4100],
-        ["ghost_ask_agent", 3100, 5300],
-        ["ghost_docs_search", 3300, 4600],
-        ["linear_issues_search", 3450, 5000],
+        ["github_pull_requests_list", 0, 0.8],
+        ["calendar_events_today", 0.06, 0.6],
+        ["ghost_recall", 0.12, 0.5],
+        ["ghost_ask_agent", 0.2, 1],
+        ["ghost_docs_search", 0.28, 0.7],
+        ["linear_issues_search", 0.34, 0.9],
       ];
       for (const [name, out, back] of six) {
         const cid = id();
-        call(out, name, cid);
-        done(back, name, cid);
+        call(from + Math.round(out * span), name, cid);
+        done_(from + Math.round(back * span), name, cid);
       }
-      at(5600, () => this.reply("Three issues are still open, two pull requests wait on review, and the review is at four.", 2800));
+      at(reply.at, () => this.reply(reply.text, reply.ms));
       const g = id();
-      call(8600, "github_issue_list", g);
-      done(8600 + 400, "github_issue_list", g);
-      at(9200, () => {
+      call(reply.at + reply.ms + 50, "github_issue_list", g);
+      done_(ask.at - 50, "github_issue_list", g);
+      at(ask.at, () => {
         this.propose({
           source: "github",
           operation: "github_issue_write",
@@ -808,25 +836,33 @@ export class MockDaemon {
           summary: "Close app#151 as a duplicate of #148",
           rationale: "Same login bug; 148 has the fix in review.",
         });
-        this.reply("One more: app 151 duplicates 148. Close it?", 2400);
+        this.reply(ask.text, ask.ms);
       });
-      at(12_400, () => {
+      at(yes.at, () => {
         if (this.pending) this.act("you_started");
       });
-      at(13_200, () => {
+      at(yes.at + yes.ms, () => {
         if (!this.pending) return;
         this.act("you_stopped");
-        this.addTurn("user", "Yes.", "voice");
-        this.heard("Yes.");
-        this.confirm();
+        this.addTurn("user", yes.text, "voice");
+        this.heard(yes.text);
       });
-      at(14_800, () => {
+      at(done.at, () => {
+        if (this.pending) this.confirm(done.ms);
+      });
+      at(bye.at, () => {
         this.pushStatus({ ending: true });
-        this.reply("Talk soon.", 1200);
+        this.reply(bye.text, bye.ms);
       });
-      at(18_500, loop);
+      at(t.loop_ms, loop);
     };
     loop();
+  }
+  /** Ghost's level now on the site's loop, from the rendered clip; null outside it. */
+  private siteLevel(): number | null {
+    if (this.siteLoopAt === null) return null;
+    const v = SITE_TURN.voice;
+    return v.levels[Math.floor((Date.now() - this.siteLoopAt) / v.window_ms)] ?? 0;
   }
   private emit(e: GhostEvent) {
     for (const l of this.listeners) l(e);
@@ -1065,14 +1101,15 @@ export class MockDaemon {
     this.pushStatus();
     return entry ?? null;
   }
-  private confirm(): OutcomeView {
+  /** Says yes to the waiting change; `replyMs` is how long "Done" takes when a clip sets it. */
+  private confirm(replyMs?: number): OutcomeView {
     const p = this.pending;
     if (!p) throw new HttpError(409, "Nothing is waiting for your okay.");
     this.settlePending("executed");
     const outcome: OutcomeView = { proposal_id: p.id, status: "success", summary: p.summary.replace(/^On [^:]+: /, ""), target: p.target, applied: [p.operation], state_now: "closed", error: null, failed_step: null };
     this.emit({ type: "outcome", outcome, via: "ui" });
     const short = shortName(p.target);
-    this.reply(`Done. ${short[0].toUpperCase()}${short.slice(1)} is closed.`);
+    this.reply(`Done. ${short[0].toUpperCase()}${short.slice(1)} is closed.`, replyMs);
     return outcome;
   }
 
@@ -2072,6 +2109,11 @@ export class MockDaemon {
   dispose() {
     this.hear.dispose();
     for (const t of this.timers) clearTimeout(t);
+    if (this.voiceTimer) clearInterval(this.voiceTimer);
+    if (this.reachTimer) clearInterval(this.reachTimer);
+    this.voiceTimer = null;
+    this.reachTimer = null;
+    this.siteLoopAt = null;
     this.listeners.clear();
   }
 }

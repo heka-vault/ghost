@@ -9,6 +9,8 @@
     "site:build": "astro build",
     "site:preview": "astro preview --port 4321",
     "site:stills": "node scripts/stills.mjs",
+    "site:sound-check": "node scripts/sound-check.mjs",
+    "site:audio": "uv run -q --project ../tools/oracle python -I scripts/audio.py",
     "site:check": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {

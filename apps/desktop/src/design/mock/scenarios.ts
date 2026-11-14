@@ -78,9 +78,10 @@ export interface Scenario {
    */
   floatingTour?: boolean;
   /**
-   * The site's hero (heyghost.app, `site/src/pages/float.astro`): a cut of the tour that repeats
-   * every 18.5 s with no long quiet stretch: the wake at 0.6 s, six places from 2.6 s, the reply
-   * from 5.6 s, a yes waiting from 9.2 s and said at 13.2 s, the goodbye at 14.8 s.
+   * The site's hero (heyghost.app, `site/src/pages/float.astro`): one turn on the clock of the
+   * site's sound (`fixtures/floating-site-turn.json`, from site/audio/turn.json), every 24.6 s:
+   * the wake at 1.2 s, six places while Ghost thinks, the reply from 6.1 s, a yes waiting from
+   * 11.7 s and said at 17.2 s, "Done" at 18.3 s, the goodbye at 21 s.
    */
   floatingSite?: boolean;
   /** The realtime voice chosen (ADR 0063), its key in the vault, a day of use and a check. */
@@ -111,7 +112,7 @@ export const SCENARIOS: Scenario[] = [
   { name: "pieces", label: "Said in pieces", description: "A live session; one spoken sentence arrives in three pieces with pauses, then Ghost answers.", daemon: true, phase: "listening", modelsReady: true, session: "ghost", pending: false, configured: true, data: "normal", pieces: true },
   { name: "floating", label: "Floating room", description: "The floating room's whole sequence, over and over: the wake, your turn, calls, the reply, a yes, a question, goodbye.", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: true, data: "normal", floating: true },
   { name: "floating-tour", label: "Floating room, the tour", description: "The README's pictures: one whole turn in 12 s with six places, then a change waiting for a yes, then an agent's question, once.", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: true, data: "normal", floatingTour: true },
-  { name: "floating-site", label: "Floating room, the site", description: "The site's hero: one turn with six places, a reply, a change waiting for a yes, the yes and the goodbye, every 18.5 s.", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: true, data: "normal", floatingSite: true },
+  { name: "floating-site", label: "Floating room, the site", description: "The site's hero: one turn with six places, a reply, a change waiting for a yes, the yes and the goodbye, on the clock of the site's sound (every 24.6 s).", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: true, data: "normal", floatingSite: true },
   { name: "realtime", label: "Realtime voice", description: "The operator chose the realtime voice: Settings › Sound shows the provider, today’s spend, the cap and a check.", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: true, data: "normal", realtime: true },
   { name: "busy", label: "Busy", description: "Months of use: many lines, 200 audit rows, seven apps, one of them not connecting.", daemon: true, phase: "listening", modelsReady: true, session: "legal", pending: false, configured: true, data: "busy" },
 ];

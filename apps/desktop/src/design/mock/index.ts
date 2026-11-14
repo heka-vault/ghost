@@ -36,7 +36,14 @@ import { SCENARIOS, type Scenario, scenarioByName } from "./scenarios";
 
 export { SCENARIOS } from "./scenarios";
 
-export function createMock(name: string): { transport: Transport; design: DesignState } {
+/**
+ * The mock for scenario `name`. `extra.onSiteLoop` is called as the `floating-site` loop starts
+ * each turn (the site's sound follows it); `dispose` stops every timer it set.
+ */
+export function createMock(
+  name: string,
+  extra: { onSiteLoop?: () => void } = {},
+): { transport: Transport; design: DesignState; dispose: () => void } {
   const params = new URLSearchParams(window.location.search);
   const phone = params.get("phone");
   const base = scenarioByName(name);
@@ -56,6 +63,7 @@ export function createMock(name: string): { transport: Transport; design: Design
     skillSearch: params.get("skillsearch") === "down" ? "down" : null,
     vault: (["locked", "import", "broken"] as const).find((v) => v === params.get("vault")) ?? null,
     hear: (["recording", "countdown", "check", "problem", "scoring"] as const).find((v) => v === params.get("hear")) ?? null,
+    onSiteLoop: extra.onSiteLoop,
   });
   const latency = Number(params.get("latency") ?? 140);
 
@@ -136,5 +144,5 @@ export function createMock(name: string): { transport: Transport; design: Design
       window.location.href = scenarioHref(next, path);
     },
   };
-  return { transport, design };
+  return { transport, design, dispose: () => daemon.dispose() };
 }
