@@ -2283,6 +2283,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "toml 0.8.2",
+ "toml_edit 0.20.2",
  "tracing",
  "tracing-subscriber",
  "unicode-normalization",

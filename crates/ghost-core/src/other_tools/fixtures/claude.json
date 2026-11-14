@@ -1,0 +1,40 @@
+{
+  "numStartups": 12,
+  "theme": "dark",
+  "oauthAccount": {"displayName": "Someone"},
+  "mcpServers": {
+    "github": {
+      "type": "http",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "headers": {"Authorization": "Bearer ghp_FIXTUREfixtureFIXTUREfixture0001"}
+    },
+    "airtable": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "airtable-mcp-server"],
+      "env": {"AIRTABLE_API_KEY": "patFIXTURE.fixture0123456789", "LOG_LEVEL": "info"}
+    },
+    "ghost": {
+      "type": "stdio",
+      "command": "/usr/lib/heka-ghost-desktop/ghostd",
+      "args": ["mcp", "serve", "--client", "claude-code"]
+    },
+    "api-server": {
+      "type": "http",
+      "url": "${API_BASE_URL:-https://api.example.com}/mcp",
+      "headers": {"Authorization": "Bearer ${API_KEY}"}
+    },
+    "old-events": {"type": "sse", "url": "https://sse.example.com/sse"}
+  },
+  "projects": {
+    "@HOME@/code/site": {
+      "allowedTools": [],
+      "mcpServers": {
+        "stripe": {"type": "http", "url": "https://mcp.stripe.com"}
+      }
+    },
+    "/etc": {
+      "mcpServers": {"outside": {"command": "true"}}
+    }
+  }
+}

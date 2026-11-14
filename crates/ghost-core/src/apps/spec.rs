@@ -1047,6 +1047,76 @@ pub(crate) fn edit_keyed(text: &str, name: &str, entry: Option<Value>) -> Result
     Ok(pretty(&Ordered::Object(raw)))
 }
 
+/// Another tool's JSON file (ADR 0068) with the entry at `path` (`mcpServers`, `ghost`) put
+/// or removed: every other key, at every level, and their order kept. A file that is not a
+/// JSON object, or whose objects on the way are not objects, is refused, never overwritten.
+pub(crate) fn edit_json_at(
+    text: &str,
+    path: &[&str],
+    entry: Option<Value>,
+) -> Result<String, String> {
+    let raw = if text.trim().is_empty() {
+        Ordered::Object(IndexMap::new())
+    } else {
+        serde_json::from_str::<Ordered>(text).map_err(|e| format!("it is not plain JSON ({e})"))?
+    };
+    let Ordered::Object(mut top) = raw else {
+        return Err("it is not a JSON object".into());
+    };
+    let Some((last, parents)) = path.split_last() else {
+        return Err("no place to write".into());
+    };
+    let mut at = &mut top;
+    for key in parents {
+        if !at.contains_key(*key) {
+            if entry.is_none() {
+                return Ok(pretty(&Ordered::Object(top)));
+            }
+            at.insert((*key).to_string(), Ordered::Object(IndexMap::new()));
+        }
+        match at.get_mut(*key) {
+            Some(Ordered::Object(m)) => at = m,
+            _ => return Err(format!("its {key} is not an object")),
+        }
+    }
+    match entry {
+        Some(v) => {
+            at.insert((*last).to_string(), Ordered::from_value(v));
+        }
+        None => {
+            at.shift_remove(*last);
+        }
+    }
+    Ok(pretty(&Ordered::Object(top)))
+}
+
+/// The entries of the object at `path` in a JSON text, in the file's order (ADR 0068): what
+/// another tool lists first comes first. None when the path is not there.
+pub(crate) fn json_entries_at(
+    text: &str,
+    path: &[&str],
+) -> Result<Option<Vec<(String, Value)>>, String> {
+    let raw = serde_json::from_str::<Ordered>(text).map_err(|e| format!("not JSON ({e})"))?;
+    let mut at = &raw;
+    for key in path {
+        match at {
+            Ordered::Object(m) => match m.get(*key) {
+                Some(v) => at = v,
+                None => return Ok(None),
+            },
+            _ => return Ok(None),
+        }
+    }
+    match at {
+        Ordered::Object(m) => Ok(Some(
+            m.iter()
+                .map(|(k, v)| (k.clone(), v.clone().into_value()))
+                .collect(),
+        )),
+        _ => Err(format!("{} is not an object", path.join("."))),
+    }
+}
+
 /// Write a file of Ghost's folder atomically, 0600.
 pub(crate) fn write_folder_file(path: &Path, text: &str) -> Result<(), AppError> {
     write_private(path, text)
