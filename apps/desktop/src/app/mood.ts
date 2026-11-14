@@ -2,7 +2,7 @@
  * Wisp's mood on the rail and in the room, from the session's phase. Plain TypeScript, so the
  * tests run it without React.
  */
-import type { GhostPhase } from "@ghost/ui";
+import type { GhostPhase, MarkState } from "@ghost/ui";
 
 export type Mood = "listening" | "thinking" | "speaking" | "starting" | "offline" | "passive" | "hold";
 
@@ -16,4 +16,18 @@ export function moodOf(phase: GhostPhase, off: boolean, typed = false): Mood {
   if (phase === "listening" && typed) return "passive";
   if (phase === "listening" || phase === "thinking" || phase === "speaking" || phase === "starting" || phase === "offline") return phase;
   return "passive";
+}
+
+/**
+ * The mark's state (docs/design-system.md, The mark): the light's colour and the ring's lit arc
+ * on the rail's chip and the tray. `pending`: a change waits for a yes (amber wins over the
+ * phase, as the floating room's).
+ */
+export function markStateOf(phase: GhostPhase, off: boolean, pending = false): MarkState {
+  if (off) return "off";
+  if (pending) return "waiting";
+  if (phase === "listening") return "listening";
+  if (phase === "thinking") return "reaching";
+  if (phase === "speaking") return "speaking";
+  return "idle";
 }

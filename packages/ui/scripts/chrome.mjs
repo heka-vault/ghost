@@ -1,7 +1,7 @@
 /**
  * Headless Chrome over the DevTools protocol, the way scripts/floating-shots.mjs drives it: no
- * Playwright, no Puppeteer, Node 22+ (its own WebSocket). Opens a file, waits for fonts, and
- * captures whole pages, elements by selector, or exact clips at a given device scale.
+ * Playwright, no Puppeteer, Node 22+ (its own WebSocket). Opens a file and captures exact clips.
+ * Used by marks.mjs to turn the mark's SVG into pixels with the renderer the apps draw it with.
  */
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";

@@ -2,10 +2,11 @@
  * Mascot workbench (#/mascot): Wisp at every size and on every tile, live, with the idle loop and
  * reduced motion to toggle; every frame of its motion below (#/mascot/frames on its own).
  */
-import { type ReactNode, useState } from "react";
+import { ARCS, MARK_STATES, type MarkState, markSvg } from "@ghost/ui";
+import { useState } from "react";
 
 import type { RouteProps } from "../../app/routes";
-import { Badge, Button, Card, Mascot, Page, Section, SegmentedControl, Switch } from "../../ui";
+import { Badge, Button, Card, GhostChip, Mascot, Page, Section, SegmentedControl, Switch } from "../../ui";
 import { Frames } from "./frames";
 import "./mascot.css";
 
@@ -15,6 +16,7 @@ export default function MascotPrototype({ params }: RouteProps) {
   const [hovered, setHovered] = useState(false);
   const [trigger, setTrigger] = useState(0);
   const [mood, setMood] = useState<Mood>("passive");
+  const [lit, setLit] = useState(true);
   // Off follows prefers-reduced-motion rather than overriding it.
   const common = { hovered, trigger, idle, mood, still: still || undefined };
   const framesOnly = params.view === "frames";
@@ -23,18 +25,19 @@ export default function MascotPrototype({ params }: RouteProps) {
       width="wide"
       title="Mascot"
       eyebrow={<Badge size="sm" variant="outline">Prototype</Badge>}
-      description="Wisp, Ghost’s mascot. Point at the card to play it the way the desktop app does; Play as a tap plays it the way the phone does."
+      description="Wisp, Ghost’s mascot and mark (hem with hands). Point at the card to play it the way the desktop app does; Play as a tap plays it the way the phone does. Lit is Ghost’s own look; an agent’s Wisp is flat in its colour."
       actions={
         <div className="masc-toggles">
           <Switch checked={idle} onChange={setIdle} label="Idle loop" size="sm" />
           <Switch checked={still} onChange={setStill} label="Reduced motion" size="sm" />
+          <Switch checked={lit} onChange={setLit} label="Lit" size="sm" />
         </div>
       }
     >
       {!framesOnly && (
         <Card padding="none" className="masc-card" onPointerEnter={(e) => e.pointerType === "mouse" && setHovered(true)} onPointerLeave={() => setHovered(false)}>
           <div className="masc-stage" style={{ color: `var(--phase-${mood === "hold" ? "passive" : mood})` }}>
-            <Mascot {...common} size={256} title="Wisp, Ghost’s mascot" />
+            <Mascot {...common} size={256} title="Wisp, Ghost’s mascot" lit={lit ? MARK_STATES[LIGHT[mood]].tint : undefined} />
           </div>
           <div className="masc-moods">
             <SegmentedControl aria-label="Voice phase" size="sm" options={MOODS.map((m) => ({ value: m, label: MOOD_LABEL[m] }))} value={mood} onChange={setMood} />
@@ -52,11 +55,11 @@ export default function MascotPrototype({ params }: RouteProps) {
                 <figcaption className="t-caption t-3">Line</figcaption>
               </figure>
               <figure className="masc-size">
-                <Tile size={28}><Mascot {...common} size={18} /></Tile>
+                <GhostChip size={28} hovered={hovered} trigger={trigger} />
                 <figcaption className="t-caption t-3">Mark 28</figcaption>
               </figure>
               <figure className="masc-size">
-                <Tile size={64}><Mascot {...common} size={56} /></Tile>
+                <GhostChip size={64} hovered={hovered} trigger={trigger} />
                 <figcaption className="t-caption t-3">Mark 64</figcaption>
               </figure>
               <figure className="masc-size">
@@ -74,6 +77,26 @@ export default function MascotPrototype({ params }: RouteProps) {
           </div>
         </Card>
       )}
+      {!framesOnly && (
+        <Section title="The mark" description="The still mark from @ghost/ui mark.ts at its real pixels (the ring of ticks from 128), and the rail’s chip in each state.">
+          <div className="masc-row" aria-label="Still marks">
+            {[16, 24, 32, 48, 64, 128, 256].map((px) => (
+              <figure key={px} className="masc-size">
+                <img width={px} height={px} alt="" src={`data:image/svg+xml;utf8,${encodeURIComponent(markSvg(px))}`} />
+                <figcaption className="t-caption t-3 t-num">{px}</figcaption>
+              </figure>
+            ))}
+          </div>
+          <div className="masc-row" aria-label="States">
+            {(Object.keys(ARCS) as MarkState[]).map((st) => (
+              <figure key={st} className="masc-size">
+                <GhostChip size={44} ring="arc" state={st} />
+                <figcaption className="t-caption t-3">{MARK_STATES[st].name}</figcaption>
+              </figure>
+            ))}
+          </div>
+        </Section>
+      )}
       <Section title="Every frame" description="The real motion machine on a simulated clock. Large frames are 96px; the pair under each is 24 and 16.">
         <Frames />
       </Section>
@@ -85,7 +108,5 @@ const MOODS = ["passive", "starting", "listening", "thinking", "speaking", "hold
 type Mood = (typeof MOODS)[number];
 const MOOD_LABEL: Record<Mood, string> = { passive: "Not active", starting: "Starting", listening: "Listening", thinking: "Thinking", speaking: "Speaking", hold: "Checked out", offline: "Offline" };
 
-/** The app mark's accent tile, as GhostMark draws it, holding the live mascot. */
-function Tile({ size, children }: { size: number; children: ReactNode }) {
-  return <span className="g-mark" style={{ width: size, height: size, borderRadius: Math.round(size * 0.28) }}>{children}</span>;
-}
+/** The mark's light per voice phase. */
+const LIGHT: Record<Mood, MarkState> = { passive: "idle", starting: "idle", listening: "listening", thinking: "reaching", speaking: "speaking", hold: "idle", offline: "off" };

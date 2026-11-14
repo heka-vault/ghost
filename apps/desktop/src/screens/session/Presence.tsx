@@ -14,7 +14,7 @@
  * speaks, so nothing re-renders twenty times a second. Reduced motion: Wisp holds the mood's one
  * pose, the halo stands at a middle size, the rings and the arc stand still.
  */
-import { lineHue, useGhost } from "@ghost/ui";
+import { lineHue, MARK_STATES, type MarkState, useGhost } from "@ghost/ui";
 import { type CSSProperties, useEffect, useRef } from "react";
 
 import { Mascot, cx } from "../../ui";
@@ -22,6 +22,18 @@ import type { StageState } from "./Stage";
 
 /** A level older than this is stale: the voice stopped before its last 0 arrived. */
 const STALE_MS = 250;
+
+/** The mark's light per state, for Ghost's own lit Wisp (an agent's stays flat in its colour). */
+const LIGHT: Record<StageState, MarkState> = {
+  speaking: "speaking",
+  you: "listening",
+  working: "reaching",
+  hold: "idle",
+  listening: "listening",
+  ending: "idle",
+  phone: "listening",
+  offline: "off",
+};
 
 const MOOD: Record<StageState, string | null> = {
   speaking: "speaking",
@@ -86,7 +98,7 @@ export function Presence({ state, slug, size, className }: { state: StageState; 
       )}
       {state === "working" && <span className="presence__arc" />}
       <span className="presence__wisp">
-        <Mascot size={Math.round(size * 0.6)} mood={MOOD[state]} idle={state === "listening" || state === "phone"} level={state === "speaking" ? voice : undefined} />
+        <Mascot size={Math.round(size * 0.6)} mood={MOOD[state]} idle={state === "listening" || state === "phone"} level={state === "speaking" ? voice : undefined} lit={slug === "ghost" ? (state === "offline" ? "#9aa3b2" : MARK_STATES[LIGHT[state]].tint) : undefined} />
       </span>
     </span>
   );

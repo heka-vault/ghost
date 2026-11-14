@@ -28,14 +28,15 @@ export interface Ctx {
 
 /** Which drawing a size gets. */
 export interface Detail {
-  /** Under 24px: the simplified body, like GHOST_PATH_SMALL. */
+  /** Under 24px: the larger eyes of GHOST_PATH_SMALL. */
   simple: boolean;
-  /** 40px and up: props (Wisp's arms), in a padded viewBox. */
+  /** 32px and up: props (Wisp's mitts, the thinking dots, the hold's "z"), in a padded viewBox. */
   props: boolean;
 }
 
+/** The size ladder of figure.ts: the mitts from 32 px (`MITTS_FROM`), the small eyes under 24. */
 export function detailFor(size: number): Detail {
-  return { simple: size < 24, props: size >= 40 };
+  return { simple: size < 24, props: size >= 32 };
 }
 
 /** An element of a character's drawing. Static attributes are React/react-native-svg prop names. */

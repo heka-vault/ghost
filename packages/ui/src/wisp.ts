@@ -1,23 +1,28 @@
 /**
- * Wisp, Ghost's mascot: a round spirit with a curl of a tail, the eyes cut out, one color
- * (currentColor) so it sits on the canvas, a line's tile and the accent tile alike. Hover or tap
- * and it bounces up, grins and waves, then watches you with a small smile; leave and it settles
- * back to exactly the brand glyph.
+ * Wisp, Ghost's mascot: a round spirit with a rounded three-lobed hem and two mitts (the mark of
+ * November 2026, "hem with hands"), the eyes cut out, one colour (currentColor) or lit from
+ * within (the Mascot's `lit`). Hover or tap and it bounces up, grins and waves, then watches you;
+ * leave and it settles back to exactly the brand glyph. The hem ripples where the tail swung.
  *
- * Plain data and math on the brand's 24 grid, driven by the machine in mascot.ts. The brand
- * glyph (GHOST_PATH) is this drawing at rest, so the still mark and the live one are the same.
+ * Plain data and math on the brand's 24 grid, driven by the machine in mascot.ts. The body, the
+ * mitts and the eyes are figure.ts's, the same functions every still mark and icon is drawn
+ * from (mark.ts), so the still mark and the live one are the same drawing.
  */
+import { EYES as FIGURE_EYES, hemPath, mittPaths, wispPath } from "./figure";
 import { blink, bodyTransform, type Character, clamp, type Detail, type El, eye, type Frame, kf, n, pose, type Scene, smooth, wave } from "./mascot";
 
 const HOLE = { fill: "#000" };
 const INK = { fill: "currentColor" };
 const LINE = { fill: "none", stroke: "currentColor", strokeLinecap: "round", strokeLinejoin: "round" } as const;
+/** The body and mitts: filled, and marked so the Mascot can light them (its `lit`). */
+const FLESH = { fill: "currentColor", "data-flesh": 1 } as const;
 const CUT = { fill: "none", stroke: "#000", strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
 /**
  * Every animated quantity. Body: x, y, r(otation), sx/sy (squash), op(acity). Eyes: ex/ey (look),
  * es (size), bl (blink), hp (grin arcs), sl (shut, the sleeping arcs). Mouth: sm (smile),
- * mo (talking mouth, how open), mv (talking mouth shown). sw: tail swing. aL/aR: arms (deg).
+ * mo (talking mouth, how open), mv (talking mouth shown). sw: the hem's ripple (-1..1).
+ * aL/aR: the mitts' angles (deg; a positive aL and a negative aR raise them).
  * d1-d3: thinking dots. zo/zy: the "z" of hold, shown and risen.
  */
 const REST: Frame = {
@@ -27,30 +32,32 @@ const REST: Frame = {
   d1: 0, d2: 0, d3: 0, zo: 0, zy: 0,
 };
 
-/** The eyes: centers and radii, for the regular drawing and the simple one used under 24px. */
-const EYES = {
-  regular: { lx: 9.5, rx_: 14.5, y: 10.3, rx: 1.25, ry: 1.65, k: 1 },
-  simple: { lx: 9.5, rx_: 14.5, y: 10.4, rx: 1.4, ry: 1.8, k: 0.7 },
-};
+/** The eyes: centres and radii (figure.ts), for the regular drawing and the simple one used under 24px. */
+const eyesOf = (e: (typeof FIGURE_EYES)["regular"], k: number) => ({ lx: e[0][0], rx_: e[1][0], y: e[0][1], rx: e[0][2], ry: e[0][3], k });
+const EYES = { regular: eyesOf(FIGURE_EYES.regular, 1), simple: eyesOf(FIGURE_EYES.small, 0.7) };
 
-/** A round head tapering into a tail that curls right; `s` (-1..1) swings the tail. */
-function body(s: number): string {
-  const tx = 18.6 + s * 1.7;
-  const ty = 22.9 - s * 0.9;
-  return (
-    `M5 10A7 7 0 0 1 19 10C19 14.5 17.2 17.6 16.2 19.8` +
-    `C${n(15.6 + s * 0.4)} 21.2 ${n(16.8 + s * 0.9)} ${n(22.6 - s * 0.5)} ${n(tx)} ${n(ty)}` +
-    `C${n(16 + s * 0.6)} ${n(23.6 - s * 0.3)} 12.6 22.6 10.6 21.2C6.8 18.8 5 15 5 10Z`
-  );
-}
+/** The body: Wisp's head, straight sides and the three-lobed hem; `s` (-1..1) ripples the hem. */
+const body = hemPath;
 
-const ellipse = (cx: number, cy: number, rx: number, ry: number) =>
-  `M${n(cx - rx)} ${n(cy)}a${n(rx)} ${n(ry)} 0 1 0 ${n(2 * rx)} 0a${n(rx)} ${n(ry)} 0 1 0 ${n(-2 * rx)} 0Z`;
+/**
+ * Where the drawing's middle sits on the 24 grid (the body runs from y 3 to about 20.3), so the
+ * viewBox centres it.
+ */
+const MID_Y = 11.65;
+/**
+ * Half the viewBox: the hem ends higher than the tail did (y 20.3, not 23.6), so the box is
+ * drawn 10% tighter than the 24 grid to keep Wisp the size it was in every placement. With
+ * props, room for the raised mitts, the thinking dots and the hold's "z".
+ */
+const HALF = 10.8;
+const PROPS_HALF = 14.4;
 
-/** Wisp at rest as one evenodd path, the eyes cut out: the brand glyph. */
+/**
+ * Wisp at rest as one path for a single colour, the eyes cut out (nonzero fill rule, never
+ * evenodd): the brand glyph. `simple` is the drawing under 32 px: no mitts, larger eyes.
+ */
 export function wispGlyph(simple: boolean): string {
-  const e = simple ? EYES.simple : EYES.regular;
-  return body(0) + ellipse(e.lx, e.y, e.rx, e.ry) + ellipse(e.rx_, e.y, e.rx, e.ry);
+  return wispPath({ mitts: !simple, small: simple });
 }
 
 const happyArc = (cx: number, cy: number) => `M${n(cx - 1.2)} ${n(cy + 0.5)}Q${n(cx)} ${n(cy - 1.3)} ${n(cx + 1.2)} ${n(cy + 0.5)}`;
@@ -80,7 +87,7 @@ const amp = (d: Detail) => (d.props ? 1 : d.simple ? 0.45 : 0.65);
 export const WISP: Character = {
   id: "wisp",
   name: "Wisp",
-  personality: "A soft, round spirit with a curl of a tail.",
+  personality: "A soft, round spirit with a rippling hem and two small mitts.",
   gesture: "Bounces up, squeezes its eyes into a grin and waves hello, then watches you with a small smile.",
   rest: REST,
   gestureMs: 1000,
@@ -217,7 +224,7 @@ export const WISP: Character = {
   },
   scene(d): Scene {
     return {
-      viewBox: d.props ? "-4 -4 32 32" : "0 0 24 24",
+      viewBox: d.props ? `${n(12 - PROPS_HALF)} ${n(MID_Y - PROPS_HALF)} ${n(2 * PROPS_HALF)} ${n(2 * PROPS_HALF)}` : `${n(12 - HALF)} ${n(MID_Y - HALF)} ${n(2 * HALF)} ${n(2 * HALF)}`,
       holes: [
         { tag: "ellipse", part: "eyeL", props: HOLE },
         { tag: "ellipse", part: "eyeR", props: HOLE },
@@ -229,11 +236,13 @@ export const WISP: Character = {
           ? []
           : [{ tag: "path", part: "smile", props: { ...CUT, strokeWidth: 1 } } satisfies El, { tag: "ellipse", part: "mouth", props: HOLE } satisfies El]),
       ],
-      body: [{ tag: "path", part: "body", props: INK }],
+      // The mitts are part of the body: filled with it, under the same mask, lit with it.
+      body: [
+        { tag: "path", part: "body", props: FLESH },
+        ...(d.props ? [{ tag: "path", part: "mittL", props: FLESH } satisfies El, { tag: "path", part: "mittR", props: FLESH } satisfies El] : []),
+      ],
       over: d.props
         ? [
-            { tag: "line", part: "armL", props: { ...LINE, strokeWidth: 2.3, x1: 5.8, y1: 14.2, x2: 3, y2: 16.6 } },
-            { tag: "line", part: "armR", props: { ...LINE, strokeWidth: 2.3, x1: 18.2, y1: 14.2, x2: 21, y2: 16.6 } },
             ...DOTS.map((dot, i) => ({ tag: "circle", part: `dot${i + 1}`, props: { ...INK, ...dot } }) satisfies El),
           ]
         : [],
@@ -253,7 +262,7 @@ export const WISP: Character = {
     const arcOpacity = n(clamp((f.hp - 0.45) * 6, 0, 1));
     const shutOpacity = n(clamp((f.sl - 0.45) * 6, 0, 1) * (1 - clamp(f.hp * 2, 0, 1)));
     const out: ReturnType<Character["attrs"]> = {
-      root: { transform: bodyTransform(0, f.y * a, f.r * (d.props ? 1 : 0.7), 12, 13, 1 + (f.sx - 1) * a, 1 + (f.sy - 1) * a, 12, 22), opacity: n(f.op) },
+      root: { transform: bodyTransform(0, f.y * a, f.r * (d.props ? 1 : 0.7), 12, 13, 1 + (f.sx - 1) * a, 1 + (f.sy - 1) * a, 12, 20.3), opacity: n(f.op) },
       body: { d: body(f.sw * (d.props ? 1 : 0.6)) },
       eyeL: { ...eye(e.lx + ex, e.y + ey, e.rx * f.es, e.ry * f.es, lid), opacity: ovalOpacity },
       eyeR: { ...eye(e.rx_ + ex, e.y + ey, e.rx * f.es, e.ry * f.es, lid), opacity: ovalOpacity },
@@ -272,8 +281,9 @@ export const WISP: Character = {
       out.mouth = { cx: n(sx), cy: n(14.1 + ey * 0.4), rx: n(0.85 + 0.25 * f.mo), ry: n(0.22 + 1.0 * f.mo), opacity: n(clamp(f.mv, 0, 1)) };
     }
     if (d.props) {
-      out.armL = { transform: `rotate(${n(f.aL)} 5.8 14.2)` };
-      out.armR = { transform: `rotate(${n(f.aR)} 18.2 14.2)` };
+      const [mL, mR] = mittPaths(f.aL, f.aR);
+      out.mittL = { d: mL };
+      out.mittR = { d: mR };
       DOTS.forEach((_, i) => (out[`dot${i + 1}`] = { opacity: n(clamp(f[`d${i + 1}`], 0, 1)) }));
       out.z = { transform: `translate(${n(-f.zy * 0.35)} ${n(f.zy)})`, opacity: n(clamp(f.zo, 0, 1)) };
     }
@@ -282,9 +292,8 @@ export const WISP: Character = {
 };
 
 /**
- * Wisp saying hello, as one still pose: mid-wave, grinning, a little lifted. The icon the apps
- * use wherever the ghost stands for a line or for Ghost itself at 40px and up (below that the
- * arms are not drawn and the plain body is the icon).
+ * Wisp saying hello, as one still pose: mid-wave, grinning, a little lifted. A gesture of the
+ * live mascot, not the mark: the still mark has no smile (`WISP.rest`, docs/design-system.md).
  */
 export function wavePose(): Frame {
   const f = WISP.enter(0.5 * WISP.gestureMs, { look: { x: 0, y: 0 } });

@@ -14,11 +14,11 @@ import { AudioWaveform, Blocks, CircleArrowUp, Eye, FlaskConical, MonitorUp, Plu
 import { type ReactNode, Suspense, lazy, useRef, useState } from "react";
 
 import { useDesign } from "../design/context";
-import { IconButton, LineGlyph, Mascot, Tooltip, cx, formatShortcut, liveLabel, useLive, versionLine } from "../ui";
+import { GhostChip, IconButton, LineGlyph, Tooltip, cx, formatShortcut, liveLabel, useLive, versionLine } from "../ui";
 import { type RailAgent, railAgents } from "./railAgents";
 import { ListeningSwitch, useListeningShortcut } from "./ListeningSwitch";
 import { notListening, notListeningSub, sessionWords, typedSession } from "./listening";
-import { moodOf } from "./mood";
+import { markStateOf, moodOf } from "./mood";
 import { usePostureControl } from "./PostureContext";
 import { hrefFor, navigate, usePath } from "./router";
 import { navMatch } from "./routes";
@@ -123,7 +123,7 @@ export function Rail() {
           onPointerLeave={() => setHover(false)}
         >
           <span className="rail__wisp">
-            <Mascot size={36} mood={moodOf(phase, !!off, typed)} hovered={hover} title="" />
+            <GhostChip size={44} ring="arc" state={markStateOf(phase, !!off, !!status?.pending)} mood={moodOf(phase, !!off, typed)} hovered={hover} />
           </span>
           <span className="rail__state">{state}</span>
         </a>

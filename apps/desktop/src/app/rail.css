@@ -25,24 +25,8 @@
 .rail__presence.is-off { --hue: var(--danger); }
 .rail__presence:hover { background: var(--bg-hover); text-decoration: none; color: var(--text-1); }
 .rail__presence.is-current { background: var(--bg-nav-selected); box-shadow: var(--shadow-nav-selected); color: var(--text-1); }
-.rail__wisp {
-  position: relative; display: grid; place-items: center;
-  width: calc(var(--control-lg) + var(--space-3)); height: calc(var(--control-lg) + var(--space-3));
-  border-radius: var(--radius-full);
-  background: color-mix(in oklab, var(--hue) 12%, transparent);
-  box-shadow: inset 0 0 0 1.5px color-mix(in oklab, var(--hue) 55%, transparent);
-  color: var(--accent-text);
-  /* Whatever Wisp draws stays inside its ring: the drawing is overflow-visible for its arms
-     and lift, so nothing it paints may reach the page beside the rail. The radius leaves room
-     for the breathing ring (inset 2px, 1.5px wide, up to 1.04x). */
-  clip-path: circle(calc(50% + 6px));
-}
-.rail__presence:is(.is-listening, .is-thinking, .is-speaking, .is-starting) .rail__wisp::after {
-  content: ""; position: absolute; inset: calc(var(--space-0_5) * -1); border-radius: inherit;
-  box-shadow: 0 0 0 1.5px color-mix(in oklab, var(--hue) 45%, transparent);
-  animation: rail-breathe 2.4s var(--ease-in-out) infinite;
-}
-.rail__presence.is-off .rail__wisp { background: var(--danger-soft); box-shadow: inset 0 0 0 1.5px var(--danger-border); }
+/* The mark (GhostChip): its own tile, light and arc carry the state; nothing round it. */
+.rail__wisp { position: relative; display: grid; place-items: center; }
 .rail__state { font-size: var(--text-xs); line-height: var(--leading-xs); font-weight: var(--weight-medium); text-align: center; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rail__presence.is-off .rail__state { color: var(--danger); }
 .rail__tip { display: flex; flex-direction: column; gap: var(--space-0_5); }
@@ -223,7 +207,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .room-layer, .room-layer__glow, .rail__pulse, .room-work__live, .rail__presence .rail__wisp::after, .rail__agent .rail__agent-mark::after { animation: none !important; }
+  .room-layer, .room-layer__glow, .rail__pulse, .room-work__live, .rail__agent .rail__agent-mark::after { animation: none !important; }
   .posture__desk, .shell, .rail, .shell__main { transition: none !important; }
 }
 /* A new version (ADR 0066): quiet, in the accent, never a badge that counts. */

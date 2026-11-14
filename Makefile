@@ -57,7 +57,7 @@ endef
 .PHONY: help prereqs setup sync env passwords passwords-import echo-cancel echo-cancel-off demo-audio \
         dev daemon desktop desktop-web reload start stop restart \
         wake say status check latency restore-volumes \
-        lint fmt test deny typecheck contract web ci api-schema version release screenshots \
+        lint fmt test deny typecheck contract web ci api-schema version release screenshots marks \
         deploy deploy-rollback deploy-status service-on service-off service-logs service-install \
         perf perf-micro perf-llm perf-providers perf-hear perf-turns record wake-eval record-takes wake-takes-eval wake-check-replay wake-dynamics \
         wake-train wake-detectors wake-use wake-rollback \
@@ -144,6 +144,9 @@ desktop-web: ## the same UI in a browser at http://localhost:1420; ?mock=busy an
 
 screenshots: ## the README's screenshots and the floating room's from the mock UI (make desktop-web running; Chrome, ImageMagick, Node 22+): make screenshots [SHOTS="home apps"]
 	@scripts/screenshots.sh $(SHOTS)
+
+marks: ## the desktop's icons, tray icons and favicons from packages/ui/src/mark.ts (Chrome, ImageMagick, Node 22.15+); every variant: node packages/ui/scripts/marks.mjs all <dir>
+	@node packages/ui/scripts/marks.mjs desktop
 
 reload: ## rebuild and restart the daemon that make dev or make daemon runs, after a Rust change
 	@scripts/dev.sh reload

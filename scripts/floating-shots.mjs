@@ -35,7 +35,7 @@ const STILLS = [
   { name: "floating-question", query: "mock=floating-tour", at: 25500, crop: [560, 120, 720, 405] },
 ];
 /** The loop: one whole turn, the wake to the line again. */
-const LOOP = { name: "floating-loop", query: "mock=floating-tour", from: 300, to: 12_300, fps: 12 };
+const LOOP = { name: "floating-loop", query: "mock=floating-tour", from: 300, to: 12_300, fps: 30 };
 
 const selected = (name) => want.length === 0 || want.includes(name);
 
@@ -183,7 +183,7 @@ async function loop(cdp) {
   const webp = join(out, `${LOOP.name}.webp`);
   await magick([
     "-delay", String(Math.round(100 / LOOP.fps)), ...files,
-    "-quality", "70", "-define", "webp:method=6", "-loop", "0", webp,
+    "-quality", "60", "-define", "webp:method=6", "-loop", "0", webp,
   ]);
   console.log(`floating-shots: ${webp} (${files.length} frames at ${LOOP.fps} a second)`);
 }
