@@ -45,16 +45,22 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
-          GHOST_POSTHOG_KEY: ${{ secrets.POSTHOG_API_KEY }}
+          GHOST_POSTHOG_KEY: ${{ secrets.POSTHOG_PROJECT_KEY }}
         run: |
           if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
             echo "::error::the repository secret TAURI_SIGNING_PRIVATE_KEY is not set (docs/releasing.md, The update key)"
             exit 1
           fi
           if [ -z "$GHOST_POSTHOG_KEY" ]; then
-            echo "::error::the repository secret POSTHOG_API_KEY is not set (docs/releasing.md, Error reports)"
+            echo "::error::the repository secret POSTHOG_PROJECT_KEY is not set (docs/releasing.md, Error reports)"
             exit 1
           fi
+          # Only a project key (phc_, write-only, public by design) may be compiled in: a
+          # personal key in its place would ship an account's access inside the app.
+          case "$GHOST_POSTHOG_KEY" in
+            phc_*) ;;
+            *) echo "::error::POSTHOG_PROJECT_KEY is not a PostHog project key (phc_…); refusing to compile it in"; exit 1 ;;
+          esac
           pnpm tauri build --ci --config src-tauri/tauri.release.conf.json
       - name: collect
         run: |

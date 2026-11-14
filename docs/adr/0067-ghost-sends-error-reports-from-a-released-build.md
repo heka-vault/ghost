@@ -74,7 +74,7 @@ cutting); a quote left open cuts the message there. Deterministic code only, no 
 
 **Only a released build sends.** The project's key is compiled in from the build's
 environment (`option_env!("GHOST_POSTHOG_KEY")`); `.github/workflows/release.yml` sets it
-from the repository secret `POSTHOG_API_KEY` for the step that builds both binaries, a dry run
+from the repository secret `POSTHOG_PROJECT_KEY` for the step that builds both binaries, a dry run
 too, so the wiring is proven before a tag. Its install test points `GHOST_REPORTS_URL` at
 nothing and checks only `ghostd reports status`. With no key there is no sender: nothing is
 built, spooled, kept or sent; a checkout's build, a fork's and CI's report nothing. A developer

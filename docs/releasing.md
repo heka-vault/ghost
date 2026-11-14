@@ -220,7 +220,7 @@ assertions or no bundle type): Settings says it is a development build.
 
 A released Ghost sends error reports to the project's PostHog error tracking (ADR 0067,
 [error-reports.md](error-reports.md)). The project key is the repository secret
-`POSTHOG_API_KEY`; the release workflow's build step passes it as `GHOST_POSTHOG_KEY`, which
+`POSTHOG_PROJECT_KEY`; the release workflow's build step passes it as `GHOST_POSTHOG_KEY`, which
 `ghost-reports` compiles into `ghostd` and the shell (`option_env!`), and refuses to build
 without it. Nothing else has it: `make bundle`, CI and a checkout's build have no sender. A dry
 run builds with the key too, and its install test only checks that it is there (`ghostd
