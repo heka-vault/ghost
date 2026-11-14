@@ -169,7 +169,7 @@ const Q3_CLOSE: Seed = {
 
 const INFRA: Seed = {
   slug: "infra",
-  look: "hood:6",
+  look: "bell:6",
   name: "Infra",
   aliases: ["the infra repo", "ops"],
   job: "deploys, the ledger export, anything paging",

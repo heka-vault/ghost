@@ -45,6 +45,9 @@ describe("an agent's look", () => {
     expect(lookOf("ghost", "moth:2")).toEqual({ shape: "wisp", hue: 0 });
     expect(lookOf("ledger", null).shape).toBe("wisp");
     expect(lookOf("ledger", "star:5")).toEqual({ shape: "star", hue: 5 });
-    expect(AGENT_SHAPES.length).toBe(8);
+    expect(AGENT_SHAPES.length).toBe(7);
+    // The hood is retired (ADR 0061, amended): a look that still names it is no look.
+    expect(parseLook("hood:6")).toBeNull();
+    expect(lookOf("ledger", "hood:6").shape).toBe("wisp");
   });
 });
