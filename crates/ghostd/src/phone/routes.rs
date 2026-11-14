@@ -1035,6 +1035,21 @@ mod tests {
     // --- offers -----------------------------------------------------------------------
 
     #[tokio::test]
+    async fn the_phone_has_no_way_to_error_reports() {
+        // ADR 0067: the switch and the kept reports are the desk's only.
+        let p = phone();
+        let creds = pair(&p).await;
+        for (method, path, body) in [
+            ("GET", "/reports", None),
+            ("PUT", "/reports/choice", Some(json!({"send": false}))),
+            ("POST", "/reports", Some(json!({"type": "Error"}))),
+        ] {
+            let (r, _) = signed(&p.app, &creds, method, path, body).await;
+            assert_eq!(r.status, StatusCode::NOT_FOUND, "{method} {path}");
+        }
+    }
+
+    #[tokio::test]
     async fn offer_refused_while_busy_or_not_ready() {
         let p = phone();
         let creds = pair(&p).await;
