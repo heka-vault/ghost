@@ -54,6 +54,7 @@ import { ListeningButton } from "../../app/ListeningSwitch";
 import { RoomSettings } from "../../app/RoomSettings";
 import { listeningSentence, notListening } from "../../app/listening";
 import { VersionNotice, VersionRows } from "./About";
+import { ErrorReportsSection } from "./ErrorReports";
 import { UpdatesSection } from "./Updates";
 import { SpeechModelsRow } from "../onboarding/speech";
 import { type RouteProps, SETTINGS_PAGES, SETTINGS_SCREEN_PAGES } from "../../app/routes";
@@ -943,6 +944,7 @@ export default function SettingsScreen({ params: route }: RouteProps) {
               </Card>
             </Section>
             <UpdatesSection />
+            <ErrorReportsSection />
             {mock && Prototype && (
               <Suspense fallback={null}>
                 <Prototype only="privacy" />

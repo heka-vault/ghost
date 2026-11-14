@@ -37,15 +37,30 @@ jobs:
       - run: pnpm install --frozen-lockfile
       # The updater's artifacts are signed with the repository's key (ADR 0066); the key
       # has no password. Never printed: the bundler reads it from the environment.
+      # GHOST_POSTHOG_KEY: the error reports' project key (ADR 0067), compiled into ghostd and
+      # the shell (`option_env!`); a build without it, CI's and a checkout's, has no sender.
+      # A dry run builds with it too, so the wiring is proven before a tag; its install test
+      # below sends nothing.
       - name: the bundle, signed
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+          GHOST_POSTHOG_KEY: ${{ secrets.POSTHOG_PROJECT_KEY }}
         run: |
           if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
             echo "::error::the repository secret TAURI_SIGNING_PRIVATE_KEY is not set (docs/releasing.md, The update key)"
             exit 1
           fi
+          if [ -z "$GHOST_POSTHOG_KEY" ]; then
+            echo "::error::the repository secret POSTHOG_PROJECT_KEY is not set (docs/releasing.md, Error reports)"
+            exit 1
+          fi
+          # Only a project key (phc_, write-only, public by design) may be compiled in: a
+          # personal key in its place would ship an account's access inside the app.
+          case "$GHOST_POSTHOG_KEY" in
+            phc_*) ;;
+            *) echo "::error::POSTHOG_PROJECT_KEY is not a PostHog project key (phc_…); refusing to compile it in"; exit 1 ;;
+          esac
           pnpm tauri build --ci --config src-tauri/tauri.release.conf.json
       - name: collect
         run: |
@@ -76,7 +91,9 @@ jobs:
         run: |
           for image in ubuntu:24.04 ubuntu:26.04; do
             echo "::group::$image"
-            docker run --rm -e COMMIT="$(git rev-parse HEAD)" -v "$PWD/dist/bundle":/bundle:ro "$image" bash -ec '
+            # GHOST_REPORTS_URL points at nothing: no command here sends a report, and if one
+            # did it would go nowhere. `reports status` proves the key is compiled in.
+            docker run --rm -e COMMIT="$(git rev-parse HEAD)" -e GHOST_REPORTS_URL=http://127.0.0.1:9 -v "$PWD/dist/bundle":/bundle:ro "$image" bash -ec '
               apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq /bundle/*.deb >/dev/null
               ghostd version | tee /dev/stderr | grep -qF "release ${COMMIT:0:7}"
               ghostd restore-volumes
@@ -87,6 +104,7 @@ jobs:
               grep -q "^models: /usr/lib/heka-ghost-desktop/models$" <<<"$out"
               grep -q "Parakeet: .* is not there" <<<"$out"
               ! grep -q "scripts/onnxruntime.sh\|scripts/models.sh\|make models" <<<"$out"
+              ghostd reports status | tee /dev/stderr | grep -qx "error reports: on"
               ldd /usr/bin/heka-ghost-desktop /usr/bin/ghostd | { ! grep "not found"; }'
             echo "::endgroup::"
           done

@@ -868,6 +868,10 @@ async fn nothing_an_outside_client_must_not_reach_is_offered() {
         "hook",
         "catalog",
         "confirm",
+        // ADR 0067: error reports are the operator's switch.
+        "report",
+        "reports",
+        "telemetry",
     ];
     for t in &tools {
         let arguments: Vec<String> = t

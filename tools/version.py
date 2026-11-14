@@ -50,6 +50,7 @@ CRATES = (
     "ghost-core",
     "ghost-infer",
     "ghost-llm",
+    "ghost-reports",
     "ghost-rtc",
     "ghost-voice",
     "ghostd",

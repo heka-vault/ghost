@@ -14,6 +14,8 @@ path = "src/bin/ghost-perf.rs"
 [dependencies]
 ghost-core.workspace = true
 ghost-llm.workspace = true
+# Error reports (ADR 0067): a failed turn, by kind.
+ghost-reports.workspace = true
 ghost-audio.workspace = true
 ghost-infer.workspace = true
 ghost-api.workspace = true
