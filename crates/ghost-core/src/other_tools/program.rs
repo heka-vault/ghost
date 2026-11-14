@@ -32,7 +32,7 @@ pub const REQUIRED_SWITCHES: [&str; 17] = [
     "--output-format",
     "--include-partial-messages",
     "--verbose",
-    "--system-prompt",
+    "--system-prompt-file",
     "--tools",
     "--setting-sources",
     "--strict-mcp-config",
@@ -45,6 +45,16 @@ pub const REQUIRED_SWITCHES: [&str; 17] = [
     "--effort",
     "--model",
 ];
+
+/// Required switches the program's `--help` doesn't list, asked of its parser instead
+/// ([`takes`]). `--system-prompt-file` is in the CLI reference for every mode but appears in
+/// 2.1.325's help only inside `--bare`'s text, as `--system-prompt[-file]`. It is required:
+/// Ghost's prompt (the agent's persona, its memory, the operator's rules) never goes on the
+/// command line, which every user of the computer can read (`/proc/<pid>/cmdline`).
+pub const PROBED: [&str; 1] = ["--system-prompt-file"];
+/// An option no version has: the parser stops at the first unknown option and names it, so
+/// naming this one means every option before it was known.
+pub const PROBE_UNKNOWN: &str = "--ghost-probe-unknown";
 
 /// The versions Ghost was built and measured against: 2.1. Another major or minor still
 /// runs when it has every switch ([`REQUIRED_SWITCHES`]), with a note that says so.
@@ -89,6 +99,7 @@ pub fn parse_version(text: &str) -> Option<(u32, u32, u32)> {
 pub fn missing_switches(help: &str) -> Vec<&'static str> {
     REQUIRED_SWITCHES
         .into_iter()
+        .filter(|s| !PROBED.contains(s))
         .filter(|s| {
             !help
                 .split(|c: char| c.is_whitespace() || c == ',')
@@ -272,10 +283,7 @@ pub async fn look(binary: &Path, started: &HashMap<String, String>) -> Found {
     let version = ask(binary, &["--version"], &env)
         .await
         .and_then(|(_, out)| parse_version(&out).map(|(a, b, c)| format!("{a}.{b}.{c}")));
-    let missing = match ask(binary, &["--help"], &env).await {
-        Some((_, help)) => missing_switches(&help),
-        None => REQUIRED_SWITCHES.to_vec(),
-    };
+    let missing = missing_at(binary, started).await;
     // Signed out exits 1 and still prints the JSON.
     let sign_in = ask(binary, &["auth", "status", "--json"], &env)
         .await
@@ -288,13 +296,43 @@ pub async fn look(binary: &Path, started: &HashMap<String, String>) -> Found {
     }
 }
 
-/// The switches of [`REQUIRED_SWITCHES`] the program at `binary` lacks, from its own
-/// `--help` in [`clean_env`]; every one when it would not answer.
+/// Whether the program's parser knows `switch`: run `<switch> /dev/null --ghost-probe-unknown`
+/// and see which option it calls unknown. Nothing is read, nothing is asked of a model.
+pub async fn takes(binary: &Path, switch: &str, env: &BTreeMap<String, String>) -> bool {
+    let child = tokio::process::Command::new(binary)
+        .args([switch, "/dev/null", PROBE_UNKNOWN])
+        .env_clear()
+        .envs(env)
+        .current_dir(std::env::temp_dir())
+        .stdin(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .output();
+    let Ok(Ok(out)) = tokio::time::timeout(ASK_TIMEOUT, child).await else {
+        return false;
+    };
+    let said = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stderr),
+        String::from_utf8_lossy(&out.stdout)
+    );
+    said.contains(&format!("'{PROBE_UNKNOWN}'")) && !said.contains(&format!("'{switch}'"))
+}
+
+/// The switches of [`REQUIRED_SWITCHES`] the program at `binary` lacks: from its own
+/// `--help`, and [`PROBED`] from its parser, in [`clean_env`]; every one when it would not
+/// answer.
 pub async fn missing_at(binary: &Path, started: &HashMap<String, String>) -> Vec<&'static str> {
-    match ask(binary, &["--help"], &clean_env(started)).await {
+    let env = clean_env(started);
+    let mut missing = match ask(binary, &["--help"], &env).await {
         Some((_, help)) => missing_switches(&help),
-        None => REQUIRED_SWITCHES.to_vec(),
+        None => return REQUIRED_SWITCHES.to_vec(),
+    };
+    for switch in PROBED {
+        if !takes(binary, switch, &env).await {
+            missing.push(switch);
+        }
     }
+    missing
 }
 
 /// Where `claude` is on `PATH`: the first executable file of that name, absolute folders
@@ -449,6 +487,7 @@ mod tests {
             format!(
                 "#!/bin/sh\necho \"$* | ${{ANTHROPIC_AUTH_TOKEN:-none}} ${{CLAUDECODE:-none}}\" >> {log}\n\
                  case \"$1\" in\n--version) echo '2.1.325 (Claude Code)';;\n--help) cat {help};;\n\
+                 --system-prompt-file) echo \"error: unknown option '$3'\" >&2; exit 1;;\n\
                  auth) echo '{{\"loggedIn\": false, \"authMethod\": \"none\"}}'; exit 1;;\nesac\n",
                 log = log.display(),
                 help = help.display()
@@ -475,6 +514,7 @@ mod tests {
             [
                 "--version | none none",
                 "--help | none none",
+                "--system-prompt-file /dev/null --ghost-probe-unknown | none none",
                 "auth status --json | none none"
             ]
         );

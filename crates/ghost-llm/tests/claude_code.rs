@@ -74,7 +74,20 @@ impl Fake {
         .collect();
         let mut s = Settings::new(self.bin.clone(), "haiku", started);
         s.quiet_most = Duration::from_secs(20);
+        s.runtime_dir = self.run_dir();
         s
+    }
+
+    /// The runtime folder the processes' folders go in: a temp one, never the operator's.
+    fn run_dir(&self) -> PathBuf {
+        self.home.parent().unwrap().join("run")
+    }
+
+    /// The process folders in the runtime folder now.
+    fn folders(&self) -> Vec<PathBuf> {
+        std::fs::read_dir(self.run_dir())
+            .map(|d| d.flatten().map(|e| e.path()).collect())
+            .unwrap_or_default()
     }
 
     fn model(&self) -> ClaudeCode {
@@ -176,6 +189,87 @@ async fn a_text_reply_streams_as_the_events_an_http_model_gives_and_nothing_is_i
         fake.log("turns.jsonl")[0]["text"],
         "Say hello in five words."
     );
+}
+
+#[tokio::test]
+async fn the_prompt_is_a_private_file_never_the_command_line() {
+    use std::os::unix::fs::PermissionsExt;
+    let fake = Fake::new(json!({"turns": [[{"text": "Hello."}]]}));
+    let model = fake.model();
+    let persona = "You are Ledger. PERSONA-dry-exact. MEMORY-the-operator-banks-at-Halifax. \
+                   RULES-UK-dates-always.";
+    let mut c = Context::new(persona);
+    c.push(Message::user("Hi."));
+    let events = collect(&model, c).await;
+    assert_eq!(text_of(&events), "Hello.");
+    let runs = fake.sessions();
+    let argv: Vec<String> = serde_json::from_value(runs[0]["argv"].clone()).unwrap();
+    let line = argv.join(" ");
+    for part in persona.split_whitespace() {
+        assert!(
+            !line.contains(part),
+            "{part} is on the command line: {line}"
+        );
+    }
+    let (_, bearer) = relay_of(&fake);
+    let token = bearer.strip_prefix("Bearer ").unwrap();
+    assert!(!line.contains(token), "the bearer is on the command line");
+    // The program read Ghost's prompt from a 0600 file, in a 0700 folder of its own.
+    let seen = &fake.log("prompt.jsonl")[0];
+    assert_eq!(seen["text"], persona);
+    assert_eq!(seen["mode"], "0o600");
+    let folder = Path::new(seen["path"].as_str().unwrap())
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    assert!(folder.starts_with(fake.run_dir()));
+    let mode = std::fs::metadata(&folder).unwrap().permissions().mode();
+    assert_eq!(mode & 0o777, 0o700);
+    // Gone with the process.
+    drop(model);
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(!folder.exists(), "the prompt outlived its process");
+    assert!(fake.folders().is_empty());
+}
+
+#[tokio::test]
+async fn a_process_that_died_leaves_no_prompt_and_a_crashs_leftovers_go_at_the_next_start() {
+    let fake = Fake::new(json!({"turns": [[{"die": true}], [{"text": "Back."}]]}));
+    // What a Ghost killed mid-session left: its process folder, the prompt in it.
+    let left = fake.run_dir().join("p4194999-crashed");
+    std::fs::create_dir_all(&left).unwrap();
+    std::fs::write(left.join("system-prompt.md"), "an older persona").unwrap();
+    let model = fake.model();
+    let mut c = ctx(&["Hi."]);
+    let died = collect(&model, c.clone()).await;
+    assert!(died.iter().any(|e| e.is_err()));
+    assert!(
+        !left.exists(),
+        "a stopped Ghost's leftovers are swept at the next start"
+    );
+    assert!(
+        fake.folders().is_empty(),
+        "the dead process's folder went with it"
+    );
+    c.push_reply("x", vec![]);
+    c.push(Message::user("Again."));
+    let again = collect(&model, c).await;
+    assert_eq!(text_of(&again), "Back.");
+    assert_eq!(fake.folders().len(), 1, "one live process, one folder");
+}
+
+#[tokio::test]
+async fn a_version_without_the_prompt_file_is_refused_rather_than_given_it_on_argv() {
+    let fake = Fake::new(json!({"no_prompt_file": true, "turns": [[{"text": "never"}]]}));
+    let events = collect(&fake.model(), ctx(&["Hi."])).await;
+    assert_eq!(
+        events.iter().find_map(|e| e.as_ref().err()),
+        Some(&LlmError::Program(ProgramFailure::Unsupported))
+    );
+    assert!(fake.sessions().is_empty());
+    let found =
+        ghost_core::other_tools::program::look(&fake.bin, &fake.settings().started_env).await;
+    assert_eq!(found.missing, vec!["--system-prompt-file"]);
 }
 
 #[tokio::test]

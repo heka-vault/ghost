@@ -59,6 +59,13 @@ if args[:1] == ["--version"]:
 if args[:1] == ["--help"]:
     sys.stdout.write(open(SCENARIO["help"]).read())
     sys.exit(0)
+if "--ghost-probe-unknown" in args:
+    # The real parser names the first option it doesn't know (2.1.325); a scenario's
+    # "no_prompt_file" stands for a version without the file form.
+    known = not SCENARIO.get("no_prompt_file")
+    bad = "--ghost-probe-unknown" if known else args[0]
+    sys.stderr.write(f"error: unknown option '{bad}'\n")
+    sys.exit(1)
 if args[:2] == ["auth", "status"]:
     st = SCENARIO.get(
         "status", {"loggedIn": True, "authMethod": "claude.ai", "subscriptionType": "pro"}
@@ -70,6 +77,18 @@ if args[:2] == ["auth", "status"]:
 def arg(name):
     return args[args.index(name) + 1] if name in args else None
 
+
+# What the prompt file was, as the program found it: its mode and its text.
+prompt_path = arg("--system-prompt-file")
+if prompt_path:
+    log(
+        "prompt.jsonl",
+        {
+            "path": prompt_path,
+            "mode": oct(os.stat(prompt_path).st_mode & 0o777),
+            "text": open(prompt_path).read(),
+        },
+    )
 
 # --- the relay, as the program's app -------------------------------------------------------
 apps = json.load(open(arg("--mcp-config")))["mcpServers"]

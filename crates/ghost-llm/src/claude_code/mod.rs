@@ -87,6 +87,84 @@ pub struct Settings {
     /// own sign-in can't be used. The daemon never sets it; it is empty on every product
     /// path, which `the_program_runs_with_its_own_tools_settings_and_apps_off` holds.
     pub harness_env: BTreeMap<String, String>,
+    /// Where each process's folder is made (0700): its relay config and Ghost's prompt, both
+    /// 0600 files, never the command line. [`runtime_dir`] by default.
+    pub runtime_dir: PathBuf,
+}
+
+/// `$XDG_RUNTIME_DIR/ghost/claude-code` (`/tmp/ghost/claude-code` without one): beside the
+/// daemon's other runtime files (`ghostd::config::runtime_dir`).
+pub fn runtime_dir() -> PathBuf {
+    std::env::var_os("XDG_RUNTIME_DIR")
+        .map_or_else(|| PathBuf::from("/tmp"), PathBuf::from)
+        .join("ghost")
+        .join("claude-code")
+}
+
+/// The file Ghost's prompt is in, in a process's folder.
+pub const PROMPT_FILE: &str = "system-prompt.md";
+/// The relay's config, in a process's folder.
+pub const APPS_FILE: &str = "apps.json";
+
+/// A process's folder: `p<pid of the Ghost that made it>-<random>`, 0700, under
+/// `runtime_dir`, which is made 0700 first. Removed when dropped.
+fn process_folder(runtime_dir: &Path) -> std::io::Result<tempfile::TempDir> {
+    use std::os::unix::fs::DirBuilderExt;
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(runtime_dir)?;
+    sweep_once(runtime_dir);
+    use std::os::unix::fs::PermissionsExt;
+    tempfile::Builder::new()
+        .prefix(&format!("p{}-", std::process::id()))
+        .permissions(std::fs::Permissions::from_mode(0o700))
+        .tempdir_in(runtime_dir)
+}
+
+/// Remove what a Ghost that is no longer running left in `runtime_dir` (a crash, a kill):
+/// every process folder whose maker's pid is gone. Its prompt and its relay's bearer do not
+/// outlive it past the next start.
+pub fn sweep(runtime_dir: &Path) -> usize {
+    let Ok(entries) = std::fs::read_dir(runtime_dir) else {
+        return 0;
+    };
+    let mine = std::process::id();
+    let mut removed = 0;
+    for e in entries.flatten() {
+        let name = e.file_name();
+        let Some(pid) = name
+            .to_str()
+            .and_then(|n| n.strip_prefix('p'))
+            .and_then(|n| n.split('-').next())
+            .and_then(|n| n.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        if pid != mine
+            && !Path::new(&format!("/proc/{pid}")).exists()
+            && std::fs::remove_dir_all(e.path()).is_ok()
+        {
+            removed += 1;
+        }
+    }
+    if removed > 0 {
+        info!("claude code: removed {removed} folder(s) a stopped Ghost left behind");
+    }
+    removed
+}
+
+/// [`sweep`], once per folder per run of Ghost.
+fn sweep_once(runtime_dir: &Path) {
+    static SWEPT: LazyLock<StdMutex<std::collections::HashSet<PathBuf>>> =
+        LazyLock::new(|| StdMutex::new(std::collections::HashSet::new()));
+    if SWEPT
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(runtime_dir.to_path_buf())
+    {
+        sweep(runtime_dir);
+    }
 }
 
 impl Settings {
@@ -101,6 +179,7 @@ impl Settings {
             started_env,
             quiet_most: QUIET_MOST,
             harness_env: BTreeMap::new(),
+            runtime_dir: runtime_dir(),
         }
     }
 }
@@ -113,9 +192,10 @@ pub fn environment(settings: &Settings) -> BTreeMap<String, String> {
     env
 }
 
-/// The program's argv after its name. `system` is Ghost's whole prompt; `apps` the 0600
-/// file naming the relay.
-pub fn argv(settings: &Settings, system: &str, apps: &Path) -> Vec<String> {
+/// The program's argv after its name. `prompt` is the 0600 file holding Ghost's whole prompt
+/// and `apps` the 0600 file naming the relay: nothing of the operator's, no prompt and no
+/// bearer, is on the command line, which every user of the computer can read.
+pub fn argv(settings: &Settings, prompt: &Path, apps: &Path) -> Vec<String> {
     let mut a: Vec<String> = [
         "--print",
         "--input-format",
@@ -124,11 +204,11 @@ pub fn argv(settings: &Settings, system: &str, apps: &Path) -> Vec<String> {
         "stream-json",
         "--verbose",
         "--include-partial-messages",
-        "--system-prompt",
+        "--system-prompt-file",
     ]
     .map(String::from)
     .to_vec();
-    a.push(system.to_string());
+    a.push(prompt.display().to_string());
     a.extend(
         [
             "--tools",
@@ -234,22 +314,22 @@ async fn start(settings: &Settings, system: &str, tools: &Tools) -> Result<Proc,
         return Err(LlmError::Program(ProgramFailure::Unsupported));
     }
     let began = Instant::now();
-    let work = tempfile::Builder::new()
-        .prefix("ghost-claude-")
-        .tempdir()
+    let work = process_folder(&settings.runtime_dir)
         .map_err(|_| LlmError::Program(ProgramFailure::Failed))?;
+    let prompt = work.path().join(PROMPT_FILE);
+    write_private(&prompt, system).map_err(|_| LlmError::Program(ProgramFailure::Failed))?;
     let (tx, mut rx) = mpsc::unbounded_channel();
     let relay = Relay::bind(tools, tx.clone())
         .await
         .map_err(|_| LlmError::Program(ProgramFailure::Failed))?;
-    let apps = work.path().join("apps.json");
+    let apps = work.path().join(APPS_FILE);
     let config = serde_json::json!({"mcpServers": {APP: {
         "type": "http", "url": relay.url(),
         "headers": {"Authorization": format!("Bearer {}", relay.bearer())}}}});
     write_private(&apps, &config.to_string())
         .map_err(|_| LlmError::Program(ProgramFailure::Failed))?;
     let mut child = Command::new(&settings.binary)
-        .args(argv(settings, system, &apps))
+        .args(argv(settings, &prompt, &apps))
         .env_clear()
         .envs(environment(settings))
         .current_dir(work.path())
@@ -885,14 +965,14 @@ async fn once(settings: &Settings, system: &str, user: &str) -> Result<String, L
     if !missing_switches(settings).await.is_empty() {
         return Err(LlmError::Program(ProgramFailure::Unsupported));
     }
-    let work = tempfile::Builder::new()
-        .prefix("ghost-claude-")
-        .tempdir()
+    let work = process_folder(&settings.runtime_dir)
         .map_err(|_| LlmError::Program(ProgramFailure::Failed))?;
-    let apps = work.path().join("apps.json");
+    let prompt = work.path().join(PROMPT_FILE);
+    write_private(&prompt, system).map_err(|_| LlmError::Program(ProgramFailure::Failed))?;
+    let apps = work.path().join(APPS_FILE);
     write_private(&apps, r#"{"mcpServers":{}}"#)
         .map_err(|_| LlmError::Program(ProgramFailure::Failed))?;
-    let mut args = argv(settings, system, &apps);
+    let mut args = argv(settings, &prompt, &apps);
     // One answer as JSON, from text on standard input.
     for (i, a) in args.clone().iter().enumerate() {
         if a == "--input-format" {
@@ -966,7 +1046,11 @@ mod tests {
     #[test]
     fn the_program_runs_with_its_own_tools_settings_and_apps_off_and_nothing_inherited() {
         let s = settings();
-        let a = argv(&s, "You are Ghost.", Path::new("/tmp/x/apps.json"));
+        let a = argv(
+            &s,
+            Path::new("/run/user/1000/ghost/claude-code/p1-x/system-prompt.md"),
+            Path::new("/tmp/x/apps.json"),
+        );
         let has = |pair: &[&str]| {
             a.windows(pair.len())
                 .any(|w| w.iter().zip(pair).all(|(x, y)| x == y))
@@ -997,7 +1081,14 @@ mod tests {
             has(&["--permission-mode", "dontAsk"]),
             "anything not allowed is refused, never asked"
         );
-        assert!(has(&["--system-prompt", "You are Ghost."]));
+        assert!(has(&[
+            "--system-prompt-file",
+            "/run/user/1000/ghost/claude-code/p1-x/system-prompt.md"
+        ]));
+        assert!(
+            !a.iter().any(|x| x == "--system-prompt"),
+            "never the prompt itself"
+        );
         assert!(has(&["--model", "haiku"]));
         assert!(
             !a.iter().any(|x| x == "--bare"),
@@ -1044,8 +1135,9 @@ mod tests {
             ("check.rs", include_str!("check.rs")),
         ] {
             let code = src.split("#[cfg(test)]").next().unwrap();
+            // `read_dir` lists Ghost's own runtime folder (the sweep), never the program's.
             for reads in [
-                "fs::read",
+                "fs::read(",
                 "File::open",
                 "read_to_string",
                 ".credentials",

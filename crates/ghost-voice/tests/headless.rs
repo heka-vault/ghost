@@ -1562,9 +1562,9 @@ fn fake_claude(
     ]
     .into_iter()
     .collect();
-    let cc = ghost_llm::claude_code::ClaudeCode::new(ghost_llm::claude_code::Settings::new(
-        bin, "haiku", started,
-    ));
+    let mut settings = ghost_llm::claude_code::Settings::new(bin, "haiku", started);
+    settings.runtime_dir = tmp.join("run");
+    let cc = ghost_llm::claude_code::ClaudeCode::new(settings);
     (cc, dir)
 }
 
