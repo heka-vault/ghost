@@ -32,16 +32,11 @@ Scores against the floating room (9): today 4, I 7, II 8.5 (7.5 at 16 to 32), II
 
 ## Build
 
-Plain Node (22+), Chrome and ImageMagick; no dependencies.
+The round's generators were removed once the mark was chosen (2026-11-13): the drawing that
+shipped lives in `packages/ui/src/figure.ts` and `mark.ts`, and
+`node packages/ui/scripts/marks.mjs` writes its files (docs/design-system.md, The mark). The
+sheets, motion and SVGs here are the record of the round; the sources are in git history
+(`git show a6200af0:docs/design/mark-2026-11/src/marks.mjs`).
 
-```sh
-node src/export.mjs   # every mark: svg/ (sources) and png/ (each at its own pixel size, not committed)
-node src/sheet.mjs    # sheet/index.html
-node src/render.mjs   # sheet/*.webp
-node src/motion.mjs   # motion/*.webp
-```
-
-`src/marks.mjs` holds every drawing. Wisp's body is copied from `packages/ui/src/wisp.ts`
-(`body(s)`) and the agents' shapes are read from `packages/ui/src/agentShapes.ts`. The fonts
-are the design system's own (Inter and JetBrains Mono, OFL). Today's marks on the sheet are
-resized from the shipped files, read only.
+[`stage-1/`](stage-1/) holds the rollout's before and after: the floating room in every state,
+the icon on a dock, the tray and the rail (PR #126).

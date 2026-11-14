@@ -21,14 +21,6 @@ in black (the most familiar ghost there is); the light, the ring and the hands m
 For the live mascot, `body(s)` becomes a hem whose lobes ripple (`sw` drives the ripple instead
 of the tail's swing) and the arm lines become mitts on the same `aL`/`aR`.
 
-Build (from `docs/design/mark-2026-11/`):
-
-```sh
-node round-2/src/export.mjs     # svg/ and png/ (png/ not committed)
-node round-2/src/sheet.mjs      # sheet/index.html
-node src/render.mjs round-2     # sheet/*.webp
-node round-2/src/motion.mjs     # motion/*.webp
-```
-
-`round-2/src/figures.mjs` holds every figure; the tile, ring and light are round 1's
-(`../src/marks.mjs`).
+The chosen direction (1c) shipped as `packages/ui/src/figure.ts` (the body) and `mark.ts` (the
+mark); the round's generators were removed then. They are in git history
+(`git show a6200af0:docs/design/mark-2026-11/round-2/src/figures.mjs`).
