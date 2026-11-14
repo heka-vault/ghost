@@ -1122,7 +1122,7 @@ export function AgentStep({ w }: { w: Wizard }) {
         </Card>
       ) : (
         <div className="onb-shapes" aria-hidden>
-          {(["drop", "bell", "hood", "cloud", "lantern", "star"] as const).map((sh, i) => (
+          {(["drop", "bell", "cloud", "lantern", "star"] as const).map((sh, i) => (
             <span key={sh} className="onb-shapes__one" style={{ color: `var(--hue-${i + 1}-fg)`, background: `var(--hue-${i + 1}-bg)` }}>
               <AgentShapeGlyph shape={sh} size={36} />
             </span>

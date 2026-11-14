@@ -1354,7 +1354,7 @@
             ]
           },
           "look": {
-            "description": "How it is drawn, `\"<shape>:<colour>\"` (shapes: wisp, drop, bell, hood, cloud,\nlantern, star, moth; colours 0 to 7). Null: the one the desktop picks from its slug.",
+            "description": "How it is drawn, `\"<shape>:<colour>\"` (shapes: wisp, drop, bell, cloud,\nlantern, star, moth; colours 0 to 7). Null: the one the desktop picks from its slug.",
             "type": [
               "string",
               "null"

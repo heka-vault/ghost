@@ -2137,7 +2137,7 @@ export class MockDaemon {
         // A look, as the daemon checks it: a known shape and colour, "" back to the slug's; never Ghost's.
         if (typeof b.look === "string") {
           if (d.is_ghost) throw new HttpError(422, "Ghost is always Wisp");
-          if (b.look && !parseLook(b.look)) throw new HttpError(422, "a shape (wisp, drop, bell, hood, cloud, lantern, star, moth), a colon and a colour 0 to 7");
+          if (b.look && !parseLook(b.look)) throw new HttpError(422, "a shape (wisp, drop, bell, cloud, lantern, star, moth), a colon and a colour 0 to 7");
           d.look = b.look || null;
         }
         for (const k of ["name", "aliases", "job", "speed", "persona", "memory", "notes"] as const) {
