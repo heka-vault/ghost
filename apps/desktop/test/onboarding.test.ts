@@ -133,6 +133,9 @@ describe("the path to the moment (2026-11-14)", () => {
 
   // The PR's table. A required action added before the wake beat fails here.
   it("reaches the wake beat in the stated number of actions for each newcomer", () => {
+    // Claude Code signed in (ADR 0069): Use Claude Code is the one click at the model step.
+    expect(pathToMoment(fresh, "claude-code")).toEqual({ steps: ["welcome", "model", "wake"], clicks: 2, fields: 0 });
+    expect(requiredAt("model", "claude-code")).toEqual({ clicks: 1, fields: 0 });
     expect(pathToMoment(fresh, "found")).toEqual({ steps: ["welcome", "model", "wake"], clicks: 3, fields: 0 });
     expect(pathToMoment(fresh, "key")).toEqual({ steps: ["welcome", "model", "wake"], clicks: 3, fields: 1 });
     expect(pathToMoment(fresh, "nothing")).toEqual({ steps: ["welcome", "model", "wake"], clicks: 2, fields: 0 });

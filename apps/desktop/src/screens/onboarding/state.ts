@@ -152,8 +152,12 @@ export function routeAfter(from: StepId, f: Facts, s: Pick<Saved, "met" | "waiti
   }
 }
 
-/** Who a newcomer is, for the measured path: what their computer already offers Ghost. */
-export type Newcomer = "found" | "key" | "nothing";
+/**
+ * Who a newcomer is, for the measured path: what their computer already offers Ghost. `claude-code`:
+ * their own Claude Code is signed in (ADR 0069), and the model step leads with it; `found`: a
+ * model on this computer or a key in the environment (ADR 0068).
+ */
+export type Newcomer = "claude-code" | "found" | "key" | "nothing";
 
 /**
  * What a step asks of a newcomer before it lets them on, as the screen has it: the clicks
@@ -166,9 +170,14 @@ export function requiredAt(step: StepId, who: Newcomer): { clicks: number; field
     case "welcome":
       return { clicks: 1, fields: 0 }; // Get started
     case "model":
-      // found: the model it found, Save and continue; key: the provider, the key, Save and
-      // continue; nothing: Skip, meet Ghost first.
-      return who === "found" ? { clicks: 2, fields: 0 } : who === "key" ? { clicks: 2, fields: 1 } : { clicks: 1, fields: 0 };
+      // claude-code: Use Claude Code, which saves and goes on; found: the model it found,
+      // Save and continue; key: the provider, the key, Save and continue; nothing: Skip,
+      // meet Ghost first.
+      return who === "claude-code" || who === "nothing"
+        ? { clicks: 1, fields: 0 }
+        : who === "found"
+          ? { clicks: 2, fields: 0 }
+          : { clicks: 2, fields: 1 };
     case "hear":
       return { clicks: 1, fields: 0 }; // Continue
     default:

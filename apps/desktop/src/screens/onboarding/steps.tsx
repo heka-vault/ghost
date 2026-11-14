@@ -716,7 +716,8 @@ export function WakeStep({ w }: { w: Wizard }) {
   } else if (fetching) {
     state = "ears";
     title = "Ghost’s ears are on their way";
-    line = `${Math.floor(w.speech.share * 100)}% of ${gb(sp?.fetch.total_bytes ?? 0)}${w.speech.left ? ` · ${w.speech.left}` : " · working out how long"}. Setup comes back here by itself when they’re ready.`;
+    // A download a terminal started is the same one, followed (#135).
+    line = `${sp?.fetch.following ? "Already downloading: " : ""}${Math.floor(w.speech.share * 100)}% of ${gb(sp?.fetch.total_bytes ?? 0)}${w.speech.left ? ` · ${w.speech.left}` : " · working out how long"}. Setup comes back here by itself when they’re ready.`;
     primary = {
       label: "Make it yours meanwhile",
       onClick: () => {

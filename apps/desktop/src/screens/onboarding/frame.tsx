@@ -123,7 +123,8 @@ export function Rail({ current, progress, checking, onGo, speech }: RailProps) {
       {speech?.view?.fetch.state === "fetching" && (
         <div className="onb-rail__foot" role="status">
           <p className="t-small t-2 t-num">
-            Ghost’s ears · {Math.floor(speech.share * 100)}%{speech.left ? ` · ${speech.left}` : ""}
+            Ghost’s ears · {speech.view.fetch.following ? "already downloading · " : ""}
+            {Math.floor(speech.share * 100)}%{speech.left ? ` · ${speech.left}` : ""}
           </p>
           <Bar value={speech.share * 100} label="Downloading Ghost’s ears and voice" tone="info" />
         </div>
