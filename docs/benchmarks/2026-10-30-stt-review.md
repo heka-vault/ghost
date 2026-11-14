@@ -90,7 +90,7 @@ turn (int8):
 | Per segment | Per turn |
 |---|---|
 | "Can you read issue?" / "Four oh three." | "Can you read issue four oh three?" |
-| "Read me issue four one three from the" / "from the quotient research ecosystem project." | "Read me issue four one three from the quotient research ecosystem project." |
+| "Read me issue four one three from the" / "from the acme research ecosystem project." | "Read me issue four one three from the acme research ecosystem project." |
 | "Can you read me issue" / "Issue four one five." / "From the" | "Can you read me issue four one five from motion?" |
 | "Give me the details about issue." / "" / "Four, one, three." | "Give me the details about issue four one three." |
 
@@ -113,7 +113,7 @@ Both write "Close in for seventeen" for "Close infra 17" and "Market ready for a
 "seventeen", a spelling. The errors are the model's, not the quantization's.
 
 **The operator's own turns** (the turn spans of eight clips, `ghost.mic` channel): the two
-read 25 of 35 spans the same. Where they differ, fp32 read "quotient" where int8 read
+read 25 of 35 spans the same. Where they differ, fp32 read "acme" where int8 read
 "motion", "Thank you" where int8 read nothing, "Come on" for "Come", and was otherwise no
 better on the short fragments ("You sat up first ahead" against "You stop that for a
 second"). Per turn: int8 0.11 to 0.26 s, fp32 0.17 to 0.30 s.
