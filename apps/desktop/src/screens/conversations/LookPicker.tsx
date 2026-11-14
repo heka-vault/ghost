@@ -8,6 +8,8 @@ import { AGENT_SHAPES, type AgentLook, HUE_NAMES, SHAPE_NAMES } from "@ghost/ui"
 import { type KeyboardEvent, useId } from "react";
 
 import { AgentShapeGlyph, LineGlyph, cx } from "../../ui";
+// Its own styles: the first run uses this dialog without loading the Agents screen.
+import "./conversations.css";
 
 export function LookPicker({ value, onChange, name, disabled }: { value: AgentLook; onChange: (l: AgentLook) => void; name: string; disabled?: boolean }) {
   const id = useId();
