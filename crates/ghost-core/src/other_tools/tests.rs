@@ -726,3 +726,126 @@ fn nothing_found_is_nothing_said() {
     assert!(opened.is_empty());
     let _ = Path::new("");
 }
+
+const CLAUDE_PRIVATE: &str = include_str!("fixtures/claude-private.json");
+/// What `~/.claude.json` holds besides the apps: none of it may leave the reader.
+pub(crate) const CLAUDE_PRIVATE_VALUES: [&str; 11] = [
+    "a1b2c3FIXTUREuserid999",
+    "sk-ant-api03-FIXTUREprimaryKeyNEVERREAD0000",
+    "FIXTURE-account-uuid-7777",
+    "someone.private@fixture.example",
+    "FIXTURE-org-uuid-8888",
+    "Private Fixture Holdings Ltd",
+    "FIXTUREapprovedkeysuffix",
+    "FIXTURE private prompt about the payroll export",
+    "FIXTURE-session-id-5555",
+    "Bash(git:*)",
+    "lastCost",
+];
+
+#[test]
+fn nothing_but_the_apps_leaves_claude_json() {
+    let h = Home::new();
+    std::fs::create_dir_all(h.root.join("code/payroll-internal")).unwrap();
+    let path = h.put(
+        ".claude.json",
+        &CLAUDE_PRIVATE.replace("@HOME@", &h.root.display().to_string()),
+    );
+    // What the reader hands out, as Debug shows all of it.
+    let mut opened = Vec::new();
+    let apps = claude::read_claude_json(&h.root, &path, &mut opened).unwrap();
+    let debug = format!("{apps:?}");
+    for v in CLAUDE_PRIVATE_VALUES {
+        assert!(!debug.contains(v), "{v} left the reader: {debug}");
+    }
+    assert_eq!(apps.user[0].0, "linear");
+    assert_eq!(apps.projects[0].1[0].0, "payroll-db");
+    // And what detection hands out, Debug included.
+    let (found, _) = run(&h.at(), &ghost());
+    let text = shown_text(&found) + &format!("{found:?}");
+    for v in CLAUDE_PRIVATE_VALUES {
+        assert!(!text.contains(v), "{v} in what detection found: {text}");
+    }
+    let claude = tool(&found, Tool::ClaudeCode);
+    let db = app(claude, "payroll-db");
+    assert_eq!(db.scope, "~/code/payroll-internal only");
+    // The project's folder is a label only: never in the entry for apps.json.
+    let plan = db.planned().unwrap();
+    let rendered = crate::apps::render_app(&plan.spec).to_string();
+    assert!(!rendered.contains("payroll-internal"), "{rendered}");
+    // Its password goes to the vault plan, not the entry.
+    assert!(!rendered.contains("FIXTUREpgpasswordValue123"));
+    assert_eq!(
+        plan.secrets.values().next().unwrap().as_str(),
+        "FIXTUREpgpasswordValue123"
+    );
+}
+
+#[test]
+fn a_long_project_folder_is_a_short_label() {
+    let h = Home::new();
+    let deep = h.root.join("a".repeat(40)).join("b".repeat(40));
+    let label = claude::project_label(&h.root, &deep);
+    assert!(label.chars().count() <= 60, "{label}");
+    assert!(label.starts_with('…') && label.ends_with(&"b".repeat(40)));
+}
+
+#[test]
+fn claude_code_without_its_command_is_never_written() {
+    let h = Home::new();
+    let text = r#"{"oauthAccount": {"emailAddress": "x@fixture.example"}, "mcpServers": {}}"#;
+    let path = h.put(".claude.json", text);
+    let w = h.at();
+    let (found, _) = run(&w, &ghost());
+    let claude = tool(&found, Tool::ClaudeCode);
+    for bridge in [
+        Bridge::Command("/opt/ghostd".into()),
+        Bridge::Address("127.0.0.1:47824".into()),
+    ] {
+        let plan = plan_link(&w, claude, &[], &bridge).unwrap();
+        assert!(matches!(plan.how, How::Yourself(_)), "{:?}", plan.how);
+        assert!(plan.argv("t").is_none(), "Ghost runs nothing");
+        assert!(write_link(&w, &plan, &bridge, "t", "s").is_err());
+        // Even a plan made by hand to write the file is refused by the one writer.
+        let forced = link::LinkPlan {
+            how: How::File {
+                path: path.clone(),
+                shown: "Adds to ~/.claude.json".into(),
+                entry: String::new(),
+            },
+            ..plan
+        };
+        let err = write_link(&w, &forced, &bridge, "t", "s").unwrap_err();
+        assert!(err.contains("does not write ~/.claude.json"), "{err}");
+    }
+    let plan = plan_link(&w, claude, &[], &Bridge::Command("/opt/ghostd".into())).unwrap();
+    assert_eq!(
+        plan.yourself("t").unwrap(),
+        "claude mcp add --scope user ghost -- /opt/ghostd mcp serve --client claude-code"
+    );
+    let by_address =
+        plan_link(&w, claude, &[], &Bridge::Address("127.0.0.1:47824".into())).unwrap();
+    assert!(
+        by_address
+            .yourself("ghost.claude-code.T")
+            .unwrap()
+            .ends_with("--header 'Authorization: Bearer ghost.claude-code.T'")
+    );
+    assert!(remove_link(&w, Tool::ClaudeCode, "ghost", "s").is_err());
+    assert_eq!(
+        link::claude_remove_command("ghost"),
+        "claude mcp remove --scope user ghost"
+    );
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+    let backups = std::fs::read_dir(&h.root)
+        .unwrap()
+        .filter(|e| {
+            e.as_ref()
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .contains("backup")
+        })
+        .count();
+    assert_eq!(backups, 0);
+}

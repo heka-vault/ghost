@@ -15,7 +15,9 @@ use std::collections::BTreeMap;
 
 use axum::Json;
 use axum::extract::{Path as PathArg, State};
-use ghost_core::other_tools::link::{Bridge, How, plan_link, remove_link, unlink_argv, write_link};
+use ghost_core::other_tools::link::{
+    Bridge, How, claude_remove_command, plan_link, remove_link, unlink_argv, write_link,
+};
 use ghost_core::other_tools::models::{LOCAL_SERVERS, keys_present, model_names};
 use ghost_core::other_tools::{
     FileState, Ghost, Shown, Tool, ToolFound, Where, detect, noticed_line, shown_path,
@@ -82,7 +84,9 @@ pub struct FoundAppView {
 pub struct LinkView {
     /// The client it would be (`ghostd mcp add`'s name).
     pub client: String,
-    /// command (the tool's own) or file (Ghost writes it, after a backup).
+    /// command (the tool's own, run by Ghost), file (Ghost writes it, after a backup) or
+    /// yourself (the tool's own command, shown for the operator to run; Claude Code without
+    /// `claude` on the PATH, since Ghost never writes `~/.claude.json`).
     pub by: String,
     /// The command, or the file and what is added to it; `<token>` stands for the token.
     pub shown: String,
@@ -180,6 +184,11 @@ pub struct OtherLinkResult {
     /// The backup Ghost made of the tool's file.
     #[schema(required)]
     pub backup: Option<String>,
+    /// The command for the operator to run in a terminal, when Ghost runs and writes nothing
+    /// of the tool's (Claude Code without `claude` on the PATH). Shown this once: by address it
+    /// carries the tool's token.
+    #[schema(required)]
+    pub run_yourself: Option<String>,
     pub tools: OtherToolsView,
 }
 
@@ -306,6 +315,7 @@ fn tool_view(deps: &Deps, w: &Where, t: &ToolFound) -> OtherToolView {
             client: p.client.clone(),
             by: match p.how {
                 How::Command(_) => "command",
+                How::Yourself(_) => "yourself",
                 How::File { .. } => "file",
             }
             .into(),
@@ -476,9 +486,11 @@ async fn link_tool(
     let made = clients
         .create(&plan.client, command)
         .map_err(|e| ApiError::conflict(e.to_string()))?;
-    let outcome = match plan.argv(&made.token) {
-        Some(argv) => port(&deps)?.run(&argv).await.map(|()| None),
-        None => write_link(&w, &plan, &b, &made.token, &port(&deps)?.stamp()),
+    let run_yourself = plan.yourself(&made.token);
+    let outcome = match (plan.argv(&made.token), &run_yourself) {
+        (Some(argv), _) => port(&deps)?.run(&argv).await.map(|()| None),
+        (None, Some(_)) => Ok(None),
+        (None, None) => write_link(&w, &plan, &b, &made.token, &port(&deps)?.stamp()),
     };
     let backup = match outcome {
         Ok(b) => b,
@@ -497,13 +509,23 @@ async fn link_tool(
     );
     let view_now = clients_view(&deps)?;
     let client = view_now.clients.into_iter().find(|c| c.name == plan.client);
-    Ok(Json(OtherLinkResult {
-        done: format!(
+    let done = if run_yourself.is_some() {
+        format!(
+            "Run this in a terminal, then restart {} if it is open. Ghost does not write its \
+             settings file.",
+            tool.title()
+        )
+    } else {
+        format!(
             "{} can use Ghost now; restart it if it is open.",
             tool.title()
-        ),
+        )
+    };
+    Ok(Json(OtherLinkResult {
+        done,
         client,
         backup: backup.map(|p| shown_path(&w.home, &p)),
+        run_yourself,
         tools: view(&deps).await?,
     }))
 }
@@ -535,6 +557,18 @@ async fn unlink_tool(
             l.file
         )));
     }
+    if tool == Tool::ClaudeCode && t.binary.is_none() {
+        // Ghost never writes ~/.claude.json: the operator runs Claude Code's own command.
+        return Ok(Json(OtherLinkResult {
+            done: "Run this in a terminal to take Ghost out of Claude Code. Ghost does not write \
+                   its settings file."
+                .into(),
+            client: None,
+            backup: None,
+            run_yourself: Some(claude_remove_command(&l.entry)),
+            tools: view(&deps).await?,
+        }));
+    }
     let backup = match unlink_argv(tool, t.binary.as_deref(), &l.entry) {
         Some(argv) => port(&deps)?.run(&argv).await.map(|()| None),
         None => remove_link(&w, tool, &l.entry, &port(&deps)?.stamp()),
@@ -549,6 +583,7 @@ async fn unlink_tool(
         done: format!("{} no longer uses Ghost.", tool.title()),
         client: None,
         backup: backup.map(|p| shown_path(&w.home, &p)),
+        run_yourself: None,
         tools: view(&deps).await?,
     }))
 }

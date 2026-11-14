@@ -147,9 +147,21 @@ pub fn json_entries(
             }
         },
     };
-    let Some(mut entries) = entries else {
+    let Some(entries) = entries else {
         return;
     };
+    entries_from(tool, entries, scope, file, raws);
+}
+
+/// Entries already read (Claude Code's typed reader, or a JSON file's object), each in one
+/// shape.
+pub fn entries_from(
+    tool: Tool,
+    mut entries: Vec<(String, Value)>,
+    scope: &str,
+    file: &mut FileSeen,
+    raws: &mut Vec<Raw>,
+) {
     if entries.len() > ENTRIES_MAX {
         file.problems.push(format!(
             "{} lists {} apps; Ghost shows the first {ENTRIES_MAX}.",

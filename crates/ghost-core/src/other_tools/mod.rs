@@ -15,6 +15,7 @@
 //! writes that tool's own file through [`link`], after a backup beside it. Every one of
 //! those is the operator's own click, or `ghostd setup … --yes`.
 
+pub mod claude;
 pub mod entries;
 pub mod link;
 pub mod models;
@@ -23,12 +24,12 @@ pub mod read;
 mod tests;
 
 use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use indexmap::IndexMap;
 use zeroize::Zeroizing;
 
-use crate::apps::{AppSpec, json_entries_at};
+use crate::apps::AppSpec;
 pub use entries::{Shown, Skip};
 pub use read::{FileState, is_credential, shown_path};
 
@@ -278,11 +279,7 @@ pub fn detect(w: &Where, ghost: &Ghost, opened: &mut Vec<PathBuf>) -> Vec<ToolFo
         };
         let mut raws: Vec<entries::Raw> = Vec::new();
         for path in files_for(w, tool) {
-            let cap = if tool == Tool::ClaudeCode {
-                CLAUDE_JSON_CAP
-            } else {
-                FILE_CAP
-            };
+            let cap = FILE_CAP;
             let mut seen_file = FileSeen {
                 shown: shown_path(&w.home, &path),
                 path: path.clone(),
@@ -290,74 +287,69 @@ pub fn detect(w: &Where, ghost: &Ghost, opened: &mut Vec<PathBuf>) -> Vec<ToolFo
                 problems: Vec::new(),
                 commented: false,
             };
-            match read::read_bounded(&w.home, &path, cap, opened) {
-                Err(state) => seen_file.state = state,
-                Ok(text) => {
-                    let mut projects = Vec::new();
-                    match tool {
-                        Tool::Codex => entries::codex_entries(&text, &mut seen_file, &mut raws),
-                        Tool::Cursor => entries::json_entries(
+            if tool == Tool::ClaudeCode {
+                // Read for its app list only: the typed reader keeps nothing else (claude.rs).
+                match claude::read_claude_json(&w.home, &path, opened) {
+                    Err(state) => {
+                        seen_file.state = state;
+                        t.files.push(seen_file);
+                    }
+                    Ok(apps) => {
+                        entries::entries_from(
                             tool,
-                            &text,
-                            &["mcpServers"],
+                            apps.user,
                             "every project",
                             &mut seen_file,
                             &mut raws,
-                        ),
-                        Tool::ClaudeCode => {
-                            entries::json_entries(
-                                tool,
-                                &text,
-                                &["mcpServers"],
-                                "every project",
-                                &mut seen_file,
-                                &mut raws,
-                            );
-                            projects = claude_projects(&w.home, &text);
-                            for p in &projects {
-                                let scope = format!("{} only", shown_path(&w.home, p));
-                                let key = p.to_string_lossy().to_string();
-                                entries::json_entries(
-                                    tool,
-                                    &text,
-                                    &["projects", key.as_str(), "mcpServers"],
-                                    &scope,
-                                    &mut seen_file,
-                                    &mut raws,
-                                );
-                            }
+                        );
+                        let mut project_files = Vec::new();
+                        for (p, list) in apps.projects {
+                            let scope = format!("{} only", claude::project_label(&w.home, &p));
+                            entries::entries_from(tool, list, &scope, &mut seen_file, &mut raws);
+                            project_files.push((p, scope));
                         }
-                    }
-                    t.files.push(seen_file);
-                    // Claude Code's project scope: `.mcp.json` in each project it names.
-                    for p in projects.into_iter().take(PROJECTS_MAX) {
-                        let file = p.join(".mcp.json");
-                        let mut pf = FileSeen {
-                            shown: shown_path(&w.home, &file),
-                            path: file.clone(),
-                            state: FileState::Read,
-                            problems: Vec::new(),
-                            commented: false,
-                        };
-                        match read::read_bounded(&w.home, &file, FILE_CAP, opened) {
-                            Err(FileState::Missing) => continue,
-                            Err(state) => pf.state = state,
-                            Ok(text) => {
-                                let scope = format!("{} only", shown_path(&w.home, &p));
-                                entries::json_entries(
+                        t.files.push(seen_file);
+                        // Claude Code's project scope: `.mcp.json` in each project it names.
+                        for (p, scope) in project_files {
+                            let file = p.join(".mcp.json");
+                            let mut pf = FileSeen {
+                                shown: format!("{}/.mcp.json", scope.trim_end_matches(" only")),
+                                path: file.clone(),
+                                state: FileState::Read,
+                                problems: Vec::new(),
+                                commented: false,
+                            };
+                            match read::read_bounded(&w.home, &file, FILE_CAP, opened) {
+                                Err(FileState::Missing) => continue,
+                                Err(state) => pf.state = state,
+                                Ok(text) => entries::json_entries(
                                     tool,
                                     &text,
                                     &["mcpServers"],
                                     &scope,
                                     &mut pf,
                                     &mut raws,
-                                );
+                                ),
                             }
+                            t.files.push(pf);
                         }
-                        t.files.push(pf);
                     }
-                    continue;
                 }
+                continue;
+            }
+            match read::read_bounded(&w.home, &path, cap, opened) {
+                Err(state) => seen_file.state = state,
+                Ok(text) => match tool {
+                    Tool::Codex => entries::codex_entries(&text, &mut seen_file, &mut raws),
+                    _ => entries::json_entries(
+                        tool,
+                        &text,
+                        &["mcpServers"],
+                        "every project",
+                        &mut seen_file,
+                        &mut raws,
+                    ),
+                },
             }
             t.files.push(seen_file);
         }
@@ -375,25 +367,6 @@ pub fn detect(w: &Where, ghost: &Ghost, opened: &mut Vec<PathBuf>) -> Vec<ToolFo
         found.push(t);
     }
     found
-}
-
-/// The project folders `~/.claude.json` names, inside the home folder only.
-fn claude_projects(home: &Path, text: &str) -> Vec<PathBuf> {
-    let Ok(Some(projects)) = json_entries_at(text, &["projects"]) else {
-        return Vec::new();
-    };
-    let home_real = home.canonicalize().unwrap_or_else(|_| home.to_path_buf());
-    projects
-        .into_iter()
-        .map(|(k, _)| PathBuf::from(k))
-        .filter(|p| p.is_absolute())
-        .filter(|p| {
-            p.canonicalize()
-                .map(|r| r.starts_with(&home_real))
-                .unwrap_or(false)
-        })
-        .take(PROJECTS_MAX)
-        .collect()
 }
 
 /// `s` cut to [`SHOWN_MAX`] characters, and redacted of every password Ghost holds.

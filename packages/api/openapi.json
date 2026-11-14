@@ -2765,7 +2765,7 @@
         "description": "What letting the tool use Ghost would do, shown before it is done.",
         "properties": {
           "by": {
-            "description": "command (the tool's own) or file (Ghost writes it, after a backup).",
+            "description": "command (the tool's own, run by Ghost), file (Ghost writes it, after a backup) or\nyourself (the tool's own command, shown for the operator to run; Claude Code without\n`claude` on the PATH, since Ghost never writes `~/.claude.json`).",
             "type": "string"
           },
           "by_address": {
@@ -3570,6 +3570,13 @@
             "description": "What was done, in a sentence.",
             "type": "string"
           },
+          "run_yourself": {
+            "description": "The command for the operator to run in a terminal, when Ghost runs and writes nothing\nof the tool's (Claude Code without `claude` on the PATH). Shown this once: by address it\ncarries the tool's token.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "tools": {
             "$ref": "#/components/schemas/OtherToolsView"
           }
@@ -3578,6 +3585,7 @@
           "done",
           "client",
           "backup",
+          "run_yourself",
           "tools"
         ],
         "type": "object"

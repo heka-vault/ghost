@@ -377,14 +377,20 @@ pub async fn setup_cli(
                     out,
                     "Ghost makes the outside tool {} and {}:\n{}",
                     s(&l["client"]),
-                    if l["by"] == "command" {
-                        "runs"
-                    } else {
-                        "writes, after a backup beside it"
+                    match l["by"].as_str() {
+                        Some("command") => "runs",
+                        Some("yourself") =>
+                            "shows you this to run yourself (Ghost does not write that tool's settings file)",
+                        _ => "writes, after a backup beside it",
                     },
                     s(&l["shown"])
                 );
-                if l["by_address"] == true {
+                if l["by_address"] == true && l["by"] == "yourself" {
+                    let _ = writeln!(
+                        out,
+                        "(<token> is the tool's own token, made when you say yes and printed once.)"
+                    );
+                } else if l["by_address"] == true {
                     let _ = writeln!(
                         out,
                         "(<token> is the tool's own token, made when you say yes and never shown.)"
@@ -408,6 +414,9 @@ pub async fn setup_cli(
             {
                 Ok((200, v)) => {
                     let _ = writeln!(out, "{}", s(&v["done"]));
+                    if let Some(cmd) = v["run_yourself"].as_str() {
+                        let _ = writeln!(out, "  {cmd}");
+                    }
                     if let Some(b) = v["backup"].as_str() {
                         let _ = writeln!(out, "The file as it was is in {b}.");
                     }
@@ -534,6 +543,51 @@ mod tests {
             ("POST", "/other-tools/cursor/import")
         );
         assert_eq!(body.as_ref().unwrap()["apps"], json!(["k1", "k2"]));
+    }
+
+    #[tokio::test]
+    async fn link_prints_the_command_to_run_when_ghost_runs_nothing() {
+        let mut api = fake();
+        api.detected["tools"][0]["link"]["by"] = json!("yourself");
+        api.detected["tools"][0]["link"]["shown"] =
+            json!("claude mcp add --scope user ghost -- /g mcp serve --client cursor");
+        let api = Yourself(api);
+        let (code, said) = run_with(&api, &["link", "cursor", "--yes"]).await;
+        assert_eq!(code, 0, "{said}");
+        assert!(said.contains("shows you this to run yourself"));
+        assert!(said.contains("Run this in a terminal.\n  claude mcp add --scope user ghost -- /g mcp serve --client claude-code"));
+    }
+
+    struct Yourself(Fake);
+
+    #[async_trait]
+    impl Api for Yourself {
+        async fn call(
+            &self,
+            method: &str,
+            path: &str,
+            body: Option<Value>,
+        ) -> Result<(u16, Value), String> {
+            if method == "POST" && path.ends_with("/link") {
+                return Ok((
+                    200,
+                    json!({"done": "Run this in a terminal.", "backup": null,
+                    "run_yourself": "claude mcp add --scope user ghost -- /g mcp serve --client claude-code"}),
+                ));
+            }
+            self.0.call(method, path, body).await
+        }
+    }
+
+    async fn run_with(api: &dyn Api, args: &[&str]) -> (i32, String) {
+        let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+        let mut input = std::io::Cursor::new(Vec::new());
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let code = setup_cli(&args, api, &mut input, &mut out, &mut err).await;
+        (
+            code,
+            String::from_utf8(out).unwrap() + &String::from_utf8(err).unwrap(),
+        )
     }
 
     #[tokio::test]

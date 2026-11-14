@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{Value, json};
 
 use super::read::{FileState, resolve};
-use super::{CLAUDE_JSON_CAP, FILE_CAP, Tool, ToolFound, Where, shown_path};
+use super::{FILE_CAP, Tool, ToolFound, Where, shown_path};
 use crate::apps::edit_json_at;
 
 /// The entry's name in the other tool.
@@ -37,6 +37,9 @@ pub enum Bridge {
 pub enum How {
     /// The tool's own command, as argv: run directly, never through a shell.
     Command(Vec<String>),
+    /// The tool's own command, for the operator to run in a terminal: Ghost runs nothing and
+    /// writes nothing of the tool's (Claude Code without `claude` on the PATH).
+    Yourself(Vec<String>),
     /// Ghost adds `entry` to the file at `path`.
     File {
         path: PathBuf,
@@ -59,7 +62,7 @@ impl LinkPlan {
     /// What the operator is shown before the click, with [`TOKEN_SHOWN`] for the token.
     pub fn shown(&self) -> String {
         match &self.how {
-            How::Command(argv) => shell_words(argv),
+            How::Command(argv) | How::Yourself(argv) => shell_words(argv),
             How::File { shown, entry, .. } => format!("{shown}:\n{entry}"),
         }
     }
@@ -70,9 +73,54 @@ impl LinkPlan {
             How::Command(argv) => {
                 Some(argv.iter().map(|a| a.replace(TOKEN_SHOWN, token)).collect())
             }
-            How::File { .. } => None,
+            How::File { .. } | How::Yourself(_) => None,
         }
     }
+
+    /// The command for the operator to run, with the token in it, when Ghost runs nothing.
+    pub fn yourself(&self, token: &str) -> Option<String> {
+        match &self.how {
+            How::Yourself(argv) => Some(shell_words(
+                &argv
+                    .iter()
+                    .map(|a| a.replace(TOKEN_SHOWN, token))
+                    .collect::<Vec<_>>(),
+            )),
+            _ => None,
+        }
+    }
+}
+
+/// `claude mcp add --scope user ghost …` for `bridge`, as argv.
+fn claude_add(bin: &str, bridge: &Bridge, client: &str) -> Vec<String> {
+    let mut argv: Vec<String> = [bin, "mcp", "add", "--scope", "user"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    match bridge {
+        Bridge::Command(ghostd) => argv.extend(
+            [
+                ENTRY,
+                "--",
+                ghostd.as_str(),
+                "mcp",
+                "serve",
+                "--client",
+                client,
+            ]
+            .iter()
+            .map(|s| s.to_string()),
+        ),
+        Bridge::Address(addr) => argv.extend([
+            "--transport".to_string(),
+            "http".to_string(),
+            ENTRY.to_string(),
+            format!("http://{addr}/mcp"),
+            "--header".to_string(),
+            format!("Authorization: Bearer {TOKEN_SHOWN}"),
+        ]),
+    }
+    argv
 }
 
 /// Words joined for showing, each quoted when a shell would split or read it. Shown only:
@@ -201,43 +249,11 @@ pub fn plan_link(
     let by_address = matches!(bridge, Bridge::Address(_));
     let binary = found.binary.as_ref().map(|p| p.display().to_string());
     let how = match (tool, bridge, binary) {
-        (Tool::ClaudeCode, Bridge::Command(ghostd), Some(bin)) => How::Command(
-            [
-                bin.as_str(),
-                "mcp",
-                "add",
-                "--scope",
-                "user",
-                ENTRY,
-                "--",
-                ghostd,
-                "mcp",
-                "serve",
-                "--client",
-                &client,
-            ]
-            .iter()
-            .map(|s| s.to_string())
-            .collect(),
-        ),
-        (Tool::ClaudeCode, Bridge::Address(addr), Some(bin)) => How::Command(
-            [
-                bin.as_str(),
-                "mcp",
-                "add",
-                "--scope",
-                "user",
-                "--transport",
-                "http",
-                ENTRY,
-                &format!("http://{addr}/mcp"),
-                "--header",
-                &format!("Authorization: Bearer {TOKEN_SHOWN}"),
-            ]
-            .iter()
-            .map(|s| s.to_string())
-            .collect(),
-        ),
+        // Claude Code rewrites ~/.claude.json itself and keeps its own account state there:
+        // Ghost never writes that file. Its own command, run by Ghost when it is on the PATH,
+        // and otherwise shown for the operator to run.
+        (Tool::ClaudeCode, _, Some(bin)) => How::Command(claude_add(&bin, bridge, &client)),
+        (Tool::ClaudeCode, _, None) => How::Yourself(claude_add("claude", bridge, &client)),
         (Tool::Codex, Bridge::Command(ghostd), Some(bin)) => How::Command(
             [
                 bin.as_str(),
@@ -395,6 +411,19 @@ pub fn unlink_argv(tool: Tool, binary: Option<&Path>, entry: &str) -> Option<Vec
     }
 }
 
+/// The command that takes Ghost out of Claude Code, for the operator to run when `claude`
+/// is not on the PATH: Ghost never writes `~/.claude.json`.
+pub fn claude_remove_command(entry: &str) -> String {
+    shell_words(&[
+        "claude".to_string(),
+        "mcp".into(),
+        "remove".into(),
+        "--scope".into(),
+        "user".into(),
+        entry.into(),
+    ])
+}
+
 fn parse_toml(text: &str) -> Result<toml_edit::Document, String> {
     text.parse::<toml_edit::Document>()
         .map_err(|_| "it could not be read as TOML".to_string())
@@ -410,11 +439,14 @@ fn edit_file(
     change: impl Fn(Tool, &str) -> Result<String, String>,
 ) -> Result<Option<PathBuf>, String> {
     let shown = shown_path(&w.home, path);
-    let cap = if tool == Tool::ClaudeCode {
-        CLAUDE_JSON_CAP
-    } else {
-        FILE_CAP
-    };
+    // Claude Code rewrites ~/.claude.json itself and keeps its own account there: Ghost
+    // never writes it, by any path (ADR 0068). Its own command does it, or the operator.
+    if tool == Tool::ClaudeCode {
+        return Err(format!(
+            "Ghost does not write {shown}; Claude Code's own command does that"
+        ));
+    }
+    let cap = FILE_CAP;
     let (real, text, mode) = match resolve(&w.home, path) {
         Ok(real) => {
             let mut opened = Vec::new();

@@ -1,0 +1,33 @@
+{
+  "numStartups": 41,
+  "userID": "a1b2c3FIXTUREuserid999",
+  "primaryApiKey": "sk-ant-api03-FIXTUREprimaryKeyNEVERREAD0000",
+  "oauthAccount": {
+    "accountUuid": "FIXTURE-account-uuid-7777",
+    "emailAddress": "someone.private@fixture.example",
+    "organizationUuid": "FIXTURE-org-uuid-8888",
+    "organizationName": "Private Fixture Holdings Ltd"
+  },
+  "customApiKeyResponses": {"approved": ["FIXTUREapprovedkeysuffix"]},
+  "mcpServers": {
+    "linear": {"type": "http", "url": "https://mcp.linear.app/mcp"}
+  },
+  "projects": {
+    "@HOME@/code/payroll-internal": {
+      "allowedTools": ["Bash(git:*)"],
+      "history": [
+        {"display": "FIXTURE private prompt about the payroll export", "pastedContents": {}}
+      ],
+      "lastSessionId": "FIXTURE-session-id-5555",
+      "lastCost": 4.2,
+      "mcpServers": {
+        "payroll-db": {
+          "type": "stdio",
+          "command": "npx",
+          "args": ["-y", "@example/postgres-mcp"],
+          "env": {"PGPASSWORD": "FIXTUREpgpasswordValue123"}
+        }
+      }
+    }
+  }
+}

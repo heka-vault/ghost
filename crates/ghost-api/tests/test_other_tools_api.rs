@@ -344,3 +344,196 @@ async fn an_unknown_tool_is_not_found() {
         404
     );
 }
+
+const CLAUDE_PRIVATE: &str =
+    include_str!("../../ghost-core/src/other_tools/fixtures/claude-private.json");
+/// What `~/.claude.json` holds besides the apps (the same list as the core's test).
+const CLAUDE_PRIVATE_VALUES: [&str; 9] = [
+    "a1b2c3FIXTUREuserid999",
+    "sk-ant-api03-FIXTUREprimaryKeyNEVERREAD0000",
+    "FIXTURE-account-uuid-7777",
+    "someone.private@fixture.example",
+    "FIXTURE-org-uuid-8888",
+    "Private Fixture Holdings Ltd",
+    "FIXTUREapprovedkeysuffix",
+    "FIXTURE private prompt about the payroll export",
+    "FIXTURE-session-id-5555",
+];
+
+fn with_private_claude(s: &Setup) {
+    std::fs::create_dir_all(s.home.join("code/payroll-internal")).unwrap();
+    std::fs::write(
+        s.home.join(".claude.json"),
+        CLAUDE_PRIVATE.replace("@HOME@", &s.home.display().to_string()),
+    )
+    .unwrap();
+}
+
+#[tokio::test]
+async fn nothing_of_claude_codes_account_reaches_the_api_the_vault_or_apps_json() {
+    let s = setup(false);
+    with_private_claude(&s);
+    let c = s.w.client();
+    let r = c.get("/other-tools").await;
+    assert_eq!(r.status, 200, "{}", r.text);
+    let i = c
+        .post(
+            "/other-tools/claude-code/import",
+            Some(json!({"all": true})),
+        )
+        .await;
+    assert_eq!(i.status, 200, "{}", i.text);
+    let file = std::fs::read_to_string(apps_file(&s.w)).unwrap();
+    let mut vault = String::new();
+    for name in s.w.vault.names() {
+        vault += &format!("{name}={}\n", s.w.vault.value(&name).unwrap().as_str());
+    }
+    for v in CLAUDE_PRIVATE_VALUES {
+        for (place, text) in [
+            ("GET", &r.text),
+            ("import", &i.text),
+            ("apps.json", &file),
+            ("vault", &vault),
+        ] {
+            assert!(!text.contains(v), "{v} in {place}: {text}");
+        }
+    }
+    // The project's folder is shown as a label, and never written into apps.json.
+    assert_eq!(
+        found(&r.json, "claude-code", "payroll-db")["scope"],
+        "~/code/payroll-internal only"
+    );
+    assert!(!file.contains("payroll-internal"), "{file}");
+    // Its password is in the vault, under a name of Ghost's.
+    assert!(vault.contains("FIXTUREpgpasswordValue123"));
+    assert!(!file.contains("FIXTUREpgpasswordValue123"));
+}
+
+#[tokio::test]
+async fn claude_code_without_claude_on_the_path_gets_the_command_and_its_file_is_untouched() {
+    let s = setup(false);
+    with_private_claude(&s);
+    let before = std::fs::read_to_string(s.home.join(".claude.json")).unwrap();
+    let c = s.w.client();
+    let shown = c.get("/other-tools").await;
+    let link = &tool(&shown.json, "claude-code")["link"];
+    assert_eq!(link["by"], "yourself");
+    assert!(
+        link["shown"]
+            .as_str()
+            .unwrap()
+            .starts_with("claude mcp add --scope user ghost -- ")
+    );
+    let r = c.post("/other-tools/claude-code/link", None).await;
+    assert_eq!(r.status, 200, "{}", r.text);
+    let cmd = r["run_yourself"].as_str().unwrap();
+    assert!(
+        cmd.starts_with("claude mcp add --scope user ghost -- "),
+        "{cmd}"
+    );
+    assert!(cmd.ends_with("mcp serve --client claude-code"), "{cmd}");
+    assert_eq!(r["backup"], Value::Null);
+    assert!(s.tools.ran().is_empty(), "Ghost ran nothing");
+    assert!(s.w.store.get_client("claude-code").unwrap().is_some());
+    assert_eq!(
+        std::fs::read_to_string(s.home.join(".claude.json")).unwrap(),
+        before
+    );
+    let backups = std::fs::read_dir(&s.home)
+        .unwrap()
+        .filter(|e| {
+            e.as_ref()
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .contains("backup")
+        })
+        .count();
+    assert_eq!(backups, 0);
+}
+
+#[tokio::test]
+async fn taking_ghost_out_of_claude_code_without_claude_is_a_command_too() {
+    let s = setup(false);
+    let text = r#"{"userID": "x", "mcpServers": {"ghost": {"command": "/usr/bin/ghostd", "args": ["mcp", "serve", "--client", "claude-code"]}}}"#.to_string();
+    std::fs::write(s.home.join(".claude.json"), &text).unwrap();
+    let r = s.w.client().delete("/other-tools/claude-code/link").await;
+    assert_eq!(r.status, 200, "{}", r.text);
+    assert_eq!(r["run_yourself"], "claude mcp remove --scope user ghost");
+    assert_eq!(
+        std::fs::read_to_string(s.home.join(".claude.json")).unwrap(),
+        text
+    );
+    assert!(s.tools.ran().is_empty());
+}
+
+/// Log lines, at every level, into a buffer for this test's thread.
+#[derive(Clone, Default)]
+struct Captured(Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl std::io::Write for Captured {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Captured {
+    type Writer = Captured;
+    fn make_writer(&'a self) -> Self::Writer {
+        self.clone()
+    }
+}
+
+#[tokio::test]
+async fn no_log_line_carries_a_token_from_another_tools_file() {
+    let s = setup(true);
+    let sink = Captured::default();
+    let subscriber = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::TRACE)
+        .with_ansi(false)
+        .with_writer(sink.clone())
+        .finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
+    tracing::info!("capture is on");
+    let c = s.w.client();
+    let r = c.get("/other-tools").await;
+    assert_eq!(r.status, 200);
+    // The hostile fixtures first (GitHub's bearer token in ~/.claude.json), then Claude Code's
+    // account file with a project's password.
+    for tool in ["claude-code", "cursor", "codex"] {
+        let i = c
+            .post(
+                &format!("/other-tools/{tool}/import"),
+                Some(json!({"all": true})),
+            )
+            .await;
+        assert_eq!(i.status, 200, "{tool}: {}", i.text);
+    }
+    with_private_claude(&s);
+    assert_eq!(c.get("/other-tools").await.status, 200);
+    let i = c
+        .post(
+            "/other-tools/claude-code/import",
+            Some(json!({"all": true})),
+        )
+        .await;
+    assert_eq!(i.status, 200, "{}", i.text);
+    assert!(s.w.vault.names().iter().any(|n| n.contains("PAYROLL_DB")));
+    let logged = String::from_utf8(sink.0.lock().unwrap().clone()).unwrap();
+    assert!(logged.contains("capture is on"), "the capture works");
+    assert!(
+        logged.contains("other tools:"),
+        "the import logged: {logged}"
+    );
+    for v in SECRETS
+        .iter()
+        .chain(&["FIXTUREpgpasswordValue123"])
+        .chain(CLAUDE_PRIVATE_VALUES.iter())
+    {
+        assert!(!logged.contains(v), "{v} logged: {logged}");
+    }
+}

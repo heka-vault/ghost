@@ -3005,7 +3005,11 @@ export interface components {
         };
         /** @description What letting the tool use Ghost would do, shown before it is done. */
         LinkView: {
-            /** @description command (the tool's own) or file (Ghost writes it, after a backup). */
+            /**
+             * @description command (the tool's own, run by Ghost), file (Ghost writes it, after a backup) or
+             *     yourself (the tool's own command, shown for the operator to run; Claude Code without
+             *     `claude` on the PATH, since Ghost never writes `~/.claude.json`).
+             */
             by: string;
             /** @description It connects by address, with a token in its config. */
             by_address: boolean;
@@ -3287,6 +3291,12 @@ export interface components {
             client: components["schemas"]["ClientView"] | null;
             /** @description What was done, in a sentence. */
             done: string;
+            /**
+             * @description The command for the operator to run in a terminal, when Ghost runs and writes nothing
+             *     of the tool's (Claude Code without `claude` on the PATH). Shown this once: by address it
+             *     carries the tool's token.
+             */
+            run_yourself: string | null;
             tools: components["schemas"]["OtherToolsView"];
         };
         OtherToolsView: {

@@ -2219,6 +2219,7 @@ dependencies = [
  "toml 0.8.2",
  "tower",
  "tracing",
+ "tracing-subscriber",
  "url",
  "utoipa",
  "utoipa-axum",

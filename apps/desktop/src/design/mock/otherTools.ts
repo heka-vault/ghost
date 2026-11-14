@@ -39,9 +39,10 @@ function found(): OtherToolsView {
     installed: true,
     files: [{ path: "~/.claude.json", state: "read", problem: null }],
     uses_ghost: null,
+    // `claude` isn't on the PATH here: Ghost never writes ~/.claude.json, so it shows the command.
     link: {
       client: "claude-code",
-      by: "command",
+      by: "yourself",
       shown: "claude mcp add --scope user ghost -- /usr/lib/heka-ghost-desktop/ghostd mcp serve --client claude-code",
       by_address: false,
     },
@@ -150,10 +151,15 @@ export class MockOtherTools {
   private link(tool: OtherToolView): OtherLinkResult {
     if (tool.uses_ghost || !tool.link) throw new HttpError(409, tool.link_problem ?? `${tool.title} already uses Ghost.`);
     const client = this.hooks.addClient(tool.link.client);
+    if (tool.link.by === "yourself") {
+      // Ghost runs and writes nothing of the tool's; it uses Ghost once the operator runs this.
+      const run_yourself = tool.link.shown;
+      return { done: `Run this in a terminal, then restart ${tool.title} if it is open. Ghost does not write its settings file.`, client, backup: null, run_yourself, tools: structuredClone(this.view) };
+    }
     const backup = tool.link.by === "file" ? `${tool.files[0].path}.ghost-backup-20261114T120000` : null;
     tool.uses_ghost = { entry: "ghost", client: client.name, file: tool.files[0].path, removable: true };
     tool.link = null;
-    return { done: `${tool.title} can use Ghost now; restart it if it is open.`, client, backup, tools: structuredClone(this.view) };
+    return { done: `${tool.title} can use Ghost now; restart it if it is open.`, client, backup, run_yourself: null, tools: structuredClone(this.view) };
   }
 
   private unlink(tool: OtherToolView): OtherLinkResult {
@@ -162,10 +168,11 @@ export class MockOtherTools {
     tool.uses_ghost = null;
     tool.link = {
       client,
-      by: tool.id === "cursor" ? "file" : "command",
+      by: tool.id === "cursor" ? "file" : "yourself",
       shown: tool.id === "cursor" ? "Adds to ~/.cursor/mcp.json" : `claude mcp add --scope user ghost -- ghostd mcp serve --client ${client}`,
       by_address: false,
     };
-    return { done: `${tool.title} no longer uses Ghost.`, client: null, backup: null, tools: structuredClone(this.view) };
+    if (tool.id === "claude-code") return { done: "Run this in a terminal to take Ghost out of Claude Code. Ghost does not write its settings file.", client: null, backup: null, run_yourself: "claude mcp remove --scope user ghost", tools: structuredClone(this.view) };
+    return { done: `${tool.title} no longer uses Ghost.`, client: null, backup: null, run_yourself: null, tools: structuredClone(this.view) };
   }
 }

@@ -10,7 +10,7 @@
  */
 import type { FoundAppView, OtherToolsView, OtherToolView } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
-import { Check, RefreshCw, Terminal } from "lucide-react";
+import { Check, Copy, RefreshCw, Terminal } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { useDesign } from "../../design/context";
@@ -87,6 +87,8 @@ function ToolApps({ tool, onView, links }: { tool: OtherToolView; onView: (v: Ot
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
+  // Claude Code without `claude` on the PATH: Ghost writes nothing of its, and the operator runs this.
+  const [runYourself, setRunYourself] = useState<string | null>(null);
   const [showLink, setShowLink] = useState(false);
 
   const connect = async (a: FoundAppView) => {
@@ -109,6 +111,7 @@ function ToolApps({ tool, onView, links }: { tool: OtherToolView; onView: (v: Ot
     try {
       const r = await client.linkOtherTool(tool.id);
       setDone(r.backup ? `${r.done} The file as it was is in ${r.backup}.` : r.done);
+      setRunYourself(r.run_yourself ?? null);
       setShowLink(false);
       onView(r.tools);
     } catch (e) {
@@ -157,7 +160,24 @@ function ToolApps({ tool, onView, links }: { tool: OtherToolView; onView: (v: Ot
             }
           />
         ))}
-        {tool.uses_ghost ? (
+        {runYourself ? (
+          <ListRow
+            align="start"
+            title={`Run this to let ${tool.title} use Ghost`}
+            description={
+              <>
+                <span className="other-facts">{done}</span>
+                <pre className="other-link t-mono">{runYourself}</pre>
+                <span className="other-facts">Shown this once. If it carries a token, that token is {tool.title}’s alone.</span>
+              </>
+            }
+            trailing={
+              <Button size="sm" variant="secondary" leadingIcon={<Copy />} onClick={() => void navigator.clipboard?.writeText(runYourself)}>
+                Copy
+              </Button>
+            }
+          />
+        ) : tool.uses_ghost ? (
           <ListRow
             leading={<Check className="t-ok" size={16} aria-hidden />}
             title={`${tool.title} uses Ghost`}
@@ -171,7 +191,11 @@ function ToolApps({ tool, onView, links }: { tool: OtherToolView; onView: (v: Ot
               showLink ? (
                 <>
                   <span className="other-facts">
-                    {tool.link.by === "command" ? `Ghost runs ${tool.title}’s own command:` : "Ghost backs the file up beside itself, then adds Ghost to it:"}
+                    {tool.link.by === "command"
+                      ? `Ghost runs ${tool.title}’s own command:`
+                      : tool.link.by === "yourself"
+                        ? `${tool.title}’s command isn’t on this computer’s path, and Ghost doesn’t write its settings file. Ghost gives ${tool.title} its own access and shows you this to run:`
+                        : "Ghost backs the file up beside itself, then adds Ghost to it:"}
                   </span>
                   <pre className="other-link t-mono" data-user-content>
                     {tool.link.shown}
@@ -185,7 +209,7 @@ function ToolApps({ tool, onView, links }: { tool: OtherToolView; onView: (v: Ot
             trailing={
               showLink ? (
                 <Button size="sm" loading={busy === "link"} onClick={link}>
-                  Add Ghost to {tool.title}
+                  {tool.link.by === "yourself" ? "Make the command" : `Add Ghost to ${tool.title}`}
                 </Button>
               ) : (
                 <Button size="sm" variant="secondary" onClick={() => setShowLink(true)}>
