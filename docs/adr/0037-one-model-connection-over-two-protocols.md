@@ -8,7 +8,8 @@
 - **Amended by:** ADR 0056 (Test connection is the provider check, kept per route; a field
   a route refuses is left out of its requests; a failed turn is said); 2026-11-13 below (what
   the desktop is told is the connection Ghost uses; Passwords says it, and `ghostd` reads
-  `settings.env` itself)
+  `settings.env` itself); 2026-11-14 below (the named `cliproxy` provider removed, its saved
+  value read as `custom`)
 
 Ghost reached its model through whatever `ANTHROPIC_BASE_URL` pointed at, or OpenRouter's
 Anthropic API with `GHOST_LLM_ENDPOINT=openrouter`. Only Anthropic's protocol was spoken, the
@@ -127,3 +128,21 @@ file itself (`make` and `make dev`, the user unit and the deploy drop-in, the de
 sets `GHOST_SETTINGS_LOADED=1` and the daemon reads nothing more, so the file is read once
 and each launcher's own rule stands (the file over the login session's exports, a `./.env` in
 its place for the make targets).
+
+## Amendment, 2026-11-14: the named `cliproxy` provider is removed
+
+The owner's decision: Ghost does not offer or describe a named proxy provider. `cliproxy` is
+no longer one of the providers (`ghost_core::connection::PROVIDERS`), the desktop does not
+offer it, and no document a user reads names it. The ways to connect are a key (Anthropic,
+OpenRouter, OpenAI), OpenRouter's sign-in, a model on this computer (Ollama, LM Studio), or
+your own address (`custom`), which reaches any Anthropic- or OpenAI-compatible address.
+
+A `settings.env` that still says `GHOST_LLM_PROVIDER=cliproxy` keeps working without a word:
+`ModelConnection::from_env` reads it (`LEGACY_PROVIDERS`) as `custom` on Anthropic's protocol
+with the route it had (`GHOST_LLM_BASE_URL`, else `CLIPROXY_BASE_URL`, else
+`http://localhost:8317`; `GHOST_LLM_PASSWORD`, else `ANTHROPIC_AUTH_TOKEN`; the same model and
+headers). `GET /model` reports it as `custom` with that address as its own, so Settings shows
+"Your own address" and its first save writes `custom`, never `cliproxy`. With no provider set,
+`ANTHROPIC_BASE_URL` is `custom` whatever `CLIPROXY_BASE_URL` says. A kept model check from
+before is named as `custom` in the slow note's advice. `make perf-providers` and `perf llm`
+time your own address as `custom` (`GHOST_LLM_BASE_URL`, else `ANTHROPIC_BASE_URL`).

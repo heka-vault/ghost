@@ -1677,7 +1677,7 @@ mod tests {
             at: utcnow(),
             route: route.into(),
             role: "main".into(),
-            provider: "cliproxy".into(),
+            provider: "custom".into(),
             model: "m".into(),
             report: json!({"n": n}),
         };

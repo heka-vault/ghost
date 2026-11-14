@@ -14,8 +14,8 @@ use axum::Json;
 use axum::extract::State;
 use ghost_core::apps::AppError;
 use ghost_core::connection::{
-    ENV_KEYS, ModelConnection, PROVIDERS, Protocol as CoreProtocol, format_headers, new_pkce,
-    openrouter_auth_url, provider,
+    ENV_KEYS, LEGACY_PROVIDERS, ModelConnection, PROVIDERS, Protocol as CoreProtocol,
+    format_headers, names_a_provider, new_pkce, openrouter_auth_url, provider,
 };
 use tracing::info;
 use utoipa_axum::router::OpenApiRouter;
@@ -186,14 +186,19 @@ pub fn from_environment(
     let mut read: Vec<&str> = ENV_KEYS.to_vec();
     let named = env
         .get("GHOST_LLM_PROVIDER")
-        .is_some_and(|p| provider(&p.trim().to_lowercase()).is_some());
+        .is_some_and(|p| names_a_provider(p));
     if !named {
         // The older settings count only when no provider is named.
-        read.extend([
-            "GHOST_LLM_ENDPOINT",
-            "ANTHROPIC_BASE_URL",
-            "CLIPROXY_BASE_URL",
-        ]);
+        read.extend(["GHOST_LLM_ENDPOINT", "ANTHROPIC_BASE_URL"]);
+    }
+    if env
+        .get("GHOST_LLM_PROVIDER")
+        .is_some_and(|p| LEGACY_PROVIDERS.contains(&p.trim().to_lowercase().as_str()))
+        && env
+            .get("GHOST_LLM_BASE_URL")
+            .is_none_or(|b| b.trim().is_empty())
+    {
+        read.push("CLIPROXY_BASE_URL"); // a retired provider's address (ADR 0037)
     }
     if !conn.password.is_empty() {
         read.push(conn.password.as_str());

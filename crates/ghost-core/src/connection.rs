@@ -2,9 +2,8 @@
 //!
 //! Spoken sessions with their tool calls, compaction, a watch's model step and the latency
 //! harness all reach the model through the connection this module resolves. A provider is
-//! picked like an app is: Anthropic with a password, OpenRouter by signing in, the operator's
-//! Claude subscription through CLIProxy, OpenAI or a local Ollama or LM Studio, or a URL of
-//! the operator's own that speaks either protocol.
+//! picked like an app is: Anthropic with a password, OpenRouter by signing in, OpenAI or a
+//! local Ollama or LM Studio, or a URL of the operator's own that speaks either protocol.
 //!
 //! Two protocols carry it: Anthropic's Messages API and the OpenAI-compatible Chat
 //! Completions API (the voice crate has a client for each). The key is a Password: the
@@ -14,7 +13,7 @@
 //! The non-secret settings, all in settings.env:
 //!
 //! ```text
-//! GHOST_LLM_PROVIDER     anthropic, openrouter, cliproxy, openai, ollama, lmstudio, custom
+//! GHOST_LLM_PROVIDER     anthropic, openrouter, openai, ollama, lmstudio, custom
 //! GHOST_LLM_MODEL        the model id as the provider names it (a default per provider)
 //! GHOST_LLM_PROTOCOL     anthropic or openai; a custom URL only (the others are fixed)
 //! GHOST_LLM_BASE_URL     overrides the provider's address (folded away in the desktop)
@@ -25,7 +24,9 @@
 //!
 //! With no `GHOST_LLM_PROVIDER` the settings from before keep working unchanged:
 //! `GHOST_LLM_ENDPOINT=openrouter` is OpenRouter with `OPENROUTER_API_KEY`, and the
-//! default (`proxy`) is `ANTHROPIC_BASE_URL` with `ANTHROPIC_AUTH_TOKEN`.
+//! default (`proxy`) is `ANTHROPIC_BASE_URL` with `ANTHROPIC_AUTH_TOKEN`. A
+//! `GHOST_LLM_PROVIDER` that names a provider Ghost no longer offers (`LEGACY_PROVIDERS`) is
+//! read as the custom connection it always was, without a word (ADR 0037, amended 2026-11-14).
 //!
 //! The environment is a parameter (`Env`): the daemon's own, in memory, which the vault
 //! fills (ADR 0036). Nothing here reads the process environment on its own.
@@ -55,7 +56,11 @@ pub const ANTHROPIC_VERSION: &str = "2023-06-01";
 pub const OPENROUTER_ANTHROPIC_URL: &str = "https://openrouter.ai/api";
 pub const OPENROUTER_AUTH_URL: &str = "https://openrouter.ai/auth";
 pub const OPENROUTER_KEYS_URL: &str = "https://openrouter.ai/api/v1/auth/keys";
-pub const CLIPROXY_DEFAULT_URL: &str = "http://localhost:8317";
+/// Provider ids Ghost once offered and still reads from a saved settings.env, as `custom`
+/// with the route they resolved to then; never offered, never written back.
+pub const LEGACY_PROVIDERS: [&str; 1] = ["cliproxy"];
+/// The address the retired `cliproxy` id fell back on when no other was set.
+const LEGACY_PROXY_URL: &str = "http://localhost:8317";
 pub const LIST_TIMEOUT_SECS: f64 = 8.0;
 const EXCHANGE_TIMEOUT_SECS: f64 = 15.0;
 
@@ -200,7 +205,7 @@ const PROVIDER_DEFAULTS: Provider = Provider {
 };
 
 /// The providers, in the order the desktop offers them.
-pub static PROVIDERS: [Provider; 7] = [
+pub static PROVIDERS: [Provider; 6] = [
     Provider {
         id: "anthropic",
         title: "Anthropic",
@@ -220,18 +225,6 @@ pub static PROVIDERS: [Provider; 7] = [
         password: "OPENROUTER_API_KEY",
         sign_in: true,
         default_model: "anthropic/claude-sonnet-5.5",
-        ..PROVIDER_DEFAULTS
-    },
-    Provider {
-        id: "cliproxy",
-        title: "Claude subscription",
-        blurb: "Your Claude plan, through CLIProxy running on your network.",
-        protocol: Protocol::Anthropic,
-        base_url: CLIPROXY_DEFAULT_URL,
-        password: "ANTHROPIC_AUTH_TOKEN",
-        password_optional: true,
-        local: true,
-        default_model: DEFAULT_CLAUDE,
         ..PROVIDER_DEFAULTS
     },
     Provider {
@@ -280,6 +273,12 @@ pub fn provider(id: &str) -> Option<&'static Provider> {
     PROVIDERS.iter().find(|p| p.id == id)
 }
 
+/// Whether `GHOST_LLM_PROVIDER` names a provider, offered or legacy (case and spaces aside).
+pub fn names_a_provider(id: &str) -> bool {
+    let id = id.trim().to_lowercase();
+    provider(&id).is_some() || LEGACY_PROVIDERS.contains(&id.as_str())
+}
+
 fn provider_ids() -> String {
     PROVIDERS
         .iter()
@@ -288,12 +287,17 @@ fn provider_ids() -> String {
         .join(", ")
 }
 
+/// The Password an Anthropic-compatible address takes when the settings name none: the older
+/// `ANTHROPIC_BASE_URL` setting's, and a retired provider's (`LEGACY_PROVIDERS`).
+pub const ANTHROPIC_ADDRESS_PASSWORD: &str = "ANTHROPIC_AUTH_TOKEN";
+
 /// Every Password a provider may use by default: the desktop may set these.
 pub static PASSWORD_NAMES: LazyLock<BTreeSet<&'static str>> = LazyLock::new(|| {
     PROVIDERS
         .iter()
         .filter(|p| !p.password.is_empty())
         .map(|p| p.password)
+        .chain([ANTHROPIC_ADDRESS_PASSWORD])
         .collect()
 });
 
@@ -783,6 +787,21 @@ impl ModelConnection {
         let mut base_override = get("GHOST_LLM_BASE_URL");
         let mut password = get("GHOST_LLM_PASSWORD");
         let mut protocol = get("GHOST_LLM_PROTOCOL").to_lowercase();
+        if LEGACY_PROVIDERS.contains(&provider_id.as_str()) {
+            // A retired id (`cliproxy`): the custom connection it resolved to, the same
+            // route. Its address becomes the connection's own, so a save keeps it.
+            provider_id = "custom".into();
+            protocol = "anthropic".into();
+            if base_override.is_empty() {
+                base_override = get("CLIPROXY_BASE_URL");
+            }
+            if base_override.is_empty() {
+                base_override = LEGACY_PROXY_URL.into();
+            }
+            if password.is_empty() {
+                password = ANTHROPIC_ADDRESS_PASSWORD.into();
+            }
+        }
         if !provider_id.is_empty() && provider(&provider_id).is_none() {
             problems.push(format!(
                 "GHOST_LLM_PROVIDER={provider_id} is not one of {}",
@@ -803,13 +822,7 @@ impl ModelConnection {
                 legacy = "GHOST_LLM_ENDPOINT=openrouter".into();
             } else {
                 let legacy_base = get("ANTHROPIC_BASE_URL");
-                let cliproxy = get("CLIPROXY_BASE_URL");
-                provider_id = if !legacy_base.is_empty()
-                    && !cliproxy.is_empty()
-                    && legacy_base.trim_end_matches('/') == cliproxy.trim_end_matches('/')
-                {
-                    "cliproxy"
-                } else if !legacy_base.is_empty() {
+                provider_id = if !legacy_base.is_empty() {
                     "custom"
                 } else {
                     "anthropic"
@@ -822,7 +835,7 @@ impl ModelConnection {
                     .var("ANTHROPIC_AUTH_TOKEN")
                     .is_some_and(|v| !v.is_empty());
                 if password.is_empty() && (provider_id != "anthropic" || has_token) {
-                    password = "ANTHROPIC_AUTH_TOKEN".into();
+                    password = ANTHROPIC_ADDRESS_PASSWORD.into();
                 }
             }
         }
@@ -839,9 +852,6 @@ impl ModelConnection {
             spec.protocol
         };
         let mut base = base_override.clone();
-        if base.is_empty() && provider_id == "cliproxy" {
-            base = get("CLIPROXY_BASE_URL");
-        }
         if base.is_empty() {
             base = spec.base_url.to_string();
         }
@@ -1208,12 +1218,12 @@ mod tests {
     #[test]
     fn the_operators_setup_from_before_is_openrouter_unchanged() {
         // Their env on 2026-10-28: GHOST_LLM_ENDPOINT=openrouter, no model set, and
-        // ANTHROPIC_BASE_URL pointing at CLIProxy (unused by the endpoint).
+        // ANTHROPIC_BASE_URL pointing at a proxy (unused by the endpoint).
         let env = env(&[
             ("GHOST_LLM_ENDPOINT", "openrouter"),
             ("OPENROUTER_API_KEY", OR_KEY),
-            ("ANTHROPIC_BASE_URL", "http://192.168.1.5:8317"),
-            ("CLIPROXY_BASE_URL", "http://192.168.1.5:8317"),
+            ("ANTHROPIC_BASE_URL", "http://proxy.lan:8317"),
+            ("CLIPROXY_BASE_URL", "http://proxy.lan:8317"),
         ]);
         let c = ModelConnection::from_env(&env);
         let t = c.target(&env);
@@ -1234,7 +1244,7 @@ mod tests {
     #[test]
     fn the_proxy_from_before_is_the_anthropic_base_url_with_its_token() {
         let mut env = env(&[
-            ("ANTHROPIC_BASE_URL", "http://192.168.1.5:8317/"),
+            ("ANTHROPIC_BASE_URL", "http://proxy.lan:8317/"),
             ("ANTHROPIC_AUTH_TOKEN", TOKEN),
         ]);
         let c = ModelConnection::from_env(&env);
@@ -1248,15 +1258,121 @@ mod tests {
             ),
             (
                 "custom",
-                "http://192.168.1.5:8317",
+                "http://proxy.lan:8317",
                 "claude-sonnet-5-5",
                 TOKEN
             )
         );
         assert_eq!(t.protocol, Protocol::Anthropic);
-        // Said to be CLIProxy when it is the CLIProxy address.
-        env.insert("CLIPROXY_BASE_URL".into(), "http://192.168.1.5:8317".into());
-        assert_eq!(ModelConnection::from_env(&env).provider, "cliproxy");
+        // With the older proxy address beside it, it is still your own address, the same route.
+        env.insert("CLIPROXY_BASE_URL".into(), "http://proxy.lan:8317".into());
+        env.insert("ANTHROPIC_BASE_URL".into(), "http://proxy.lan:8317".into());
+        let c = ModelConnection::from_env(&env);
+        assert_eq!(c.provider, "custom");
+        assert_eq!(c.target(&env).base_url, "http://proxy.lan:8317");
+        assert!(c.legacy.is_empty() && c.problems(&env, false).is_empty());
+    }
+
+    /// The route as it was resolved when `cliproxy` was a named provider: its base URL
+    /// (GHOST_LLM_BASE_URL, else CLIPROXY_BASE_URL, else its own default), Anthropic's
+    /// protocol whatever GHOST_LLM_PROTOCOL says, ANTHROPIC_AUTH_TOKEN unless
+    /// GHOST_LLM_PASSWORD names another, Claude by default, the headers as written.
+    fn route(env: &HashMap<String, String>) -> (Protocol, String, String, String, Headers) {
+        let c = ModelConnection::from_env(env);
+        let t = c.target(env);
+        (
+            t.protocol,
+            t.base_url.clone(),
+            t.model.clone(),
+            t.api_key.to_string(),
+            t.headers.clone(),
+        )
+    }
+
+    #[test]
+    fn a_saved_cliproxy_provider_is_your_own_address_on_the_same_route() {
+        assert!(provider("cliproxy").is_none(), "never offered");
+        type Case<'a> = (
+            &'a [(&'a str, &'a str)],
+            (Protocol, &'a str, &'a str, &'a str),
+        );
+        let cases: [Case; 4] = [
+            (
+                &[
+                    ("GHOST_LLM_PROVIDER", "cliproxy"),
+                    ("ANTHROPIC_AUTH_TOKEN", TOKEN),
+                ],
+                (
+                    Protocol::Anthropic,
+                    "http://localhost:8317",
+                    "claude-sonnet-5-5",
+                    TOKEN,
+                ),
+            ),
+            (
+                &[
+                    ("GHOST_LLM_PROVIDER", "CLIProxy"),
+                    ("CLIPROXY_BASE_URL", "http://proxy.lan:8317/"),
+                    ("ANTHROPIC_AUTH_TOKEN", TOKEN),
+                ],
+                (
+                    Protocol::Anthropic,
+                    "http://proxy.lan:8317",
+                    "claude-sonnet-5-5",
+                    TOKEN,
+                ),
+            ),
+            (
+                &[
+                    ("GHOST_LLM_PROVIDER", "cliproxy"),
+                    ("GHOST_LLM_BASE_URL", "http://other.lan:9000"),
+                    ("CLIPROXY_BASE_URL", "http://proxy.lan:8317"),
+                    ("ANTHROPIC_BASE_URL", "http://unused.lan:1"),
+                    ("GHOST_LLM_PROTOCOL", "openai"),
+                    ("GHOST_LLM_MODEL", "claude-opus-5-5"),
+                    ("GHOST_LLM_PASSWORD", "MY_PROXY_KEY"),
+                    ("MY_PROXY_KEY", "sk-mine-0123456789"),
+                    ("ANTHROPIC_AUTH_TOKEN", TOKEN),
+                ],
+                (
+                    Protocol::Anthropic,
+                    "http://other.lan:9000",
+                    "claude-opus-5-5",
+                    "sk-mine-0123456789",
+                ),
+            ),
+            (
+                // No token: the proxy took none, and that was never a problem.
+                &[("GHOST_LLM_PROVIDER", "cliproxy")],
+                (
+                    Protocol::Anthropic,
+                    "http://localhost:8317",
+                    "claude-sonnet-5-5",
+                    "",
+                ),
+            ),
+        ];
+        for (pairs, (protocol, base, model, key)) in cases {
+            let mut e = env(pairs);
+            e.insert("GHOST_LLM_HEADERS".into(), "X-Team: ghost".into());
+            let c = ModelConnection::from_env(&e);
+            assert_eq!(c.provider, "custom", "{pairs:?}");
+            assert_eq!(c.protocol, Protocol::Anthropic);
+            assert!(c.legacy.is_empty(), "silent: {}", c.legacy);
+            assert!(
+                c.problems(&e, false).is_empty(),
+                "{:?}",
+                c.problems(&e, false)
+            );
+            let (p, b, m, k, h) = route(&e);
+            assert_eq!(
+                (p, b.as_str(), m.as_str(), k.as_str()),
+                (protocol, base, model, key)
+            );
+            assert_eq!(h, vec![("X-Team".to_string(), "ghost".to_string())]);
+            // The address is the connection's own now, so saving it as custom keeps it.
+            assert_eq!(c.base_url_override.trim_end_matches('/'), base);
+        }
     }
 
     #[test]

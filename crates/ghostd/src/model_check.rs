@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use ghost_api::ModelCheckRun;
-use ghost_core::connection::{ModelConnection, Target};
+use ghost_core::connection::{LEGACY_PROVIDERS, ModelConnection, Target};
 use ghost_core::store::ModelCheckRow;
 use ghost_llm::capabilities::{self, route_key};
 use ghost_llm::check::{
@@ -47,9 +47,15 @@ const LIVE_LEAST: usize = 5;
 /// is about 1 to 2 KB, so this holds well over the last ten.
 const FIRST_WORD_TAIL_BYTES: u64 = 64 * 1024;
 
-/// "claude-haiku-5-5 via cliproxy".
+/// "claude-haiku-5-5 via openrouter". A check kept from a provider Ghost no longer offers
+/// is named as the connection it is read as now (`custom`).
 fn label(row: &ModelCheckRow) -> String {
-    format!("{} via {}", row.model, row.provider)
+    let provider = if LEGACY_PROVIDERS.contains(&row.provider.as_str()) {
+        "custom"
+    } else {
+        row.provider.as_str()
+    };
+    format!("{} via {provider}", row.model)
 }
 
 fn parsed(row: &ModelCheckRow) -> Option<ModelCheck> {
@@ -322,6 +328,20 @@ mod tests {
     /// One refresh of the note from the operator's own turns, as `refresh_slow_note` does.
     fn step(held: Option<Slow>, secs: f64) -> Option<Slow> {
         settle(held.as_ref(), &[], true, live(secs), &[])
+    }
+
+    #[test]
+    fn a_check_kept_from_a_retired_provider_is_named_as_your_own_address() {
+        let row = |provider: &str| ModelCheckRow {
+            at: Utc::now(),
+            route: "r".into(),
+            role: "fast".into(),
+            provider: provider.into(),
+            model: "claude-haiku-5-5".into(),
+            report: json!({}),
+        };
+        assert_eq!(label(&row("cliproxy")), "claude-haiku-5-5 via custom");
+        assert_eq!(label(&row("openrouter")), "claude-haiku-5-5 via openrouter");
     }
 
     #[test]

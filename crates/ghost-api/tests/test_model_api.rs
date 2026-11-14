@@ -62,6 +62,58 @@ async fn the_setup_from_before_shows_as_openrouter_without_its_key() {
 }
 
 #[tokio::test]
+async fn a_saved_cliproxy_provider_is_reported_and_saved_as_your_own_address() {
+    // A settings.env from before the named provider was removed (ADR 0037, amended
+    // 2026-11-14): it keeps working, read as the custom connection it always was.
+    let w = World::new();
+    w.set_env("GHOST_LLM_PROVIDER", "cliproxy");
+    w.set_env("CLIPROXY_BASE_URL", "http://proxy.lan:8317");
+    w.set_env("ANTHROPIC_AUTH_TOKEN", OPENAI_KEY);
+    let c = w.client();
+    let v = c.get("/model").await;
+    assert_eq!(v.status, 200);
+    assert_eq!(v["provider"], "custom");
+    assert_eq!(v["protocol"], "anthropic");
+    assert_eq!(v["base_url"], "http://proxy.lan:8317");
+    assert_eq!(v["wire_model"], "claude-sonnet-5-5");
+    assert_eq!(v["password"], "ANTHROPIC_AUTH_TOKEN");
+    assert_eq!(v["password_set"], true);
+    assert_eq!(v["legacy"], Value::Null, "silent");
+    assert_eq!(v["ready"], true, "{}", v.text);
+    let ids = common::strings(&v["providers"], "id");
+    assert!(
+        !ids.iter().any(|id| id == "cliproxy"),
+        "never offered: {ids:?}"
+    );
+    assert!(!v.text.to_lowercase().contains("cliproxy"), "{}", v.text);
+    let values = json!({
+        "GHOST_LLM_PROVIDER": "custom",
+        "GHOST_LLM_PROTOCOL": "anthropic",
+        "GHOST_LLM_BASE_URL": "http://proxy.lan:8317",
+        "GHOST_LLM_PASSWORD": "ANTHROPIC_AUTH_TOKEN",
+    });
+    assert_eq!(v["values"], values);
+    // What the page saves is those values: the same route, without the retired name.
+    let r = c.put("/settings", json!({ "values": values })).await;
+    assert_eq!(r.status, 200, "{}", r.text);
+    let saved = std::fs::read_to_string(&w.settings_path).unwrap();
+    assert!(!saved.contains("cliproxy"), "{saved}");
+    assert!(saved.contains("GHOST_LLM_PROVIDER=custom"), "{saved}");
+    let after = c.get("/model").await;
+    for k in [
+        "provider",
+        "protocol",
+        "base_url",
+        "wire_model",
+        "password",
+        "ready",
+    ] {
+        assert_eq!(after[k], v[k], "{k}");
+    }
+    assert!(!after.text.contains(OPENAI_KEY));
+}
+
+#[tokio::test]
 async fn a_key_in_the_vault_counts_without_coming_out() {
     let w = World::new();
     w.set_env("GHOST_LLM_PROVIDER", "openrouter");

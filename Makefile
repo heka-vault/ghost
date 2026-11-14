@@ -280,9 +280,9 @@ perf-llm: ## model and endpoint TTFB with Ghost's prompt and tools (a few thousa
 	@cargo build --release -q -p ghostd --bin ghostd -p ghost-core --bin ghost-mock-github
 	@$(load_env) target/release/ghostd perf llm $(ARGS)
 
-perf-providers: ## the provider check (ADR 0056) on every provider with a key in the environment, compared: make perf-providers [PROVIDERS="proxy anthropic:ANTHROPIC_API_KEY openrouter:OPENROUTER_API_KEY openrouter-openai"] [ARGS=--samples 5]
+perf-providers: ## the provider check (ADR 0056) on every provider with a key in the environment, compared: make perf-providers [PROVIDERS="custom anthropic:ANTHROPIC_API_KEY openrouter:OPENROUTER_API_KEY openrouter-openai"] [ARGS=--samples 5]
 	@cargo build --release -q -p ghostd --bin ghostd
-	@target/release/ghostd perf providers $(or $(PROVIDERS),proxy anthropic openrouter openrouter-openai openai) $(ARGS)
+	@target/release/ghostd perf providers $(or $(PROVIDERS),custom anthropic openrouter openrouter-openai openai) $(ARGS)
 
 perf-hear: ## how well Ghost hears (docs/benchmarks/hear-harness.md): make perf-hear [TAKES=latest|dir] [BASELINE=dir/results.json] [ARGS=--show-text ...]
 	@cargo build --release -q -p ghostd --bin ghostd

@@ -132,10 +132,10 @@ export default function settings(s: Scenario): SettingsFixture {
         GHOST_WAKE_PHRASES: s.data === "busy" ? "hey ghost,okay ghost,ghost wake up" : "hey ghost,okay ghost",
         GHOST_WAKE_FUZZY: "0.8",
         GHOST_JEV: "auto",
-        // The model connection (ADR 0037): busy names its provider, CLIProxy on the LAN; normal
-        // still has the older setting, OpenRouter by GHOST_LLM_ENDPOINT, as the operator did.
+        // The model connection (ADR 0037): busy names its provider, an address of the operator's
+        // own; normal still has the older setting, OpenRouter by GHOST_LLM_ENDPOINT, as the operator did.
         ...(s.data === "busy"
-          ? { GHOST_LLM_PROVIDER: "cliproxy", GHOST_LLM_BASE_URL: "http://192.168.1.5:8317", GHOST_LLM_MODEL: "claude-sonnet-5-5" }
+          ? { GHOST_LLM_PROVIDER: "custom", GHOST_LLM_PROTOCOL: "anthropic", GHOST_LLM_BASE_URL: "https://llm.example.com", GHOST_LLM_PASSWORD: "ANTHROPIC_AUTH_TOKEN", GHOST_LLM_MODEL: "claude-sonnet-5-5" }
           : { GHOST_LLM_ENDPOINT: "openrouter" }),
       }
     : // First run: nothing set yet, the default microphone.
