@@ -95,3 +95,10 @@
 .policy-try__answer.is-allow svg { color: var(--ok); }
 .policy-try__more { margin: 0; font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-3); }
 @media (max-width: 720px) { .policy-try__pick { grid-template-columns: minmax(0, 1fr); } }
+
+/* ADR 0070: what the operator decided on a card sits on top; the rest under Advanced. */
+.policy-decided__meta { display: block; margin-top: var(--space-0_5); }
+.policy-decided__empty { padding: 0; }
+.policy-advanced { margin-top: var(--space-6); }
+.policy-advanced > .g-disclosure__body { display: flex; flex-direction: column; gap: var(--space-8); padding-top: var(--space-4); }
+.policy-advanced__file { display: flex; }

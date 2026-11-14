@@ -561,6 +561,12 @@ function PendingSpecimens() {
       <Spec label="Expired: both buttons off until the daemon clears it" column>
         <PendingChange {...props} expiresAt={at(0)} />
       </Spec>
+      <Spec label="More choices, open: the decision made to stick (ADR 0070), never the default" column>
+        <PendingChange {...props} expiresAt={at(42)} always={{ rule: "github_issues.close", scope: "“close” in github_issues", allow: true }} onAlways={(c) => toast({ title: `${c} pressed`, description: "In the app this calls client.decideAlways(id, choice) and nothing else." })} alwaysOpen />
+      </Spec>
+      <Spec label="More choices, a careful rule of yours asks every time: said instead of “don’t ask again”" column>
+        <PendingChange {...props} expiresAt={at(42)} always={{ rule: "github_issues.close", scope: "“close” in github_issues", allow: false, held: "Your rules ask for this every time: change that in Permissions." }} onAlways={(c) => toast({ title: `${c} pressed` })} alwaysOpen />
+      </Spec>
       <Spec label="Compact, 320 wide (tray)" column>
         <div className="gal-pending-compact">
           <PendingChange {...props} expiresAt={at(42)} compact />

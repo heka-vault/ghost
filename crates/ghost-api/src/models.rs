@@ -85,6 +85,66 @@ pub struct PendingProposal {
     pub rationale: String,
     pub expires_at: DateTime<Utc>,
     pub expires_in_secs: f64,
+    /// What the desktop's card may offer to make the decision stick (ADR 0070). None when
+    /// no rule can name this tool.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub always: Option<AlwaysOffer>,
+}
+
+/// "Yes, and don't ask again" and "No, and never" for one waiting change (ADR 0070): one
+/// tool of one app, named from the tool's name and the app's key only.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct AlwaysOffer {
+    /// The rule a click writes (`github.issue_write`).
+    pub rule: String,
+    /// The tool and app in plain words: `“issue write” in github`.
+    pub scope: String,
+    /// Whether "don't ask again" takes effect; false when a more careful rule of the
+    /// operator's would still ask.
+    pub allow: bool,
+    /// Said instead of "don't ask again" when it would not take effect.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub held: Option<String>,
+}
+
+/// Which way the operator decided, made to stick.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum AlwaysChoice {
+    /// Yes, and don't ask again: the change runs now and the tool runs without asking.
+    Allow,
+    /// No, and never: the change is dropped and the tool is blocked.
+    Block,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct AlwaysRequest {
+    pub choice: AlwaysChoice,
+}
+
+/// A rule the operator set from a decision (ADR 0070), as Settings › Permissions shows it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct PermissionChoiceView {
+    pub id: i64,
+    /// The rule in the file (`github.issue_write`).
+    pub rule: String,
+    pub choice: AlwaysChoice,
+    /// In a sentence: `“issue write” in github runs without asking`.
+    pub sentence: String,
+    pub set_at: DateTime<Utc>,
+    /// The change it was decided on.
+    pub proposal_id: String,
+    /// False when the rule is no longer in the file (taken out by hand).
+    pub in_file: bool,
+}
+
+/// What a decision made to stick did: the rule, and the change run (a yes) or dropped.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct AlwaysResult {
+    pub choice: PermissionChoiceView,
+    /// The change's verified outcome, for a yes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<OutcomeView>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, ToSchema)]

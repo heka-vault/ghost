@@ -139,7 +139,13 @@ pub fn permissions_view(p: &AutonomyPolicy, path: &Path) -> PermissionsView {
     }
 }
 
-pub fn pending_view(p: &Proposal, at: Option<DateTime<Utc>>) -> PendingProposal {
+/// A waiting change as the desktop and the phone show it. `permissions` are the gate's
+/// now, so the card offers only a choice that would take effect (ADR 0070).
+pub fn pending_view(
+    p: &Proposal,
+    at: Option<DateTime<Utc>>,
+    permissions: &ghost_core::permissions::Permissions,
+) -> PendingProposal {
     let at = at.unwrap_or_else(now);
     let left = (p.expires_at - at).num_microseconds().unwrap_or(0) as f64 / 1_000_000.0;
     PendingProposal {
@@ -151,6 +157,18 @@ pub fn pending_view(p: &Proposal, at: Option<DateTime<Utc>>) -> PendingProposal 
         rationale: p.rationale.clone(),
         expires_at: p.expires_at,
         expires_in_secs: left.max(0.0),
+        always: ghost_core::permission_choices::offer(
+            permissions,
+            &p.ability,
+            &p.operation,
+            &ghost_core::gate::WriteGate::args_of(p),
+        )
+        .map(|o| crate::models::AlwaysOffer {
+            rule: o.rule,
+            scope: o.scope,
+            allow: o.allow,
+            held: o.held,
+        }),
     }
 }
 
@@ -178,7 +196,7 @@ pub fn status_snapshot(deps: &Deps) -> Status {
     let pending = st
         .session_id()
         .and_then(|id| deps.gate.pending(&id, None).ok().flatten())
-        .map(|p| pending_view(&p, None));
+        .map(|p| pending_view(&p, None, &deps.gate.autonomy().permissions));
     let mut apps: Vec<String> = match &deps.apps {
         Some(apps) => apps.names().into_iter().filter(|n| apps.is_up(n)).collect(),
         None => Vec::new(),
@@ -224,6 +242,7 @@ pub fn waiting_view(deps: &Deps) -> ApiResult<WaitingView> {
         .into_iter()
         .map(|p| (p.id.clone(), p))
         .collect();
+    let permissions = deps.gate.autonomy().permissions;
     let mut out = Vec::new();
     for i in &items {
         let change = if i.source == ghost_core::waiting::GATE {
@@ -252,7 +271,7 @@ pub fn waiting_view(deps: &Deps) -> ApiResult<WaitingView> {
             delivered_via: i.delivered_via.clone(),
             acknowledged_at: i.acknowledged_at,
             snoozed_until: i.snoozed_until,
-            change: change.map(|c| pending_view(c, Some(at))),
+            change: change.map(|c| pending_view(c, Some(at), &permissions)),
             place: crate::models::waiting_place(&i.source, &i.key),
             question: match change {
                 Some(c) => Some(crate::questions::question_view(
@@ -1633,6 +1652,7 @@ pub fn create_app(deps: SharedDeps) -> (axum::Router, utoipa::openapi::OpenApi) 
         .merge(crate::questions::router())
         .merge(crate::calls::router())
         .merge(crate::reach::router())
+        .merge(crate::permission_choices::router())
         .routes(routes!(get_status))
         .routes(routes!(wake))
         .routes(routes!(sleep))

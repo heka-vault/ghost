@@ -15,12 +15,13 @@ import { useEffect, useState } from "react";
 import { placeOf } from "../../app/places";
 import { hrefFor } from "../../app/router";
 import { nameOf, useToday } from "../../app/today";
-import { Button, IconButton, Input, LineGlyph, Menu, PendingChange, cx, errorText, relativeTime, useLive, useToast } from "../../ui";
+import { Button, IconButton, Input, LineGlyph, Menu, PendingChange, alwaysDone, cx, errorText, relativeTime, useLive, useToast } from "../../ui";
 import { clock, needLine } from "./model";
 import { actionFailure, canSend, expiresIn, sourceLabel, untilTomorrowMorning } from "./needs";
 import { bytes, count, tallyFor } from "./telemetry";
 
-type Act = (key: string, run: () => Promise<unknown>, done?: string) => Promise<void>;
+type Done = string | { title: string; description: string };
+type Act = (key: string, run: () => Promise<unknown>, done?: Done) => Promise<void>;
 
 function useAct(): { busy: string | null; act: Act } {
   const toast = useToast();
@@ -31,7 +32,7 @@ function useAct(): { busy: string | null; act: Act } {
     try {
       const failed = actionFailure(await run());
       if (failed) toast({ title: failed.title, description: failed.text || undefined, tone: failed.tone });
-      else if (done) toast({ title: done });
+      else if (done) toast(typeof done === "string" ? { title: done } : done);
       reload();
     } catch (e) {
       toast({ title: "That didn’t work", description: errorText(e), tone: "danger" });
@@ -189,6 +190,7 @@ export function Now() {
 /**
  * A change waiting for the operator's yes: the one `PendingChange` card, as everywhere. Confirm
  * calls the gate's confirm by id and nothing else (the click is confirmation evidence, ADR 0013).
+ * Its "More choices" makes the decision stick for the change's own tool (ADR 0070).
  */
 function Decide({ item, busy, act, online }: { item: WaitingItemView; busy: boolean; act: Act; online: boolean }) {
   const { client } = useGhost();
@@ -204,6 +206,8 @@ function Decide({ item, busy, act, online }: { item: WaitingItemView; busy: bool
         disabled={!online}
         onConfirm={() => void act(item.key, () => client.confirmProposal(change.id), "Done")}
         onCancel={() => void act(item.key, () => client.cancelProposal(change.id), "Canceled; nothing changed")}
+        always={change.always}
+        onAlways={(choice) => void act(item.key, async () => (await client.decideAlways(change.id, choice)).outcome ?? null, alwaysDone(choice, change.always?.scope ?? "this tool"))}
       />
       <p className="now-decide__meta">
         {sourceLabel(item)} · {relativeTime(item.first_seen)}

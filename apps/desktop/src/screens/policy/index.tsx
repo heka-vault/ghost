@@ -6,13 +6,18 @@
  * rule that matches wins. Ghost's own operations (agents, rules, skills, outputs) are
  * named by the same rules. The model never sees this screen or the file.
  *
+ * At the top, what the operator decided on a change Ghost asked about and made stick ("Yes, and
+ * don't ask again", "No, and never", ADR 0070), each in a sentence and removable through the same
+ * writer (`DELETE /permissions/choices/{id}`). Everything else (the mode, Try it, the rules in
+ * both forms and the file) sits under Advanced, unchanged in behaviour.
+ *
  * Rules apply the moment they are set (`PUT /permissions`); the TOML view edits the whole file
  * (`PUT /policy` with text) and saves through the dock, keeping the operator's comments.
  *   #/settings/permissions                 the rules
  *   ?policy=toml#/settings/permissions     the file (works anywhere)
  *   mock only: ?policy=dirty|invalid|load-error
  */
-import { ApiError, type AppView, type PermissionsView, type PolicyView, type SourceInfo } from "@ghost/client-ts";
+import { ApiError, type AppView, type PermissionChoiceView, type PermissionsView, type PolicyView, type SourceInfo } from "@ghost/client-ts";
 import { permissionLabel, permissionOf, useGhost } from "@ghost/ui";
 import { Code, Hand, Megaphone, ShieldOff, SlidersHorizontal, VolumeX, X } from "lucide-react";
 import { type FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
@@ -44,7 +49,7 @@ import {
 } from "../../ui";
 import { type BarState, SaveBar, useCopy } from "./Bar";
 import { useLeaveGuard } from "./guard";
-import { LISTS, type Level, MODES, type Mode, OWN, errorLine, ruleApp, ruleWords, sentence } from "./model";
+import { LISTS, type Level, MODES, type Mode, OWN, decidedLine, decidedMeta, errorLine, ruleApp, ruleWords, sentence } from "./model";
 import { TomlEditor } from "./TomlEditor";
 import "./policy.css";
 
@@ -76,6 +81,8 @@ export default function PermissionsScreen(_: RouteProps) {
   const [perms, setPerms] = useState<PermissionsView | null>(null);
   const [sources, setSources] = useState<SourceInfo[] | null>(null);
   const [apps, setApps] = useState<AppView[] | null>(null);
+  /** What the operator decided on a card and made stick (ADR 0070); [] from a daemon without it. */
+  const [choices, setChoices] = useState<PermissionChoiceView[] | null>(null);
   /** The file as the operator is editing it in TOML. */
   const [text, setText] = useState("");
   const [view, setView] = useState<View>(designState === "toml" || designState === "invalid" ? "toml" : "rules");
@@ -107,11 +114,12 @@ export default function PermissionsScreen(_: RouteProps) {
         await new Promise((r) => setTimeout(r, 200));
         throw new ApiError(422, `${DEFAULT_PATH}: Invalid value (at line 4, column 9)`);
       }
-      const [p, s, a] = await Promise.all([client.policy(), client.sources(), client.apps().catch(() => null)]);
+      const [p, s, a, c] = await Promise.all([client.policy(), client.sources(), client.apps().catch(() => null), client.permissionChoices().catch(() => [])]);
       if (seq !== loadSeq.current) return null;
       adopt(p);
       setSources(s);
       setApps(a);
+      setChoices(c);
       return p;
     } catch (e) {
       if (seq === loadSeq.current) setLoadError(errorText(e));
@@ -153,6 +161,7 @@ export default function PermissionsScreen(_: RouteProps) {
       .catch(() => {});
     client.sources().then(setSources).catch(() => {});
     client.apps().then(setApps).catch(() => {});
+    client.permissionChoices().then(setChoices).catch(() => {});
   }, [appsVersion, client, adopt]);
 
   // ---------------------------------------------------------------------- rules
@@ -177,6 +186,24 @@ export default function PermissionsScreen(_: RouteProps) {
       if (opts.onError) opts.onError(message);
       else setRuleError(message);
       return false;
+    } finally {
+      setSetting(null);
+    }
+  };
+
+  /** Take a decision's rule back out (ADR 0070): the same writer, then the file read back. No undo: deciding again sets it again. */
+  const removeChoice = async (c: PermissionChoiceView) => {
+    if (!online || setting) return;
+    const key = `choice:${c.id}`;
+    setSetting(key);
+    try {
+      await client.removePermissionChoice(c.id);
+      setChoices((all) => (all ?? []).filter((x) => x.id !== c.id));
+      client.policy().then((v) => !dirtyRef.current && adopt(v)).catch(() => {});
+      client.sources().then(setSources).catch(() => {});
+      toast({ tone: "ok", title: "Removed", description: `${decidedLine(c.sentence)}: not any more. Ghost follows your other rules for it from its next turn.` });
+    } catch (e) {
+      setRuleError(sentence(errorText(e)));
     } finally {
       setSetting(null);
     }
@@ -321,6 +348,11 @@ export default function PermissionsScreen(_: RouteProps) {
         </Notice>
       )}
 
+      <Section id="perm-decided" title="What you’ve decided" description="When Ghost asks about a change, “More choices” on the card can make your answer stick. Those answers are here; remove one and Ghost goes back to the rules below.">
+        <Decided choices={choices} online={online} setting={setting} onRemove={(c) => void removeChoice(c)} />
+      </Section>
+
+      <Disclosure summary="Advanced: the mode, every rule and the policy file" className="policy-advanced">
       <Section id="perm-mode" title="When no rule says otherwise" description="What Ghost does with a change no rule below names. Reads always run unless blocked.">
         <RadioGroup<Mode>
           variant="card"
@@ -381,6 +413,12 @@ export default function PermissionsScreen(_: RouteProps) {
       <p className="policy-foot t-small t-3">
         These apply to Ghost and every agent alike. Each app’s tools, with these rules applied, are on its page under <Link to="/apps">Apps</Link>.
       </p>
+      <div className="policy-advanced__file">
+        <Button size="sm" variant="secondary" leadingIcon={<Code size={14} />} onClick={() => void switchView("toml")}>
+          Edit the policy file
+        </Button>
+      </div>
+      </Disclosure>
     </>
   );
 
@@ -433,6 +471,7 @@ export default function PermissionsScreen(_: RouteProps) {
       title="Permissions"
       description="Everything runs: Ghost uses every app you connect and tells you what it changed. This is where you block, or have Ghost ask you first about, anything you want handled differently. Every change is in the audit log; to reverse one, ask Ghost to change it back."
       actions={
+        view === "toml" && (
         <SegmentedControl<View>
           aria-label="Edit as"
           value={view}
@@ -443,12 +482,40 @@ export default function PermissionsScreen(_: RouteProps) {
             { value: "toml", label: "TOML", icon: <Code /> },
           ]}
         />
+        )
       }
       dock={bar && <SaveBar state={bar} onSave={() => void save()} onDiscard={discard} />}
     >
       {loadError ? <LoadError message={loadError} onRetry={() => void load()} /> : !policy ? <PermissionsSkeleton view={view} /> : view === "rules" ? rules : toml}
       {dialog}
     </Page>
+  );
+}
+
+/* ------------------------------------------------------ what you've decided */
+
+/** The rules set from a decision (ADR 0070), each a sentence with when and how, and Remove. */
+function Decided({ choices, online, setting, onRemove }: { choices: PermissionChoiceView[] | null; online: boolean; setting: string | null; onRemove: (c: PermissionChoiceView) => void }) {
+  if (!choices) return <Skeleton width={260} height={14} />;
+  if (choices.length === 0) return <p className="policy-empty policy-decided__empty">Nothing yet. Ghost asks when your rules say so, and you decide each time.</p>;
+  return (
+    <Card list>
+      {choices.map((c) => (
+        <div key={c.id} className="policy-rule policy-decided">
+          <div className="policy-rule__text">
+            <span className="policy-rule__words" data-user-content>
+              {decidedLine(c.sentence)}
+            </span>
+            <span className="policy-decided__meta t-small t-3">
+              {decidedMeta(c)} · <span className="t-mono">{c.rule}</span>
+            </span>
+          </div>
+          <Button size="sm" variant="ghost" aria-label={`Remove: ${decidedLine(c.sentence)}`} loading={setting === `choice:${c.id}`} disabled={!online || (!!setting && setting !== `choice:${c.id}`)} onClick={() => onRemove(c)}>
+            Remove
+          </Button>
+        </div>
+      ))}
+    </Card>
   );
 }
 
