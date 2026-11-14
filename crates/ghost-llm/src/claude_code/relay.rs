@@ -159,9 +159,9 @@ fn refuse(status: StatusCode, why: &'static str) -> Response {
 }
 
 /// The checks every request passes before its body is read.
-fn admit(s: &Shared, headers: &HeaderMap) -> Result<(), Response> {
+fn admit(s: &Shared, headers: &HeaderMap) -> Result<(), (StatusCode, &'static str)> {
     if headers.contains_key(header::ORIGIN) {
-        return Err(refuse(StatusCode::FORBIDDEN, "no browser requests"));
+        return Err((StatusCode::FORBIDDEN, "no browser requests"));
     }
     let port = s.port.get().copied().unwrap_or(0);
     let host_ok = headers
@@ -169,7 +169,7 @@ fn admit(s: &Shared, headers: &HeaderMap) -> Result<(), Response> {
         .and_then(|h| h.to_str().ok())
         .is_some_and(|h| h == format!("127.0.0.1:{port}") || h == format!("localhost:{port}"));
     if !host_ok {
-        return Err(refuse(StatusCode::FORBIDDEN, "not this host"));
+        return Err((StatusCode::FORBIDDEN, "not this host"));
     }
     let given = headers
         .get(header::AUTHORIZATION)
@@ -177,7 +177,7 @@ fn admit(s: &Shared, headers: &HeaderMap) -> Result<(), Response> {
         .and_then(|h| h.strip_prefix("Bearer "))
         .unwrap_or("");
     if given.len() != s.token.len() || !bool::from(given.as_bytes().ct_eq(s.token.as_bytes())) {
-        return Err(refuse(StatusCode::UNAUTHORIZED, "no"));
+        return Err((StatusCode::UNAUTHORIZED, "no"));
     }
     Ok(())
 }
@@ -197,8 +197,8 @@ fn reply(id: &Value, result: Result<Value, (i64, String)>) -> Response {
 }
 
 async fn on_post(State(s): State<Arc<Shared>>, headers: HeaderMap, body: Bytes) -> Response {
-    if let Err(r) = admit(&s, &headers) {
-        return r;
+    if let Err((status, why)) = admit(&s, &headers) {
+        return refuse(status, why);
     }
     let Ok(msg) = serde_json::from_slice::<Value>(&body) else {
         return refuse(StatusCode::BAD_REQUEST, "not JSON");
@@ -275,8 +275,8 @@ async fn on_post(State(s): State<Arc<Shared>>, headers: HeaderMap, body: Bytes) 
 
 /// The server's messages to the program: the tool list changed.
 async fn on_get(State(s): State<Arc<Shared>>, headers: HeaderMap) -> Response {
-    if let Err(r) = admit(&s, &headers) {
-        return r;
+    if let Err((status, why)) = admit(&s, &headers) {
+        return refuse(status, why);
     }
     let rx = s.changed.subscribe();
     Sse::new(list_changed(rx))
@@ -306,8 +306,8 @@ fn list_changed(
 }
 
 async fn on_delete(State(s): State<Arc<Shared>>, headers: HeaderMap) -> Response {
-    if let Err(r) = admit(&s, &headers) {
-        return r;
+    if let Err((status, why)) = admit(&s, &headers) {
+        return refuse(status, why);
     }
     StatusCode::OK.into_response()
 }

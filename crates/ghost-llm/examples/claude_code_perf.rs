@@ -37,7 +37,10 @@ fn secs(d: Duration) -> f64 {
 }
 
 /// The first word, the end, and the call if one came.
-async fn turn(cc: &ClaudeCode, ctx: &Context) -> (Option<f64>, f64, Option<ghost_llm::ToolCall>, String) {
+async fn turn(
+    cc: &ClaudeCode,
+    ctx: &Context,
+) -> (Option<f64>, f64, Option<ghost_llm::ToolCall>, String) {
     let began = Instant::now();
     let mut first = None;
     let mut call = None;
@@ -67,7 +70,10 @@ async fn turn(cc: &ClaudeCode, ctx: &Context) -> (Option<f64>, f64, Option<ghost
 
 #[tokio::main]
 async fn main() {
-    let rounds: usize = std::env::args().nth(1).and_then(|n| n.parse().ok()).unwrap_or(3);
+    let rounds: usize = std::env::args()
+        .nth(1)
+        .and_then(|n| n.parse().ok())
+        .unwrap_or(3);
     let base = std::env::var("GHOST_PERF_CC_BASE_URL").expect("GHOST_PERF_CC_BASE_URL");
     let token = std::env::var("GHOST_PERF_CC_TOKEN").expect("GHOST_PERF_CC_TOKEN");
     let started: HashMap<String, String> = ["HOME", "PATH", "USER", "LANG"]
@@ -88,7 +94,10 @@ async fn main() {
         let ready = secs(began.elapsed());
         let mut ctx = Context::new(SYSTEM);
         let mut words = Vec::new();
-        for (i, q) in ["Name a colour.", "Name a fruit.", "Name an animal."].iter().enumerate() {
+        for (i, q) in ["Name a colour.", "Name a fruit.", "Name an animal."]
+            .iter()
+            .enumerate()
+        {
             ctx.push(Message::user(*q));
             let (first, _, _, text) = turn(&cc, &ctx).await;
             ctx.push_reply(text, Vec::new());

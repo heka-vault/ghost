@@ -15,7 +15,13 @@ A step: {"text": "..."} streamed a word at a time ({"pace": seconds} between wor
 {"die": true}; {"error": "authentication_failed"}; {"retry": 401} (repeated until
 interrupted); {"limit": true}.
 """
-import json, os, sys, threading, time, urllib.request
+
+import json
+import os
+import sys
+import threading
+import time
+import urllib.request
 
 HOME = os.environ.get("HOME", "/nonexistent")
 DIR = os.path.join(HOME, ".fake-claude")
@@ -36,8 +42,16 @@ def out(obj):
 
 
 args = sys.argv[1:]
-log("runs.jsonl", {"argv": args, "env": sorted(os.environ.keys()),
-                   "inherited": {k: os.environ[k] for k in os.environ if k.startswith(("ANTHROPIC", "CLAUDE"))}})
+log(
+    "runs.jsonl",
+    {
+        "argv": args,
+        "env": sorted(os.environ.keys()),
+        "inherited": {
+            k: os.environ[k] for k in os.environ if k.startswith(("ANTHROPIC", "CLAUDE"))
+        },
+    },
+)
 
 if args[:1] == ["--version"]:
     print(SCENARIO.get("version", "2.1.325") + " (Claude Code)")
@@ -46,7 +60,9 @@ if args[:1] == ["--help"]:
     sys.stdout.write(open(SCENARIO["help"]).read())
     sys.exit(0)
 if args[:2] == ["auth", "status"]:
-    st = SCENARIO.get("status", {"loggedIn": True, "authMethod": "claude.ai", "subscriptionType": "pro"})
+    st = SCENARIO.get(
+        "status", {"loggedIn": True, "authMethod": "claude.ai", "subscriptionType": "pro"}
+    )
     print(json.dumps(st))
     sys.exit(0 if st.get("loggedIn") else 1)
 
@@ -70,7 +86,9 @@ def rpc(method, params=None, notify=False, bearer=None, origin=None):
         body["id"] = NEXT_ID[0]
     headers = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
     headers.update(relay.get("headers", {}))
-    req = urllib.request.Request(relay["url"], data=json.dumps(body).encode(), headers=headers, method="POST")
+    req = urllib.request.Request(
+        relay["url"], data=json.dumps(body).encode(), headers=headers, method="POST"
+    )
     with urllib.request.urlopen(req, timeout=600) as r:
         text = r.read().decode()
     return json.loads(text) if text and not notify else None
@@ -78,7 +96,14 @@ def rpc(method, params=None, notify=False, bearer=None, origin=None):
 
 TOOLS = []
 if relay:
-    rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "fake", "version": "0"}})
+    rpc(
+        "initialize",
+        {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": {"name": "fake", "version": "0"},
+        },
+    )
     rpc("notifications/initialized", notify=True)
     TOOLS = [t["name"] for t in rpc("tools/list")["result"]["tools"]]
 
@@ -93,20 +118,53 @@ def ev(e):
 
 
 def result(error=False, status=None):
-    out({"type": "result", "subtype": "success" if not error else "error_during_execution", "is_error": error,
-         "api_error_status": status, "stop_reason": "end_turn",
-         "usage": {"input_tokens": 9, "output_tokens": 5, "cache_read_input_tokens": 300, "cache_creation_input_tokens": 0}})
+    out(
+        {
+            "type": "result",
+            "subtype": "success" if not error else "error_during_execution",
+            "is_error": error,
+            "api_error_status": status,
+            "stop_reason": "end_turn",
+            "usage": {
+                "input_tokens": 9,
+                "output_tokens": 5,
+                "cache_read_input_tokens": 300,
+                "cache_creation_input_tokens": 0,
+            },
+        }
+    )
 
 
 def run_turn(steps):
     INTERRUPTED.clear()
-    out({"type": "system", "subtype": "init", "tools": ["mcp__ghost__" + t for t in TOOLS], "model": arg("--model")})
+    out(
+        {
+            "type": "system",
+            "subtype": "init",
+            "tools": ["mcp__ghost__" + t for t in TOOLS],
+            "model": arg("--model"),
+        }
+    )
     for step in steps:
         if "die" in step:
             os._exit(3)
         if "error" in step:
-            out({"type": "assistant", "error": step["error"], "message": {"model": "<synthetic>", "role": "assistant",
-                 "content": [{"type": "text", "text": "Words of the program's own that Ghost never repeats"}]}})
+            out(
+                {
+                    "type": "assistant",
+                    "error": step["error"],
+                    "message": {
+                        "model": "<synthetic>",
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Words of the program's own that Ghost never repeats",
+                            }
+                        ],
+                    },
+                }
+            )
             result(error=True)
             return
         if "limit" in step:
@@ -116,37 +174,96 @@ def run_turn(steps):
             n = 0
             while not INTERRUPTED.is_set():
                 n += 1
-                out({"type": "system", "subtype": "api_retry", "attempt": n, "max_retries": 10, "retry_delay_ms": 500 * n,
-                     "error_status": step["retry"], "error": "authentication_failed" if step["retry"] == 401 else "rate_limit"})
+                out(
+                    {
+                        "type": "system",
+                        "subtype": "api_retry",
+                        "attempt": n,
+                        "max_retries": 10,
+                        "retry_delay_ms": 500 * n,
+                        "error_status": step["retry"],
+                        "error": "authentication_failed" if step["retry"] == 401 else "rate_limit",
+                    }
+                )
                 time.sleep(0.1)
             result(error=True)
             return
-        ev({"type": "message_start", "message": {"model": "claude-haiku-5-5", "id": "msg_fixture", "type": "message",
-            "role": "assistant", "content": [], "usage": {"input_tokens": 9, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 300, "output_tokens": 1}}})
+        ev(
+            {
+                "type": "message_start",
+                "message": {
+                    "model": "claude-haiku-5-5",
+                    "id": "msg_fixture",
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [],
+                    "usage": {
+                        "input_tokens": 9,
+                        "cache_creation_input_tokens": 0,
+                        "cache_read_input_tokens": 300,
+                        "output_tokens": 1,
+                    },
+                },
+            }
+        )
         if "text" in step:
-            ev({"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}})
+            ev(
+                {
+                    "type": "content_block_start",
+                    "index": 0,
+                    "content_block": {"type": "text", "text": ""},
+                }
+            )
             words = step["text"].split(" ")
             for i, w in enumerate(words):
                 if INTERRUPTED.is_set():
                     result(error=True)
                     return
-                ev({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": (" " if i else "") + w}})
+                ev(
+                    {
+                        "type": "content_block_delta",
+                        "index": 0,
+                        "delta": {"type": "text_delta", "text": (" " if i else "") + w},
+                    }
+                )
                 time.sleep(step.get("pace", 0))
             ev({"type": "content_block_stop", "index": 0})
-            ev({"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": len(words)}})
+            ev(
+                {
+                    "type": "message_delta",
+                    "delta": {"stop_reason": "end_turn"},
+                    "usage": {"output_tokens": len(words)},
+                }
+            )
             ev({"type": "message_stop"})
         if "tool" in step:
             calls = step["tool"] if isinstance(step["tool"], list) else [step["tool"]]
             inputs = step.get("input", {})
             for i, name in enumerate(calls):
-                ev({"type": "content_block_start", "index": i, "content_block": {"type": "tool_use", "id": "toolu_fixture",
-                    "name": "mcp__ghost__" + name, "input": {}}})
+                ev(
+                    {
+                        "type": "content_block_start",
+                        "index": i,
+                        "content_block": {
+                            "type": "tool_use",
+                            "id": "toolu_fixture",
+                            "name": "mcp__ghost__" + name,
+                            "input": {},
+                        },
+                    }
+                )
                 ev({"type": "content_block_stop", "index": i})
-            ev({"type": "message_delta", "delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 40}})
+            ev(
+                {
+                    "type": "message_delta",
+                    "delta": {"stop_reason": "tool_use"},
+                    "usage": {"output_tokens": 40},
+                }
+            )
             ev({"type": "message_stop"})
             answers = [None] * len(calls)
 
-            def call(i, name):
+            def call(i, name, answers=answers, inputs=inputs):
                 try:
                     answers[i] = rpc("tools/call", {"name": name, "arguments": inputs})
                 except Exception as e:
@@ -163,8 +280,21 @@ def run_turn(steps):
                     result(error=True)
                     return
                 time.sleep(0.01)
-            out({"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_fixture",
-                 "content": [{"type": "text", "text": "(the relay's answer)"}]}]}})
+            out(
+                {
+                    "type": "user",
+                    "message": {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": "toolu_fixture",
+                                "content": [{"type": "text", "text": "(the relay's answer)"}],
+                            }
+                        ],
+                    },
+                }
+            )
     result()
 
 
@@ -194,8 +324,26 @@ for line in sys.stdin:
         log("control.jsonl", {"subtype": sub})
         if sub == "interrupt":
             INTERRUPTED.set()
-        resp = {"models": [{"value": "haiku", "displayName": "Haiku"}, {"value": "sonnet", "displayName": "Sonnet"}]} if sub == "initialize" else {}
-        out({"type": "control_response", "response": {"subtype": "success", "request_id": msg["request_id"], "response": resp}})
+        resp = (
+            {
+                "models": [
+                    {"value": "haiku", "displayName": "Haiku"},
+                    {"value": "sonnet", "displayName": "Sonnet"},
+                ]
+            }
+            if sub == "initialize"
+            else {}
+        )
+        out(
+            {
+                "type": "control_response",
+                "response": {
+                    "subtype": "success",
+                    "request_id": msg["request_id"],
+                    "response": resp,
+                },
+            }
+        )
     elif msg.get("type") == "user":
         log("turns.jsonl", {"text": msg["message"]["content"]})
         with COND:

@@ -168,8 +168,11 @@ pub enum Incoming {
     Ended,
 }
 
+/// A program, by its path and when it last changed.
+type Binary = (PathBuf, Option<SystemTime>);
+
 /// The switches a program lacks, asked once per binary and kept until it changes.
-static SWITCHES: LazyLock<StdMutex<HashMap<(PathBuf, Option<SystemTime>), Vec<&'static str>>>> =
+static SWITCHES: LazyLock<StdMutex<HashMap<Binary, Vec<&'static str>>>> =
     LazyLock::new(|| StdMutex::new(HashMap::new()));
 
 async fn missing_switches(settings: &Settings) -> Vec<&'static str> {
@@ -1009,7 +1012,10 @@ mod tests {
                 "{name} is used but not required of the program"
             );
         }
-        assert!(s.harness_env.is_empty(), "a product path never sets the harness's variables");
+        assert!(
+            s.harness_env.is_empty(),
+            "a product path never sets the harness's variables"
+        );
         let env = environment(&s);
         assert_eq!(
             env.keys().map(String::as_str).collect::<Vec<_>>(),
