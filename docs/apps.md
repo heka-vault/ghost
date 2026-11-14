@@ -32,6 +32,11 @@ signs in to it, or sends the key you give), or by pasting the config another too
 value shaped like a token), or in the address's query. An entry it can't read is named,
 not dropped quietly.
 
+The catalog is the registry's text, shown to you as it is. Ghost removes only the
+protocol's name from it. None of it reaches the model, and nothing the registry fixes (a
+header, an argument, an address) can name one of Ghost's passwords: only the settings you
+fill in are.
+
 ### From the AI tools already on this computer
 
 If Claude Code, Cursor or Codex is set up here, the first run's app step and **Apps** (under
@@ -55,10 +60,10 @@ ghostd setup import claude-code --all
 Each import shows what it will connect, and the command it will run, and asks first unless
 `--yes`.
 
-The catalog is the registry's text, shown to you as it is. Ghost removes only the
-protocol's name from it. None of it reaches the model, and nothing the registry fixes (a
-header, an argument, an address) can name one of Ghost's passwords: only the settings you
-fill in are.
+#### What Ghost keeps from those files
+
+Their app lists, and nothing else. `~/.claude.json` also holds that tool's account and your
+projects' history; Ghost reads it for its app list only and keeps nothing else from it.
 
 ### Who publishes an app, and where it runs
 

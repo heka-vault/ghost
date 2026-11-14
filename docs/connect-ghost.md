@@ -92,8 +92,11 @@ what Ghost will do before it does it:
 - Claude Code and Codex: their own command, when it is installed
   (`claude mcp add --scope user ghost -- …/ghostd mcp serve --client claude-code`,
   `codex mcp add ghost -- …/ghostd mcp serve --client codex`).
-- Otherwise the tool's own file (`~/.cursor/mcp.json`, `~/.claude.json`, Codex's
-  `config.toml`): Ghost copies it to `<file>.ghost-backup-<time>` beside it, adds its one entry,
+- Claude Code without `claude` on your path: Ghost never writes `~/.claude.json` (Claude Code
+  rewrites it itself and keeps its account there). **Make the command** shows the exact
+  `claude mcp add …` to run in a terminal, with Copy; taking Ghost out shows
+  `claude mcp remove --scope user ghost` the same way.
+- Otherwise the tool's own file (`~/.cursor/mcp.json`, or Codex's `config.toml`): Ghost copies it to `<file>.ghost-backup-<time>` beside it, adds its one entry,
   and keeps every other entry, the order and the file's permissions. A file with comments is not
   written; Ghost shows the entry to add by hand.
 

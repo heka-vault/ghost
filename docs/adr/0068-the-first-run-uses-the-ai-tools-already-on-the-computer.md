@@ -29,15 +29,21 @@ before it is done:
    address with no key of its own is offered as a sign-in through Ghost's own flow; the other
    tool's stored sign-in is never copied. A second import of the same apps changes nothing.
 2. **Ghost as a tool of theirs.** "Let Cursor use Ghost" makes a client exactly as `ghostd mcp
-   add` does (`ghost_app::clients`) and adds Ghost to that tool: by its own command when it is
-   on the PATH (`claude mcp add --scope user ghost -- …`, `codex mcp add ghost -- …`), otherwise
-   into its user file by a merge that keeps every other entry and key in order and the file's
-   mode, after a timestamped backup beside it, and in place by one rename. Where `ghostd` stays
-   put the tool runs `ghostd mcp serve --client <name>` and its file holds no token; from an
-   AppImage it connects by address with the token in a header, as the operator would have
-   pasted it. A file with comments (which Ghost would lose) is not written: the entry is shown
-   to add by hand. Removing the client in Settings › Outside tools offers to take the line back
-   out (`DELETE /other-tools/{tool}/link`).
+   add` does (`ghost_app::clients`) and adds Ghost to that tool: Claude Code and Codex by their
+   own command when it is on the PATH (`claude mcp add --scope user ghost -- …`, `codex mcp add
+   ghost -- …`), run as argv. **Ghost never writes `~/.claude.json`**: Claude Code rewrites that
+   file itself and keeps its own account state there, so without `claude` on the PATH Ghost makes
+   the client and shows the exact `claude mcp add …` command for the operator to run (in the app
+   and from `ghostd setup link`), and the same for `claude mcp remove` on unlink; the one file
+   writer refuses that file whatever plan reaches it. Cursor's `~/.cursor/mcp.json` and Codex's
+   `config.toml` (without `codex`) are merged: every other entry and key kept in order, the
+   file's mode kept, a timestamped backup beside it first, and the new file put in place by one
+   rename. Where `ghostd` stays put the tool runs `ghostd mcp serve --client <name>` and its file
+   holds no token; from an AppImage it connects by address with the token in a header, as the
+   operator would have pasted it (and the command shown to run carries it, once). A file with
+   comments (which Ghost would lose) is not written: the entry is shown to add by hand. Removing
+   the client in Settings › Outside tools offers to take the line back out
+   (`DELETE /other-tools/{tool}/link`).
 3. **A model connection that is already there.** Ollama or LM Studio answering on their default
    loopback ports, with their model lists, and `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY` or
    `OPENAI_API_KEY` set in the environment Ghost was started in (which Ghost reads already, ADR
@@ -73,6 +79,16 @@ and a GET of `http://127.0.0.1:11434/api/tags` and `http://127.0.0.1:1234/v1/mod
 each, no redirects, no proxy. Whether a tool is set up is a stat of its folder or its command
 on the PATH, never a read.
 
+**`~/.claude.json` is read for its app list only.** It also holds Claude Code's account (an
+email, an organisation, an id, perhaps a key) and each project's history: Ghost deserializes only
+the two `mcpServers` maps into types of its own with no other field
+(`other_tools::claude::read_claude_json`), drops the text before the function returns, and what
+leaves it holds the app entries and the project folders they belong to, nothing else
+(`nothing_but_the_apps_leaves_claude_json`, and through the API, the vault and `apps.json`,
+`nothing_of_claude_codes_account_reaches_the_api_the_vault_or_apps_json`). A project's folder is
+shown only as a short label (`~/code/site only`, 60 characters at most, redacted) and never
+written into `apps.json`.
+
 **Never opened:** another tool's sign-in. Not Claude Code's or Codex's subscription tokens,
 not Cursor's session, not a keychain: `~/.claude/` (all of it, `.credentials.json` included),
 `~/.codex/auth.json`, `~/.config/Cursor/`, and any file named for credentials, a token, a key
@@ -100,10 +116,13 @@ turned off in its tool is named and not offered.
   `~/.local/share/ghost/clients/` (0600), as `ghostd mcp add --command` writes.
 - The other tool's own settings, only when the operator lets it use Ghost or takes Ghost back
   out: by its command (`claude mcp add|remove --scope user`, `codex mcp add|remove`), run as
-  argv with none of Ghost's passwords in its environment and a 30 s bound, or in its user file
-  (`~/.claude.json`, `~/.cursor/mcp.json`, Codex's `config.toml`), with the old file kept beside
-  it as `<name>.ghost-backup-<time>`. A failure takes the client back out, and the file is as it
-  was.
+  argv with none of Ghost's passwords in its environment and a 30 s bound, or in Cursor's
+  `~/.cursor/mcp.json` or Codex's `config.toml`, with the old file kept beside it as
+  `<name>.ghost-backup-<time>`. Never `~/.claude.json`: without `claude`, the operator runs the
+  command Ghost shows. A failure takes the client back out, and the file is as it was.
+- Nothing of what is read reaches a log line: the import logs a count, and
+  `no_log_line_carries_a_token_from_another_tools_file` captures every level during detection
+  and import from the hostile fixtures and finds none of their tokens.
 
 ## Consequences
 
