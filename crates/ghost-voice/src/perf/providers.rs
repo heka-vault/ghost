@@ -8,9 +8,10 @@
 //! doesn't open it), never printed, never written; the report names the variable. A
 //! provider whose variable is unset is skipped, saying which variable to set.
 //!
-//! - `proxy[:VAR]`: the subscription proxy at `ANTHROPIC_BASE_URL` (`CLIPROXY_BASE_URL`,
-//!   then CLIProxy's own address), Anthropic's API; `VAR` defaults to
-//!   `ANTHROPIC_AUTH_TOKEN` and may be unset (the proxy may take no key).
+//! - `custom[:VAR]`: your own address, `GHOST_LLM_BASE_URL` (else `ANTHROPIC_BASE_URL`), on
+//!   `GHOST_LLM_PROTOCOL` (Anthropic's API by default); `VAR` defaults to `LLM_API_KEY`
+//!   (`ANTHROPIC_AUTH_TOKEN` for `ANTHROPIC_BASE_URL`) and may be unset (an address may
+//!   take no key). With no address it is skipped, saying which variable to set.
 //! - `anthropic[:VAR]`: the API direct; `ANTHROPIC_API_KEY`.
 //! - `openrouter[:VAR]`: OpenRouter's Anthropic API; `OPENROUTER_API_KEY`.
 //! - `openrouter-openai[:VAR]`: OpenRouter's OpenAI-compatible API; `OPENROUTER_API_KEY`.
@@ -31,7 +32,7 @@ use ghost_llm::{DEFAULT_THINKING, Model};
 use serde_json::json;
 
 pub const USAGE: &str = "usage: ghostd perf providers PROVIDER[:KEY_VARIABLE]... [--models main,fast] \
-                         [--samples N] [--out FILE.md]\n  providers: proxy anthropic openrouter \
+                         [--samples N] [--out FILE.md]\n  providers: custom anthropic openrouter \
                          openrouter-openai openai ollama lmstudio";
 
 const OPENROUTER_OPENAI: &str = "https://openrouter.ai/api/v1";
@@ -48,14 +49,14 @@ pub struct Named {
     pub key_optional: bool,
 }
 
-/// `proxy`, `anthropic:MY_KEY`, ...
+/// `custom`, `anthropic:MY_KEY`, ...
 pub fn parse_named(spec: &str) -> Result<Named, String> {
     let (name, var) = match spec.split_once(':') {
         Some((n, v)) => (n, Some(v.to_string())),
         None => (spec, None),
     };
     let (default, optional) = match name {
-        "proxy" => (Some("ANTHROPIC_AUTH_TOKEN"), true),
+        "custom" => (None, true), // its default depends on the address: `key_var`
         "anthropic" => (Some("ANTHROPIC_API_KEY"), false),
         "openrouter" | "openrouter-openai" => (Some("OPENROUTER_API_KEY"), false),
         "openai" => (Some("OPENAI_API_KEY"), false),
@@ -82,19 +83,17 @@ fn settings(named: &Named, env: &HashMap<String, String>) -> HashMap<String, Str
     let mut put = |k: &str, v: &str| {
         out.insert(k.into(), v.into());
     };
+    let set = |k: &str| env.get(k).filter(|v| !v.trim().is_empty()).cloned();
     match named.name.as_str() {
-        "proxy" => {
-            put("GHOST_LLM_PROVIDER", "cliproxy");
-            if let Some(b) = env
-                .get("ANTHROPIC_BASE_URL")
-                .filter(|b| !b.trim().is_empty())
-            {
-                put("GHOST_LLM_BASE_URL", b);
-            } else if let Some(b) = env
-                .get("CLIPROXY_BASE_URL")
-                .filter(|b| !b.trim().is_empty())
-            {
-                put("CLIPROXY_BASE_URL", b);
+        "custom" => {
+            put("GHOST_LLM_PROVIDER", "custom");
+            if let Some(p) = set("GHOST_LLM_PROTOCOL") {
+                put("GHOST_LLM_PROTOCOL", &p);
+            }
+            if let Some(b) = set("GHOST_LLM_BASE_URL") {
+                put("GHOST_LLM_BASE_URL", &b);
+            } else if let Some(b) = set("ANTHROPIC_BASE_URL") {
+                put("GHOST_LLM_BASE_URL", &b);
             }
         }
         "openrouter-openai" => {
@@ -104,13 +103,35 @@ fn settings(named: &Named, env: &HashMap<String, String>) -> HashMap<String, Str
         }
         other => put("GHOST_LLM_PROVIDER", other),
     }
-    if let Some(var) = &named.key_var {
-        put("GHOST_LLM_PASSWORD", var);
-        if let Some(v) = env.get(var) {
-            put(var, v);
+    if let Some(var) = key_var(named, env) {
+        put("GHOST_LLM_PASSWORD", &var);
+        if let Some(v) = env.get(&var) {
+            put(&var, v);
         }
     }
     out
+}
+
+/// The variable a provider's key is read from: as named, else its default; your own
+/// address's is `LLM_API_KEY`, or `ANTHROPIC_AUTH_TOKEN` beside `ANTHROPIC_BASE_URL`.
+pub fn key_var(named: &Named, env: &HashMap<String, String>) -> Option<String> {
+    if named.key_var.is_some() || named.name != "custom" {
+        return named.key_var.clone();
+    }
+    let own = env
+        .get("GHOST_LLM_BASE_URL")
+        .is_some_and(|b| !b.trim().is_empty());
+    let anthropic = env
+        .get("ANTHROPIC_BASE_URL")
+        .is_some_and(|b| !b.trim().is_empty());
+    Some(
+        if !own && anthropic {
+            "ANTHROPIC_AUTH_TOKEN"
+        } else {
+            "LLM_API_KEY"
+        }
+        .into(),
+    )
 }
 
 /// The models to check on a provider: `--models`, or its defaults.
@@ -152,7 +173,7 @@ fn models(named: &Named, conn: &ModelConnection, wanted: &[String]) -> Vec<(Stri
 /// address stays on the machine).
 fn shown_address(named: &Named, target: &Target) -> String {
     match named.name.as_str() {
-        "proxy" => "ANTHROPIC_BASE_URL (on the operator's network)".into(),
+        "custom" => "your own address (not shown)".into(),
         "ollama" | "lmstudio" => "this machine".into(),
         _ => ghost_llm::capabilities::address(&target.base_url),
     }
@@ -283,12 +304,20 @@ pub async fn run(
     let mut skipped = Vec::new();
     for n in named {
         let set = settings(n, env);
-        let has_key = n
-            .key_var
+        let var_name = key_var(n, env);
+        let has_key = var_name
             .as_ref()
             .is_some_and(|v| env.get(v).is_some_and(|k| !k.is_empty()));
+        if n.name == "custom" && !set.contains_key("GHOST_LLM_BASE_URL") {
+            let _ = writeln!(
+                log,
+                "  skipping custom: set GHOST_LLM_BASE_URL to measure it"
+            );
+            skipped.push("custom: set GHOST_LLM_BASE_URL to measure it".into());
+            continue;
+        }
         if !has_key && !n.key_optional {
-            let var = n.key_var.as_deref().unwrap_or("?");
+            let var = var_name.as_deref().unwrap_or("?");
             let _ = writeln!(log, "  skipping {}: set {var} to measure it", n.name);
             skipped.push(format!("{}: set {var} to measure it", n.name));
             continue;
@@ -316,7 +345,7 @@ pub async fn run(
             };
             rows.push(Row {
                 provider: n.name.clone(),
-                key_var: n.key_var.clone().filter(|_| has_key),
+                key_var: var_name.clone().filter(|_| has_key),
                 address: shown_address(n, &target),
                 check: found,
             });
@@ -405,9 +434,21 @@ mod tests {
 
     #[test]
     fn a_provider_names_where_its_key_comes_from() {
-        let p = parse_named("proxy").unwrap();
-        assert_eq!(p.key_var.as_deref(), Some("ANTHROPIC_AUTH_TOKEN"));
+        let p = parse_named("custom").unwrap();
         assert!(p.key_optional);
+        let at = |pairs: &[(&str, &str)]| -> HashMap<String, String> {
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        };
+        let base = at(&[("GHOST_LLM_BASE_URL", "http://gpu.lan:8000")]);
+        assert_eq!(key_var(&p, &base).as_deref(), Some("LLM_API_KEY"));
+        let older = at(&[("ANTHROPIC_BASE_URL", "http://gpu.lan:8000")]);
+        assert_eq!(key_var(&p, &older).as_deref(), Some("ANTHROPIC_AUTH_TOKEN"));
+        let named = parse_named("custom:MY_KEY").unwrap();
+        assert_eq!(key_var(&named, &older).as_deref(), Some("MY_KEY"));
+        assert!(parse_named("proxy").is_err(), "no named proxy");
         let a = parse_named("anthropic:MY_KEY").unwrap();
         assert_eq!(a.key_var.as_deref(), Some("MY_KEY"));
         assert!(!a.key_optional);
@@ -431,6 +472,13 @@ mod tests {
             skipped,
             vec!["openrouter: set OPENROUTER_API_KEY to measure it"]
         );
+        let named = [parse_named("custom").unwrap()];
+        let (rows, skipped) = rt.block_on(run(&named, &[], 1, &env, &mut log));
+        assert!(rows.is_empty());
+        assert_eq!(
+            skipped,
+            vec!["custom: set GHOST_LLM_BASE_URL to measure it"]
+        );
     }
 
     #[test]
@@ -443,10 +491,11 @@ mod tests {
         .into_iter()
         .map(|(k, v)| (k.to_string(), v.to_string()))
         .collect();
-        let n = parse_named("proxy").unwrap();
+        let n = parse_named("custom").unwrap();
         let set = settings(&n, &env);
         let conn = ModelConnection::from_env(&set);
-        assert_eq!(conn.provider, "cliproxy");
+        assert_eq!(conn.provider, "custom");
+        assert_eq!(conn.protocol, Protocol::Anthropic);
         assert_eq!(conn.base_url, "http://proxy.lan:8317");
         assert_eq!(&*conn.target(&set).api_key, "sk-proxy-0123456789");
         let or = parse_named("openrouter-openai").unwrap();
@@ -459,7 +508,7 @@ mod tests {
     #[test]
     fn the_report_names_variables_never_values() {
         let row = Row {
-            provider: "proxy".into(),
+            provider: "custom".into(),
             key_var: Some("ANTHROPIC_AUTH_TOKEN".into()),
             address: "http://proxy.lan:8317".into(),
             check: ModelCheck::failed("main", "claude-sonnet-5-5", "nothing answered"),
@@ -470,11 +519,9 @@ mod tests {
             5,
             "2026-11-12",
         );
-        assert!(
-            md.contains(
-                "| proxy | ANTHROPIC_AUTH_TOKEN | claude-sonnet-5-5 | main | not reachable"
-            )
-        );
+        assert!(md.contains(
+            "| custom | ANTHROPIC_AUTH_TOKEN | claude-sonnet-5-5 | main | not reachable"
+        ));
         assert!(md.contains("set OPENROUTER_API_KEY"));
     }
 }

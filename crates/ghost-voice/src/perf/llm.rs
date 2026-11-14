@@ -14,8 +14,8 @@
 //! Endpoints: `current` is the model connection as configured (ADR 0037), through the
 //! same client a session uses, on whichever protocol it speaks. Any other endpoint is built
 //! from its own provider, whatever the configured one is, and reached over that provider's
-//! protocol: `proxy` is CLIProxy (ANTHROPIC_BASE_URL with ANTHROPIC_AUTH_TOKEN),
-//! `openrouter` is OpenRouter's Anthropic Messages API with OPENROUTER_API_KEY, and a
+//! protocol: `custom` is your own address (GHOST_LLM_BASE_URL, else ANTHROPIC_BASE_URL with
+//! ANTHROPIC_AUTH_TOKEN, on GHOST_LLM_PROTOCOL, Anthropic's by default), `openrouter` is OpenRouter's Anthropic Messages API with OPENROUTER_API_KEY, and a
 //! provider id (`anthropic`, `openai`, `ollama`, ...) is that provider as it comes.
 //! `--openrouter-models` go through OpenRouter's OpenAI-compatible API. Keys are never
 //! printed. Spend is small: a few thousand input tokens per call, mostly cached.
@@ -65,8 +65,8 @@ pub const ASKS: [&str; 6] = [
     "What do I have to sign off today?",
 ];
 pub const CLAUDE_MODELS: [&str; 2] = ["claude-sonnet-5-5", "claude-haiku-5-5"];
-/// The older endpoints, with or without +sysbp.
-pub const NAMED: [&str; 2] = ["proxy", "openrouter"];
+/// The endpoints built otherwise than a provider as it comes, with or without +sysbp.
+pub const NAMED: [&str; 2] = ["custom", "openrouter"];
 
 /// The canned result of the GitHub read, for the answer probe.
 pub fn tool_result() -> Value {
@@ -222,33 +222,42 @@ pub async fn ghost_prompt_and_tools(infra_dir: &Path) -> anyhow::Result<(String,
 /// The connection a named endpoint stands for, built from its own provider so nothing
 /// of the configured connection (provider, address, protocol, password) leaks into it.
 ///
-/// `proxy` is CLIProxy: ANTHROPIC_BASE_URL with ANTHROPIC_AUTH_TOKEN (CLIPROXY_BASE_URL,
-/// then CLIProxy's own address, when it isn't set). `openrouter` is OpenRouter's
-/// Anthropic API with OPENROUTER_API_KEY. A provider id is that provider as it comes.
+/// `custom` is your own address: GHOST_LLM_BASE_URL with GHOST_LLM_PASSWORD (else
+/// LLM_API_KEY), or else ANTHROPIC_BASE_URL with ANTHROPIC_AUTH_TOKEN, on GHOST_LLM_PROTOCOL
+/// (Anthropic's by default). `openrouter` is OpenRouter's Anthropic API with
+/// OPENROUTER_API_KEY. A provider id is that provider as it comes.
 pub fn endpoint_connection(
     ep: &str,
     voice: &VoiceSettings,
 ) -> Result<ModelConnection, PerfLlmError> {
     let name = ep.strip_suffix("+sysbp").unwrap_or(ep);
     let mut env: HashMap<String, String> = HashMap::new();
-    if name == "proxy" {
-        env.insert("GHOST_LLM_PROVIDER".into(), "cliproxy".into());
-        for key in ["ANTHROPIC_BASE_URL", "CLIPROXY_BASE_URL"] {
-            if let Some(v) = voice.var(key).filter(|v| !v.trim().is_empty()) {
-                let name = if key == "ANTHROPIC_BASE_URL" {
-                    "GHOST_LLM_BASE_URL"
-                } else {
-                    key
-                };
-                env.insert(name.into(), v.to_string());
+    let set = |key: &str| voice.var(key).filter(|v| !v.trim().is_empty());
+    if name == "custom" {
+        env.insert("GHOST_LLM_PROVIDER".into(), "custom".into());
+        if let Some(p) = set("GHOST_LLM_PROTOCOL") {
+            env.insert("GHOST_LLM_PROTOCOL".into(), p.to_string());
+        }
+        if let Some(base) = set("GHOST_LLM_BASE_URL") {
+            env.insert("GHOST_LLM_BASE_URL".into(), base.to_string());
+            if let Some(pw) = set("GHOST_LLM_PASSWORD") {
+                env.insert("GHOST_LLM_PASSWORD".into(), pw.to_string());
             }
+        } else if let Some(base) = set("ANTHROPIC_BASE_URL") {
+            env.insert("GHOST_LLM_BASE_URL".into(), base.to_string());
+            env.insert("GHOST_LLM_PASSWORD".into(), "ANTHROPIC_AUTH_TOKEN".into());
         }
     } else if provider(name).is_some() {
         env.insert("GHOST_LLM_PROVIDER".into(), name.into());
     } else {
         let known = std::iter::once("current")
             .chain(NAMED)
-            .chain(PROVIDERS.iter().map(|p| p.id))
+            .chain(
+                PROVIDERS
+                    .iter()
+                    .map(|p| p.id)
+                    .filter(|id| !NAMED.contains(id)),
+            )
             .collect::<Vec<_>>()
             .join(", ");
         return Err(PerfLlmError::UnknownEndpoint {
@@ -738,7 +747,7 @@ mod tests {
     //! reached over that provider's protocol with its own key, whatever the configured
     //! connection is. No request is sent here.
 
-    use ghost_core::connection::{CLIPROXY_DEFAULT_URL, REASONING_HEADROOM};
+    use ghost_core::connection::REASONING_HEADROOM;
 
     use super::*;
 
@@ -789,9 +798,9 @@ mod tests {
     }
 
     #[test]
-    fn proxy_is_cliproxy_over_anthropics_api_whatever_the_provider() {
+    fn custom_is_your_own_address_over_anthropics_api_whatever_the_provider() {
         let rows = targets(
-            &["proxy"],
+            &["custom"],
             &[],
             &[("ANTHROPIC_BASE_URL", "http://proxy.lan:8317")],
         )
@@ -804,7 +813,7 @@ mod tests {
             let t = &r.target;
             assert_eq!(
                 (t.provider.as_str(), t.protocol, r.kind),
-                ("cliproxy", Protocol::Anthropic, Protocol::Anthropic)
+                ("custom", Protocol::Anthropic, Protocol::Anthropic)
             );
             assert_eq!(t.base_url, "http://proxy.lan:8317");
             assert_eq!(t.api_key.as_str(), env()["ANTHROPIC_AUTH_TOKEN"]);
@@ -814,11 +823,31 @@ mod tests {
     }
 
     #[test]
-    fn proxy_without_an_address_is_cliproxys_own() {
-        let t = endpoint_connection("proxy+sysbp", &voice(&[])).unwrap();
-        assert_eq!(t.provider, "cliproxy");
-        assert_eq!(t.base_url, CLIPROXY_DEFAULT_URL);
-        let rows = targets(&["proxy+sysbp"], &[], &[]).unwrap();
+    fn custom_takes_its_own_address_and_password_first() {
+        let t = endpoint_connection(
+            "custom+sysbp",
+            &voice(&[
+                ("GHOST_LLM_BASE_URL", "http://gpu.lan:8000/v1"),
+                ("GHOST_LLM_PROTOCOL", "openai"),
+                ("GHOST_LLM_PASSWORD", "MY_MODEL_KEY"),
+                ("ANTHROPIC_BASE_URL", "http://unused.lan:1"),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(
+            (t.provider.as_str(), t.protocol, t.base_url.as_str()),
+            ("custom", Protocol::Openai, "http://gpu.lan:8000/v1")
+        );
+        assert_eq!(t.password, "MY_MODEL_KEY");
+        // Without an address it is said, not guessed.
+        let t = endpoint_connection("custom", &voice(&[])).unwrap();
+        assert!(t.base_url.is_empty());
+        let rows = targets(
+            &["custom+sysbp"],
+            &[],
+            &[("ANTHROPIC_BASE_URL", "http://proxy.lan:8317")],
+        )
+        .unwrap();
         assert_eq!(rows.len(), 2);
         assert!(rows.iter().all(|r| r.sysbp));
     }
@@ -906,7 +935,7 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.starts_with("unknown endpoint 'nope' ("), "{msg}");
         assert!(
-            msg.contains("current, proxy, openrouter, anthropic"),
+            msg.contains("current, custom, openrouter, anthropic, openai"),
             "{msg}"
         );
         assert!(msg.ends_with("; a provider takes +sysbp)"), "{msg}");
@@ -955,7 +984,12 @@ mod tests {
             Some("adaptive")
         );
         assert_eq!(thinking_for("claude-sonnet-5-5", None), None);
-        let rows = targets(&["proxy"], &[], &[]).unwrap();
+        let rows = targets(
+            &["custom"],
+            &[],
+            &[("ANTHROPIC_BASE_URL", "http://proxy.lan:8317")],
+        )
+        .unwrap();
         let by_label = |l: &str| rows.iter().find(|r| r.label == l).unwrap();
         assert_eq!(
             by_label("claude-sonnet-5-5").thinking.as_deref(),
@@ -1008,7 +1042,7 @@ mod tests {
             sample(0.9, Some("hang_up"), usage(40, 2900)),
         ];
         let tool2 = [sample(1.1, None, usage(60, 3000))];
-        let r = row("proxy", "claude-sonnet-5-5", &plain, &tool1, &tool2);
+        let r = row("custom", "claude-sonnet-5-5", &plain, &tool1, &tool2);
         let v = serde_json::to_value(&r).unwrap();
         let keys: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
         assert!(keys.contains(&"hello_ttfb") && keys.contains(&"in_first"));
@@ -1030,7 +1064,7 @@ mod tests {
         );
         let text = json_indent_1(std::slice::from_ref(&r)).unwrap();
         assert!(
-            text.starts_with("[\n {\n  \"endpoint\": \"proxy\",\n  \"model\""),
+            text.starts_with("[\n {\n  \"endpoint\": \"custom\",\n  \"model\""),
             "{text}"
         );
         let md = markdown(std::slice::from_ref(&r));
@@ -1041,7 +1075,7 @@ mod tests {
         assert!(body.contains("| 1/2 | 20.0 | 2900/0 |  |"), "{body}");
         let l = line(&r);
         assert!(
-            l.starts_with("  proxy              claude-sonnet-5-5"),
+            l.starts_with("  custom             claude-sonnet-5-5"),
             "{l}"
         );
         assert!(!l.contains("ERR"));

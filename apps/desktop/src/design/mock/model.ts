@@ -10,7 +10,6 @@ import type { ModelConnectionView, ModelDraft, ModelListView, ModelCheckModel, M
 export const MODEL_PROVIDERS: ModelProviderView[] = [
   { id: "anthropic", title: "Anthropic", blurb: "Claude, with a password (API key) from the Anthropic Console.", protocol: "anthropic", base_url: "https://api.anthropic.com", password: "ANTHROPIC_API_KEY", password_optional: false, sign_in: false, local: false, default_model: "claude-sonnet-5-5" },
   { id: "openrouter", title: "OpenRouter", blurb: "Sign in, and Claude or any other model OpenRouter offers.", protocol: "anthropic", base_url: "https://openrouter.ai/api", password: "OPENROUTER_API_KEY", password_optional: false, sign_in: true, local: false, default_model: "anthropic/claude-sonnet-5.5" },
-  { id: "cliproxy", title: "Claude subscription", blurb: "Your Claude plan, through CLIProxy running on your network.", protocol: "anthropic", base_url: "http://localhost:8317", password: "ANTHROPIC_AUTH_TOKEN", password_optional: true, sign_in: false, local: true, default_model: "claude-sonnet-5-5" },
   { id: "openai", title: "OpenAI", blurb: "GPT models, with a password (API key) from the OpenAI platform.", protocol: "openai", base_url: "https://api.openai.com/v1", password: "OPENAI_API_KEY", password_optional: false, sign_in: false, local: false, default_model: "gpt-5" },
   { id: "ollama", title: "Ollama", blurb: "A model running on this computer. Nothing leaves it.", protocol: "openai", base_url: "http://localhost:11434/v1", password: null, password_optional: false, sign_in: false, local: true, default_model: null },
   { id: "lmstudio", title: "LM Studio", blurb: "A model LM Studio serves on this computer. Nothing leaves it.", protocol: "openai", base_url: "http://localhost:1234/v1", password: null, password_optional: false, sign_in: false, local: true, default_model: null },
@@ -31,7 +30,6 @@ const MODELS: Record<string, { id: string; name?: string }[]> = {
     { id: "openai/gpt-5", name: "OpenAI: GPT-5" },
     { id: "openai/gpt-5-mini", name: "OpenAI: GPT-5 mini" },
   ],
-  cliproxy: [{ id: "claude-opus-5-5" }, { id: "claude-sonnet-5-5" }],
   openai: [{ id: "gpt-5" }, { id: "gpt-5-mini" }, { id: "gpt-5-nano" }],
   ollama: [{ id: "llama4:8b" }, { id: "qwen3:14b" }],
   lmstudio: [{ id: "qwen3-30b-a3b" }],
@@ -119,7 +117,7 @@ export class MockModel {
     const fallback = MODEL_PROVIDERS.find((p) => p.id === c.provider)?.default_model ?? null;
     if (c.provider === "lmstudio") return { models: [], default: fallback, error: "couldn’t reach http://localhost:1234 (ConnectError)" };
     if (c.provider === "custom" && !c.base_url) return { models: [], default: fallback, error: "Give it an address first." };
-    if (c.password && !c.password_set && c.provider !== "openrouter" && c.provider !== "custom" && c.provider !== "cliproxy")
+    if (c.password && !c.password_set && c.provider !== "openrouter" && c.provider !== "custom")
       return { models: [], default: fallback, error: this.vaultOpen() ? "Save its password to see the models it offers." : "Unlock your keyring on Settings › Passwords to see the models it offers." };
     const models = (MODELS[c.provider] ?? []).map((m) => ({ id: m.id, name: m.name ?? null }));
     return { models, default: fallback && models.some((m) => m.id === fallback) ? fallback : models[0]?.id ?? fallback, error: null };
@@ -163,7 +161,7 @@ export class MockModel {
     if (c.fast_wire_model) models.push(model("fast", c.fast_wire_model, Math.round(word * 0.6)));
     const slow = word * (c.fast_wire_model ? 0.6 : 1) > 1500;
     const advice = slow
-      ? `Spoken replies will start slowly: ${models[models.length - 1].model} took ${((word * (c.fast_wire_model ? 0.6 : 1)) / 1000).toFixed(1)} s to its first word on this connection. Of the connections you've tested, claude-haiku-5-5 via cliproxy answered in 0.7 s. Ghost won't change the connection for you: it's in Settings, under Model.`
+      ? `Spoken replies will start slowly: ${models[models.length - 1].model} took ${((word * (c.fast_wire_model ? 0.6 : 1)) / 1000).toFixed(1)} s to its first word on this connection. Of the connections you've tested, claude-haiku-5-5 via anthropic answered in 0.7 s. Ghost won't change the connection for you: it's in Settings, under Model.`
       : null;
     const r = { checked_at: at, where, models, advice };
     if (!Object.keys(draft.values ?? {}).some((k) => draft.values[k])) this.last = r;

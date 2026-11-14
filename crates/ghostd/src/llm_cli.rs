@@ -209,7 +209,7 @@ mod tests {
     #[test]
     fn a_report_reads_in_plain_words() {
         let check = json!({
-            "where": "cliproxy (anthropic, http://proxy:8317)",
+            "where": "custom (anthropic, http://proxy:8080)",
             "models": [
                 {"role": "main", "model": "claude-sonnet-5-5", "reachable": true,
                  "answered_by": "claude-sonnet-5-5", "samples": 3,

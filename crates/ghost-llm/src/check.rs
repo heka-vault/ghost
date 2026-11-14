@@ -403,7 +403,7 @@ pub async fn check(model: &Model, opts: &CheckOptions) -> ModelCheck {
 /// Another route the operator has tried, as the advice names it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Tried {
-    /// "claude-haiku-5-5 via cliproxy".
+    /// "claude-haiku-5-5 via openrouter".
     pub label: String,
     /// Its first word's median, in seconds.
     pub first_word: f64,
@@ -571,7 +571,7 @@ mod tests {
         let over = SLOW_FIRST_WORD_SECS;
         let tried = [
             Tried {
-                label: "claude-haiku-5-5 via cliproxy".into(),
+                label: "claude-haiku-5-5 via openrouter".into(),
                 first_word: 0.7,
             },
             Tried {
@@ -591,7 +591,7 @@ mod tests {
         assert_eq!(
             a.text(),
             "Replies will start slowly: anthropic/claude-sonnet-5.5 took 2.1 s to its first \
-             word. A fast model, or claude-haiku-5-5 via cliproxy (0.7 s when \
+             word. A fast model, or claude-haiku-5-5 via openrouter (0.7 s when \
              tested), would help. Test it in Settings › Model."
         );
         let a = said(advice(&[quick("main", "s", 2.0)], false, None, &[], over));

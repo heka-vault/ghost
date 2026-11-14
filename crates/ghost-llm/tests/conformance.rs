@@ -47,7 +47,7 @@ struct Shape {
     comments: bool,
 }
 
-const SHAPES: [Shape; 8] = [
+const SHAPES: [Shape; 7] = [
     Shape {
         name: "Anthropic direct",
         provider: "anthropic",
@@ -56,17 +56,6 @@ const SHAPES: [Shape; 8] = [
         model: "claude-sonnet-5-5",
         x_api_key: true,
         bearer: false,
-        calls_in_one_chunk: false,
-        comments: false,
-    },
-    Shape {
-        name: "a subscription proxy (CLIProxy)",
-        provider: "cliproxy",
-        protocol: Protocol::Anthropic,
-        base: "",
-        model: "claude-sonnet-5-5",
-        x_api_key: true,
-        bearer: true,
         calls_in_one_chunk: false,
         comments: false,
     },
