@@ -1,0 +1,33 @@
+---
+/**
+ * The hero's moving picture, loaded into the front page's frame only when it is on screen
+ * (src/components/Hero.astro): a synthetic desktop, and over it the desktop app's floating room
+ * playing its mock session. Its own page so the room has a window of its own to measure (it
+ * lays itself out from the window, as on a monitor), and so none of its script is on the front
+ * page's first paint. Not in the sitemap and not indexed.
+ */
+import "@fontsource-variable/inter/opsz.css";
+import "@fontsource-variable/jetbrains-mono";
+import FloatDemo from "../components/FloatDemo";
+import Desktop from "../components/Desktop.astro";
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <meta name="color-scheme" content="dark" />
+    <title>Ghost, floating</title>
+    <style is:global>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #070a10; }
+      /* The floating room draws over the desktop, as it does over a real one. */
+      .demo-room { position: fixed; inset: 0; z-index: 2; }
+    </style>
+  </head>
+  <body>
+    <Desktop />
+    <div class="demo-room"><FloatDemo client:only="react" /></div>
+  </body>
+</html>

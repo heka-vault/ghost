@@ -1,0 +1,153 @@
+---
+/**
+ * A synthetic desktop for the float to come forward over: a top bar, an editor and a terminal
+ * on the left two thirds (the floating room sits beside the work, on the side away from it).
+ * Everything here is made up and matches the mock session's story (a billing deploy stuck on a
+ * migration). Plain HTML and CSS: no images, nothing fetched.
+ */
+const code = [
+  ["c", "-- 0042_invoice_currency.sql"],
+  ["c", "-- Adds a currency to every invoice; backfills from the account."],
+  ["", ""],
+  ["k", "ALTER TABLE", " invoices"],
+  ["", "  ADD COLUMN currency text NOT NULL DEFAULT 'USD';"],
+  ["", ""],
+  ["k", "UPDATE", " invoices i"],
+  ["", "   SET currency = a.currency"],
+  ["", "  FROM accounts a"],
+  ["", " WHERE a.id = i.account_id;"],
+  ["", ""],
+  ["k", "CREATE INDEX", " CONCURRENTLY invoices_currency_idx"],
+  ["", "  ON invoices (currency);"],
+  ["", ""],
+  ["c", "-- statement_timeout is 10 min in the deploy job"],
+];
+const log = [
+  ["d", "14:02:11", "deploy billing@4f1c2e0 started"],
+  ["d", "14:02:40", "build ok · 3m 12s"],
+  ["d", "14:05:52", "migrate 0042_invoice_currency"],
+  ["e", "14:17:58", "migrate failed: canceling statement due to statement timeout"],
+  ["d", "14:18:03", "retry 1 of 1"],
+  ["e", "14:30:09", "migrate failed: canceling statement due to statement timeout"],
+  ["w", "14:30:09", "deploy billing@4f1c2e0 stopped · retry policy exhausted"],
+];
+---
+
+<div class="desk" aria-hidden="true">
+  <div class="desk__sky"></div>
+  <div class="desk__bar">
+    <span>Activities</span>
+    <span class="desk__clock">Thu 09:41</span>
+    <span class="desk__tray">● ◐ ▮</span>
+  </div>
+
+  <section class="win win--editor">
+    <header class="win__title"><i></i><i></i><i></i><span>0042_invoice_currency.sql — billing</span></header>
+    <div class="win__body editor">
+      <ol>
+        {code.map(([kind, a, b]) => (
+          <li>
+            {kind === "k" ? (
+              <>
+                <b>{a}</b>
+                {b}
+              </>
+            ) : kind === "c" ? (
+              <em>{a}</em>
+            ) : (
+              a
+            )}
+          </li>
+        ))}
+      </ol>
+    </div>
+  </section>
+
+  <section class="win win--term">
+    <header class="win__title"><i></i><i></i><i></i><span>deploy — billing</span></header>
+    <div class="win__body term">
+      {log.map(([kind, t, line]) => (
+        <p class={`term__${kind}`}>
+          <span>{t}</span> {line}
+        </p>
+      ))}
+      <p><span class="term__prompt">~/billing $</span> <span class="term__cursor"></span></p>
+    </div>
+  </section>
+</div>
+
+<style>
+  .desk {
+    position: fixed;
+    inset: 0;
+    overflow: hidden;
+    font-family: "Inter Variable", system-ui, sans-serif;
+    color: #c9d3e0;
+    background: #0a0e17;
+  }
+  /* Dusk over a city that is only lights: a wallpaper, not a picture. */
+  .desk__sky {
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(60% 40% at 78% 100%, rgb(255 77 140 / 0.28), transparent 70%),
+      radial-gradient(50% 35% at 20% 100%, rgb(95 227 255 / 0.18), transparent 70%),
+      radial-gradient(80% 60% at 60% 20%, rgb(84 60 160 / 0.35), transparent 70%),
+      linear-gradient(180deg, #0b0f1d 0%, #16122b 55%, #2a1631 100%);
+  }
+  .desk__sky::after {
+    content: "";
+    position: absolute;
+    inset: 55% 0 0 0;
+    background: repeating-linear-gradient(90deg, transparent 0 22px, rgb(255 200 120 / 0.05) 22px 24px, transparent 24px 61px, rgb(120 220 255 / 0.05) 61px 63px);
+    mask-image: linear-gradient(180deg, transparent, #000 70%);
+  }
+  .desk__bar {
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 18px;
+    background: #000;
+    font-size: 14px;
+    font-weight: 600;
+    color: #e8ecf2;
+  }
+  .desk__clock { position: absolute; left: 50%; transform: translateX(-50%); }
+  .desk__tray { letter-spacing: 6px; font-size: 12px; opacity: 0.8; }
+  .win {
+    position: absolute;
+    border-radius: 12px;
+    overflow: hidden;
+    background: #11151d;
+    box-shadow: 0 24px 60px rgb(0 0 0 / 0.55), 0 0 0 1px rgb(255 255 255 / 0.06);
+  }
+  .win--editor { left: 4%; top: 9%; width: 54%; height: 58%; }
+  .win--term { left: 9%; top: 58%; width: 48%; height: 36%; background: #0b0d12; }
+  .win__title {
+    height: 40px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 14px;
+    background: #1a1f29;
+    font-size: 13px;
+    font-weight: 600;
+    color: #aab4c3;
+  }
+  .win__title i { width: 12px; height: 12px; border-radius: 50%; background: #3a4150; }
+  .win__title span { margin-left: 10px; }
+  .win__body { padding: 18px 22px; font-family: "JetBrains Mono Variable", ui-monospace, monospace; font-size: 17px; line-height: 1.6; }
+  .editor ol { margin: 0; padding-left: 2.6em; color: #d7dee9; }
+  .editor li::marker { color: #4b5566; font-size: 0.85em; }
+  .editor b { color: #ff7ab6; font-weight: 600; }
+  .editor em { color: #6c7a8f; font-style: normal; }
+  .term p { margin: 0 0 4px; white-space: nowrap; font-size: 15px; }
+  .term span:first-child { color: #5b6677; }
+  .term__e { color: #ff8a8a; }
+  .term__w { color: #ffd27a; }
+  .term__prompt { color: #4dffb8 !important; }
+  .term__cursor { display: inline-block; width: 9px; height: 18px; vertical-align: -3px; background: #c9d3e0; }
+</style>

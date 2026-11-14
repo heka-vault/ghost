@@ -1,0 +1,111 @@
+---
+/**
+ * The float, first. A still of it is the first paint (and all there is with JavaScript off or
+ * reduced motion); once the page has loaded and the frame is on screen, the live float page
+ * (/float/: the app's own floating room on its mock daemon) is loaded into the frame and takes
+ * over as Ghost arrives. Off screen for two seconds, the frame is emptied, so nothing runs while
+ * nobody watches; back on screen, the session starts again. The frame is a monitor of its own:
+ * 1600x1000 on a wide screen, 1100x1100 on a phone, scaled to fit, so the room lays itself out
+ * as it does on a real monitor.
+ */
+import wide from "../assets/float-wide.webp?url";
+import square from "../assets/float-square.webp?url";
+
+const alt = "Ghost floating beside an editor on a desktop, a beam out to GitHub, Calendar and a second GitHub account while it looks in three places";
+---
+
+<div class="screen" data-hero>
+  <div class="screen__glass">
+    <picture>
+      <source media="(max-width: 640px)" srcset={square} width="1100" height="1100" />
+      <img class="screen__still" src={wide} width="1600" height="1000" alt={alt} fetchpriority="high" decoding="async" />
+    </picture>
+  </div>
+  <p class="screen__credit">
+    <span class="screen__live" aria-hidden="true"></span>
+    <span data-credit>A still of the floating room.</span>
+    <button type="button" class="screen__play" data-play hidden>Play it</button>
+  </p>
+</div>
+
+<script>
+  const root = document.querySelector<HTMLElement>("[data-hero]");
+  const glass = root?.querySelector<HTMLElement>(".screen__glass");
+  const credit = root?.querySelector<HTMLElement>("[data-credit]");
+  const play = root?.querySelector<HTMLButtonElement>("[data-play]");
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)");
+  const phone = matchMedia("(max-width: 640px)");
+  /** Ghost wakes 2.5 s into the mock session: keep the still until it is about to arrive. */
+  const ARRIVES_MS = 2300;
+
+  let frame: HTMLIFrameElement | null = null;
+  let away = 0;
+  let chosen = false;
+
+  const size = () => (phone.matches ? { w: 1100, h: 1100 } : { w: 1600, h: 1000 });
+  function fit() {
+    if (!frame || !glass) return;
+    const { w, h } = size();
+    frame.style.width = `${w}px`;
+    frame.style.height = `${h}px`;
+    frame.style.transform = `scale(${glass.clientWidth / w})`;
+  }
+
+  function start() {
+    if (!glass || frame) return;
+    frame = document.createElement("iframe");
+    frame.className = "screen__live-frame";
+    frame.title = "Ghost's floating room, playing a synthetic session";
+    frame.setAttribute("aria-hidden", "true");
+    frame.tabIndex = -1;
+    frame.loading = "eager";
+    fit();
+    frame.addEventListener("load", () => {
+      window.setTimeout(() => root?.setAttribute("data-live", "1"), ARRIVES_MS);
+    });
+    frame.src = "/float/";
+    glass.append(frame);
+    if (credit) credit.textContent = "Live: the app's own floating room, running a made-up session in your browser. No sound, nothing sent.";
+  }
+
+  function stop() {
+    root?.removeAttribute("data-live");
+    frame?.remove();
+    frame = null;
+  }
+
+  if (root && glass) {
+    new ResizeObserver(fit).observe(glass);
+    phone.addEventListener("change", () => {
+      if (frame) {
+        stop();
+        start();
+      }
+    });
+    const seen = new IntersectionObserver(
+      ([e]) => {
+        window.clearTimeout(away);
+        if (e.isIntersecting) {
+          if (!reduced.matches || chosen) start();
+        } else if (frame) {
+          away = window.setTimeout(stop, 2000);
+        }
+      },
+      { threshold: 0.2 },
+    );
+    // After the page has loaded and gone quiet: the float never competes with the first paint.
+    const begin = () => seen.observe(root);
+    const idle = () => ("requestIdleCallback" in window ? requestIdleCallback(begin, { timeout: 1500 }) : window.setTimeout(begin, 300));
+    if (document.readyState === "complete") idle();
+    else window.addEventListener("load", idle, { once: true });
+
+    if (reduced.matches && play) {
+      play.hidden = false;
+      play.addEventListener("click", () => {
+        chosen = true;
+        play.hidden = true;
+        start();
+      });
+    }
+  }
+</script>

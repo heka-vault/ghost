@@ -1,0 +1,31 @@
+{
+  "name": "@ghost/site",
+  "version": "2026.10.0",
+  "private": true,
+  "type": "module",
+  "description": "heyghost.app: the public site, static Astro, deployed to GitHub Pages by .github/workflows/site.yml",
+  "scripts": {
+    "dev": "astro dev --port 4321",
+    "site:build": "astro build",
+    "site:preview": "astro preview --port 4321",
+    "site:stills": "node scripts/stills.mjs",
+    "site:check": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@astrojs/react": "7.1.2",
+    "@astrojs/sitemap": "3.7.4",
+    "@fontsource-variable/inter": "^5.3.0",
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
+    "@ghost/client-ts": "workspace:*",
+    "@ghost/ui": "workspace:*",
+    "astro": "7.4.3",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.7.0",
+    "playwright-core": "1.64.1"
+  }
+}

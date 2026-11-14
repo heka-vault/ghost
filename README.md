@@ -371,6 +371,7 @@ Contributing, filing an issue and what to put in it: [CONTRIBUTING.md](CONTRIBUT
 | [docs/tools.md](docs/tools.md) | Every tool Ghost's agents have, and its default |
 | [docs/realtime-voice.md](docs/realtime-voice.md) | The optional realtime speech-to-speech voice |
 | [docs/releasing.md](docs/releasing.md) | Versions, the bundle and the models it carries |
+| [docs/site.md](docs/site.md) | heyghost.app: the site, its hero, deploying it to GitHub Pages |
 | [docs/benchmarks/](docs/benchmarks/) | Measurements |
 | [docs/original/](docs/original/) | The first product documents (working title VoiceTriage), kept as history; the ADRs win where they differ |
 

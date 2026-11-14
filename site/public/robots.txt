@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+Disallow: /float/
+
+Sitemap: https://heyghost.app/sitemap-index.xml
