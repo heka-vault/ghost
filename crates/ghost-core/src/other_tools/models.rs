@@ -73,3 +73,31 @@ pub fn keys_present(started: &HashMap<String, String>) -> Vec<(&'static str, &'s
         .filter(|(var, _)| started.get(*var).is_some_and(|v| !v.trim().is_empty()))
         .collect()
 }
+
+/// How long a local server has to answer.
+pub const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(800);
+
+/// One GET of a loopback address, bounded in time and size; None for anything that is not
+/// loopback, that does not answer, or that answers with an error.
+pub async fn get_local(url: &str) -> Option<String> {
+    let parsed = url::Url::parse(url).ok()?;
+    if parsed.scheme() != "http" || !matches!(parsed.host_str(), Some("127.0.0.1") | Some("[::1]"))
+    {
+        return None;
+    }
+    let client = reqwest::Client::builder()
+        .timeout(PROBE_TIMEOUT)
+        .redirect(reqwest::redirect::Policy::none())
+        .no_proxy()
+        .build()
+        .ok()?;
+    let resp = client.get(url).send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let bytes = resp.bytes().await.ok()?;
+    if bytes.len() > 512 * 1024 {
+        return None;
+    }
+    String::from_utf8(bytes.to_vec()).ok()
+}

@@ -788,6 +788,34 @@ async fn no_tool_changes_a_permission() {
 }
 
 #[tokio::test]
+async fn no_tool_reads_or_writes_the_other_tools_on_this_computer() {
+    // ADR 0068: what Claude Code, Cursor and Codex keep is read, imported and written by
+    // the operator's own click or `ghostd setup`, never by an agent: no tool for it, and
+    // `app_connect` stays the only way an agent connects an app (asking first, ADR 0052).
+    let w = world().await;
+    for t in w.server.tools() {
+        let n = t.name.to_lowercase();
+        for word in [
+            "other_tool",
+            "setup",
+            "import",
+            "link",
+            "neighbour",
+            "cursor",
+            "claude",
+            "codex",
+        ] {
+            assert!(!n.contains(word), "{n}");
+        }
+        let about = t.description.as_deref().unwrap_or_default().to_lowercase();
+        assert!(
+            !about.contains("mcp.json") && !about.contains("config.toml"),
+            "{n}: {about}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn no_tool_turns_listening_on_or_off() {
     // ADR 0057: the microphone is the operator's switch. An agent never turns it back on,
     // and never off either: a model told by an app's text to mute Ghost would leave the

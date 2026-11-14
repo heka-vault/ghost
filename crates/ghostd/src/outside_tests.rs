@@ -868,6 +868,10 @@ async fn nothing_an_outside_client_must_not_reach_is_offered() {
         "hook",
         "catalog",
         "confirm",
+        // ADR 0068: the other tools on this computer are the operator's to read and write.
+        "import",
+        "link",
+        "setup",
     ];
     for t in &tools {
         let arguments: Vec<String> = t

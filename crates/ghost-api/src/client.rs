@@ -137,6 +137,19 @@ impl GhostClient {
         Ok(reply.body)
     }
 
+    /// One request by the method's name (`GET`, `POST`, `DELETE`), for a command line
+    /// that is not a hyper user (`ghostd setup`, ADR 0068).
+    pub async fn call(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<&Value>,
+    ) -> Result<Reply, ClientError> {
+        let m =
+            Method::from_bytes(method.as_bytes()).map_err(|e| ClientError::Http(e.to_string()))?;
+        self.request(m, path, body).await
+    }
+
     pub async fn status(&self) -> Result<Value, ClientError> {
         self.expect_ok(Method::GET, "/status", None).await
     }

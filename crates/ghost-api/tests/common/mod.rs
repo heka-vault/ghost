@@ -676,6 +676,8 @@ pub struct World {
     pub clients_listening: Vec<String>,
     /// The daemon runs from an AppImage.
     pub in_appimage: bool,
+    /// The AI tools on this computer (ADR 0068): a temp home, never the operator's.
+    pub other_tools: Option<Arc<dyn ghost_api::deps::OtherToolsPort>>,
 }
 
 impl World {
@@ -780,6 +782,7 @@ impl World {
             wake_takes: None,
             clients_listening: Vec::new(),
             in_appimage: false,
+            other_tools: None,
             tmp,
         }
     }
@@ -854,6 +857,7 @@ impl World {
         )));
         deps.clients_listening = self.clients_listening.clone();
         deps.in_appimage = self.in_appimage;
+        deps.other_tools = self.other_tools.clone();
         if let Some(d) = &self.devices {
             deps.devices = d.clone();
         }
@@ -979,4 +983,60 @@ pub fn strings(items: &Value, key: &str) -> Vec<String> {
         .iter()
         .map(|i| i[key].as_str().unwrap().to_string())
         .collect()
+}
+
+// --- the other tools on this computer, faked (ADR 0068) ------------------------------------------
+
+/// A home folder of the test's own, the commands it says are on the PATH, what loopback
+/// answers, and the commands that would have run (recorded, never run).
+pub struct FakeOtherTools {
+    pub home: PathBuf,
+    pub binaries: Mutex<Vec<(ghost_core::other_tools::Tool, PathBuf)>>,
+    pub local: Mutex<HashMap<String, String>>,
+    pub ran: Mutex<Vec<Vec<String>>>,
+    pub fail_runs: Mutex<Option<String>>,
+}
+
+impl FakeOtherTools {
+    pub fn new(home: &Path) -> Self {
+        std::fs::create_dir_all(home).unwrap();
+        Self {
+            home: home.canonicalize().unwrap(),
+            binaries: Mutex::default(),
+            local: Mutex::default(),
+            ran: Mutex::default(),
+            fail_runs: Mutex::default(),
+        }
+    }
+
+    pub fn ran(&self) -> Vec<Vec<String>> {
+        self.ran.lock().unwrap().clone()
+    }
+}
+
+#[async_trait]
+impl ghost_api::deps::OtherToolsPort for FakeOtherTools {
+    fn place(&self) -> ghost_core::other_tools::Where {
+        let mut w = ghost_core::other_tools::Where::new(&self.home);
+        for (t, p) in self.binaries.lock().unwrap().iter() {
+            w.binaries.insert(*t, p.clone());
+        }
+        w
+    }
+
+    async fn get_local(&self, url: &str) -> Option<String> {
+        self.local.lock().unwrap().get(url).cloned()
+    }
+
+    async fn run(&self, argv: &[String]) -> Result<(), String> {
+        self.ran.lock().unwrap().push(argv.to_vec());
+        match self.fail_runs.lock().unwrap().clone() {
+            Some(why) => Err(why),
+            None => Ok(()),
+        }
+    }
+
+    fn stamp(&self) -> String {
+        "20261114T120000".into()
+    }
 }

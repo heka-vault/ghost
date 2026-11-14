@@ -485,8 +485,9 @@ pub fn points_at_ghost(raw: &Raw, ports: &[u16]) -> Option<Option<String>> {
         let serves = raw
             .args
             .windows(2)
-            .any(|w| w[0] == "mcp" && w[1] == "serve");
-        if base == "ghostd" || (base == "heka-ghost-desktop" && serves) {
+            .any(|w| w[0] == "mcp" && w[1] == "serve")
+            && raw.args.iter().any(|a| a == "--client");
+        if base == "ghostd" || serves {
             let client = raw
                 .args
                 .windows(2)

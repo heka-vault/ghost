@@ -165,6 +165,8 @@ fn main() -> anyhow::Result<()> {
             std::process::exit(ghost_voice::perf::cli::main(&args[1..]))
         }
         Some("llm") => std::process::exit(llm(&args[1..])),
+        // ADR 0068: the AI tools already on this computer, for the operator or a coding agent
+        Some("setup") => std::process::exit(setup(&args[1..])),
         // ADR 0066: the speech models the bundle does not carry, for a desk with no display
         Some("models") => std::process::exit(speech_models(&args[1..])),
         // ADR 0064, ADR 0066: the echo canceller, from the checkout or the bundle
@@ -195,7 +197,7 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Some(other) => anyhow::bail!(
-            "unknown command {other:?}; commands: run, status, wake, say, sleep, check, models, echo-cancel, push, latency, llm, perf, restore-volumes, passwords, mcp, api-schema, version"
+            "unknown command {other:?}; commands: run, status, wake, say, sleep, check, models, echo-cancel, push, latency, llm, perf, restore-volumes, passwords, mcp, setup, api-schema, version"
         ),
     }
 }
@@ -290,6 +292,32 @@ fn restore_volumes() -> anyhow::Result<()> {
         Err(e) => warn!("restore-volumes: {e}"),
     }
     Ok(())
+}
+
+/// `ghostd setup detect|import|link|unlink` (ADR 0068), through the running daemon, which
+/// holds the vault and the apps. A change asks y/N on this terminal unless `--yes`.
+#[tokio::main]
+async fn setup(args: &[String]) -> i32 {
+    let path = default_socket_path();
+    if !path.exists() {
+        eprintln!(
+            "ghostd is not running (no socket at {}); start Ghost first",
+            path.display()
+        );
+        return 2;
+    }
+    // Running another tool's own command may take a while.
+    let client = GhostClient::with_timeout(&path, std::time::Duration::from_secs(60));
+    let stdin = std::io::stdin();
+    let mut input = stdin.lock();
+    ghostd::setup_cli::setup_cli(
+        args,
+        &client,
+        &mut input,
+        &mut std::io::stdout(),
+        &mut std::io::stderr(),
+    )
+    .await
 }
 
 /// `ghostd llm test`: the provider check, run by the daemon that holds the vault (ADR 0056).

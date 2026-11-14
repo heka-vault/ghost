@@ -680,37 +680,31 @@ fn specs_from(deps: &Deps, req: &AppConnect) -> ApiResult<Asked> {
     })
 }
 
-/// Connect an app now and keep it in apps.json. An app that signs in comes back with the
-/// address the browser should open; the desktop opens it.
-#[utoipa::path(post, path = "/apps", operation_id = "connect_app_apps_post", tag = "apps", summary = "Connect App",
-    description = "Connect an app now and keep it in apps.json. An app that signs in comes back\nwith the address the browser should open; the desktop opens it.",
-    request_body = AppConnect,
-    responses((status = 200, description = "Successful Response", body = AppConnectResult),
-              (status = 422, description = "Validation Error", body = HTTPValidationError)))]
-async fn connect_app(
-    State(deps): State<SharedDeps>,
-    Body(req): Body<AppConnect>,
-) -> ApiResult<Json<AppConnectResult>> {
-    let apps = need_apps(&deps)?;
-    let Asked {
-        specs,
-        secrets,
-        notes,
-    } = specs_from(&deps, &req)?;
-    for spec in &specs {
+/// Connect these apps: every check first, then `apps.json` (the one writer, `edit_apps`),
+/// then the vault, then the connections. The desktop's connect and an import from another
+/// tool (ADR 0068) both come here. Returns the apps as they are now and a sign-in address,
+/// when one wants the browser.
+pub(crate) async fn connect_specs(
+    deps: &SharedDeps,
+    specs: &[AppSpec],
+    secrets: &BTreeMap<String, String>,
+    replace: bool,
+) -> ApiResult<(Vec<AppView>, Option<String>)> {
+    let apps = need_apps(deps)?;
+    for spec in specs {
         if let Some(why) = app_name_problem(&spec.name) {
             return Err(ApiError::unprocessable(format!(
                 "{}: {why}",
                 py_repr(&spec.name)
             )));
         }
-        if apps.spec(&spec.name).is_some() && !req.replace.unwrap_or(false) {
+        if apps.spec(&spec.name).is_some() && !replace {
             return Err(ApiError::conflict(format!(
                 "an app is already connected as {}",
                 spec.name
             )));
         }
-        if let Some(other) = clash(&deps, spec, &secrets) {
+        if let Some(other) = clash(deps, spec, secrets) {
             return Err(ApiError::conflict(format!(
                 "{} would share its keys with {other}; give it another name",
                 spec.name
@@ -727,13 +721,34 @@ async fn connect_app(
         .map(|(k, v)| (k.clone(), Some(v.clone())))
         .collect();
     check_passwords(&as_values)?; // a refused password changes nothing either
-    save(&deps, &specs, None)?; // first: a file that won't take the entry changes nothing
-    keep_secrets(&deps, &secrets)?;
-    let url = start(&deps, &specs).await;
+    save(deps, specs, None)?; // first: a file that won't take the entry changes nothing
+    keep_secrets(deps, secrets)?;
+    let url = start(deps, specs).await;
     let views = specs
         .iter()
-        .map(|s| app_view(&deps, &s.name))
+        .map(|s| app_view(deps, &s.name))
         .collect::<ApiResult<Vec<_>>>()?;
+    Ok((views, url))
+}
+
+/// Connect an app now and keep it in apps.json. An app that signs in comes back with the
+/// address the browser should open; the desktop opens it.
+#[utoipa::path(post, path = "/apps", operation_id = "connect_app_apps_post", tag = "apps", summary = "Connect App",
+    description = "Connect an app now and keep it in apps.json. An app that signs in comes back\nwith the address the browser should open; the desktop opens it.",
+    request_body = AppConnect,
+    responses((status = 200, description = "Successful Response", body = AppConnectResult),
+              (status = 422, description = "Validation Error", body = HTTPValidationError)))]
+async fn connect_app(
+    State(deps): State<SharedDeps>,
+    Body(req): Body<AppConnect>,
+) -> ApiResult<Json<AppConnectResult>> {
+    need_apps(&deps)?;
+    let Asked {
+        specs,
+        secrets,
+        notes,
+    } = specs_from(&deps, &req)?;
+    let (views, url) = connect_specs(&deps, &specs, &secrets, req.replace.unwrap_or(false)).await?;
     Ok(Json(AppConnectResult {
         apps: views,
         sign_in_url: url,

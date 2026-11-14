@@ -456,7 +456,13 @@ fn edit_file(
         .to_string();
     let backup = match &text {
         Some(old) => {
-            let b = dir.join(format!("{name}.ghost-backup-{stamp}"));
+            // Never over an earlier backup: one made the same second gets a number.
+            let mut b = dir.join(format!("{name}.ghost-backup-{stamp}"));
+            let mut n = 2;
+            while std::fs::symlink_metadata(&b).is_ok() {
+                b = dir.join(format!("{name}.ghost-backup-{stamp}-{n}"));
+                n += 1;
+            }
             write_new(&b, old.as_bytes(), mode).map_err(|e| format!("{shown}: the backup: {e}"))?;
             Some(b)
         }
