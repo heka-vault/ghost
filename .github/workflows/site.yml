@@ -1,7 +1,8 @@
 name: site
 # heyghost.app (site/, docs/site.md): built with Astro's official action, deployed to GitHub
 # Pages from main only. A pull request that touches the site or what its hero imports (the
-# desktop app's floating room, its mock daemon, the README's desktop and screenshots, the shared UI) builds
+# desktop app's floating room, its mock daemon, the README's desktop and screenshots, the shared UI, the
+# agents' setup guide it serves at /agents.md) builds
 # it without deploying; nothing else runs it. Pages must be set to "GitHub Actions" as its
 # source in the repository's settings (docs/site.md has the steps).
 on:
@@ -14,6 +15,7 @@ on:
       - packages/ui/**
       - packages/client-ts/**
       - docs/screenshots/**
+      - docs/agent-setup.md
       - pnpm-lock.yaml
       - pnpm-workspace.yaml
       - .github/workflows/site.yml
@@ -25,6 +27,7 @@ on:
       - packages/ui/**
       - packages/client-ts/**
       - docs/screenshots/**
+      - docs/agent-setup.md
       - pnpm-lock.yaml
       - pnpm-workspace.yaml
       - .github/workflows/site.yml
@@ -51,7 +54,7 @@ jobs:
         with:
           path: .
           node-version: 22
-          build-cmd: pnpm --filter @ghost/site site:check && pnpm --filter @ghost/site site:build
+          build-cmd: pnpm --filter @ghost/site site:check && pnpm --filter @ghost/site site:build && pnpm --filter @ghost/site site:verify
           out-dir: site/dist
 
   deploy:

@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "astro dev --port 4321",
     "site:build": "astro build",
+    "site:verify": "node scripts/verify-agents.mjs",
     "site:preview": "astro preview --port 4321",
     "site:stills": "node scripts/stills.mjs",
     "site:sound-check": "node scripts/sound-check.mjs",
