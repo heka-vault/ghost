@@ -67,7 +67,7 @@ pub use spec::{
     looks_like_secret, parse_app, parse_apps_json, render_app, render_apps_json, secret_name,
     secret_names, write_apps,
 };
-pub(crate) use spec::{edit_keyed, write_folder_file};
+pub(crate) use spec::{edit_json_at, edit_keyed, json_entries_at, write_folder_file};
 pub(crate) use tools::fit;
 pub use tools::{
     ALSO_RETURNED, BRIEF_MAX, CUT_NOTE, MAX_FIELD_CHARS, MAX_LIST_ITEMS, MAX_RESULT_ITEMS,

@@ -859,6 +859,77 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/other-tools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Other Tools
+         * @description What the AI tools on this computer (Claude Code, Cursor, Codex) have set up, read
+         *     from their own files: their apps, whether they use Ghost, and a model connection that is
+         *     already there (a local server, a key in Ghost's environment). Names and kinds only.
+         */
+        get: operations["other_tools_other_tools_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/other-tools/{tool}/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import Other Tool Apps
+         * @description Connect apps another tool uses: each one's secrets into Ghost's vault and
+         *     `${NAME}` in apps.json, through the same path as connecting by hand. One already connected
+         *     is skipped, so a second import changes nothing.
+         */
+        post: operations["import_other_tool_apps_other_tools__tool__import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/other-tools/{tool}/link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Link Other Tool
+         * @description Let another tool use Ghost: a client made as `ghostd mcp add` makes one, and Ghost
+         *     added to the tool by its own command or into its file after a backup beside it. The
+         *     token is never returned.
+         */
+        post: operations["link_other_tool_other_tools__tool__link_post"];
+        /**
+         * Unlink Other Tool
+         * @description Take Ghost back out of another tool's own settings, by its command or from its
+         *     file after a backup. The client itself is removed on its own (`DELETE /clients/{name}`).
+         */
+        delete: operations["unlink_other_tool_other_tools__tool__link_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/outputs": {
         parameters: {
             query?: never;
@@ -2538,6 +2609,45 @@ export interface components {
             microphone?: components["schemas"]["MicrophoneView"] | null;
             output_device: string | null;
         };
+        /** @description An app another tool uses, as Ghost would connect it. Never a secret's value. */
+        FoundAppView: {
+            /** @description The address, without its query or user-info. */
+            address: string | null;
+            /** @description The command Ghost would run, word by word, exactly as given: someone else's text. */
+            command: string[];
+            /** @description The same command as one line, quoted where a shell would read it. Shown only. */
+            command_line: string | null;
+            file: string;
+            /** @description Which entry: what an import names. */
+            key: string;
+            /** @description address or command. */
+            kind: string;
+            /** @description What goes into Ghost's vault, by where it was ("header Authorization"). */
+            moved: string[];
+            /** @description Its name in the other tool. */
+            name: string;
+            /** @description Passwords it refers to that Ghost does not have yet, by name. */
+            needs: string[];
+            notes: string[];
+            /** @description "every project", or "~/code/site only". */
+            scope: string;
+            /** @description It signs in through Ghost's own sign-in; the other tool's is never copied. */
+            sign_in: boolean;
+            /** @description Why it is not offered, in a sentence; None when it can be connected. */
+            skip: string | null;
+            /** @description The name it would have in Ghost. */
+            suggested: string;
+        };
+        /** @description A model connection that is already there. */
+        FoundModelView: {
+            /** @description How Ghost knows, in a sentence. */
+            how: string;
+            /** @description What a local server lists; empty for a key. */
+            models: string[];
+            /** @description The provider id Settings › Model takes. */
+            provider: string;
+            title: string;
+        };
         HearBlock: {
             /** @description Across the room: takes start after a countdown and end on silence. */
             away?: boolean;
@@ -2893,6 +3003,21 @@ export interface components {
             /** @description The exception's type and message, as sent. */
             title: string;
         };
+        /** @description What letting the tool use Ghost would do, shown before it is done. */
+        LinkView: {
+            /**
+             * @description command (the tool's own, run by Ghost), file (Ghost writes it, after a backup) or
+             *     yourself (the tool's own command, shown for the operator to run; Claude Code without
+             *     `claude` on the PATH, since Ghost never writes `~/.claude.json`).
+             */
+            by: string;
+            /** @description It connects by address, with a token in its config. */
+            by_address: boolean;
+            /** @description The client it would be (`ghostd mcp add`'s name). */
+            client: string;
+            /** @description The command, or the file and what is added to it; `<token>` stands for the token. */
+            shown: string;
+        };
         /** @description `PUT /listening`: turn Ghost's microphone on or off (ADR 0057). */
         ListeningRequest: {
             /** @description `false` closes the microphone; `true` opens it again. */
@@ -3137,6 +3262,63 @@ export interface components {
             };
             required: string[];
             risk: string;
+        };
+        /** @description A file another tool keeps its apps in, as read. */
+        OtherFileView: {
+            /** @description The file, from the home folder (`~/.claude.json`). */
+            path: string;
+            /** @description Why it was not read, in a sentence. */
+            problem: string | null;
+            /** @description read, missing, too_large, outside (a link out of the home folder) or unreadable. */
+            state: string;
+        };
+        OtherImport: {
+            /** @description Every app offered. */
+            all?: boolean;
+            /** @description The keys of the apps to connect. */
+            apps?: string[];
+        };
+        OtherImportResult: {
+            apps: components["schemas"]["AppView"][];
+            /** @description The first app that wants the browser for its sign-in. */
+            sign_in_url: string | null;
+            skipped: components["schemas"]["SkippedView"][];
+            tools: components["schemas"]["OtherToolsView"];
+        };
+        OtherLinkResult: {
+            /** @description The backup Ghost made of the tool's file. */
+            backup: string | null;
+            client: components["schemas"]["ClientView"] | null;
+            /** @description What was done, in a sentence. */
+            done: string;
+            /**
+             * @description The command for the operator to run in a terminal, when Ghost runs and writes nothing
+             *     of the tool's (Claude Code without `claude` on the PATH). Shown this once: by address it
+             *     carries the tool's token.
+             */
+            run_yourself: string | null;
+            tools: components["schemas"]["OtherToolsView"];
+        };
+        OtherToolsView: {
+            /** @description "Cursor and Claude Code are set up on this computer.", or None. */
+            line: string | null;
+            models: components["schemas"]["FoundModelView"][];
+            /** @description Tools here whose own sign-in Ghost may not use (Claude Code, Codex). */
+            own_sign_in: string[];
+            tools: components["schemas"]["OtherToolView"][];
+        };
+        OtherToolView: {
+            apps: components["schemas"]["FoundAppView"][];
+            files: components["schemas"]["OtherFileView"][];
+            /** @description claude-code, cursor or codex. */
+            id: string;
+            /** @description Its folder or its command is on this computer. */
+            installed: boolean;
+            link: components["schemas"]["LinkView"] | null;
+            /** @description Why Ghost can't add itself to the tool, in a sentence. */
+            link_problem: string | null;
+            title: string;
+            uses_ghost: components["schemas"]["UsesGhostView"] | null;
         };
         OutcomeEvent: {
             outcome: components["schemas"]["OutcomeView"];
@@ -3994,6 +4176,11 @@ export interface components {
             source: string;
             update: boolean;
         };
+        SkippedView: {
+            key: string;
+            name: string;
+            why: string;
+        };
         SnoozeRequest: {
             key: string;
             /**
@@ -4124,6 +4311,15 @@ export interface components {
             role: "user" | "assistant" | "call" | "system";
             session_id: string;
             text: string;
+        };
+        /** @description Ghost already in the tool. */
+        UsesGhostView: {
+            /** @description The client it names, when it names one. */
+            client: string | null;
+            entry: string;
+            file: string;
+            /** @description Ghost can take it back out (it is in the tool's own user file). */
+            removable: boolean;
         };
         /** @description One thing wrong with a request, as FastAPI says it: the kind, where, and why. */
         ValidationError: {
@@ -4384,6 +4580,8 @@ export type SchemaConversationUpdate = components['schemas']['ConversationUpdate
 export type SchemaConversationView = components['schemas']['ConversationView'];
 export type SchemaDeviceInfo = components['schemas']['DeviceInfo'];
 export type SchemaDevicesView = components['schemas']['DevicesView'];
+export type SchemaFoundAppView = components['schemas']['FoundAppView'];
+export type SchemaFoundModelView = components['schemas']['FoundModelView'];
 export type SchemaHearBlock = components['schemas']['HearBlock'];
 export type SchemaHearCheck = components['schemas']['HearCheck'];
 export type SchemaHeardEvent = components['schemas']['HeardEvent'];
@@ -4424,6 +4622,7 @@ export type SchemaHttpValidationError = components['schemas']['HTTPValidationErr
 export type SchemaImportSourceView = components['schemas']['ImportSourceView'];
 export type SchemaItemKey = components['schemas']['ItemKey'];
 export type SchemaKeptReportView = components['schemas']['KeptReportView'];
+export type SchemaLinkView = components['schemas']['LinkView'];
 export type SchemaListeningRequest = components['schemas']['ListeningRequest'];
 export type SchemaListeningView = components['schemas']['ListeningView'];
 export type SchemaLogEvent = components['schemas']['LogEvent'];
@@ -4443,6 +4642,12 @@ export type SchemaModelSignInResult = components['schemas']['ModelSignInResult']
 export type SchemaModelsView = components['schemas']['ModelsView'];
 export type SchemaNotListening = components['schemas']['NotListening'];
 export type SchemaOperationInfo = components['schemas']['OperationInfo'];
+export type SchemaOtherFileView = components['schemas']['OtherFileView'];
+export type SchemaOtherImport = components['schemas']['OtherImport'];
+export type SchemaOtherImportResult = components['schemas']['OtherImportResult'];
+export type SchemaOtherLinkResult = components['schemas']['OtherLinkResult'];
+export type SchemaOtherToolsView = components['schemas']['OtherToolsView'];
+export type SchemaOtherToolView = components['schemas']['OtherToolView'];
 export type SchemaOutcomeEvent = components['schemas']['OutcomeEvent'];
 export type SchemaOutcomeView = components['schemas']['OutcomeView'];
 export type SchemaOutputInfo = components['schemas']['OutputInfo'];
@@ -4513,6 +4718,7 @@ export type SchemaSkillPreview = components['schemas']['SkillPreview'];
 export type SchemaSkillPreviewRequest = components['schemas']['SkillPreviewRequest'];
 export type SchemaSkillSearchPage = components['schemas']['SkillSearchPage'];
 export type SchemaSkillUpdateView = components['schemas']['SkillUpdateView'];
+export type SchemaSkippedView = components['schemas']['SkippedView'];
 export type SchemaSnoozeRequest = components['schemas']['SnoozeRequest'];
 export type SchemaSourceInfo = components['schemas']['SourceInfo'];
 export type SchemaSpeechModelFile = components['schemas']['SpeechModelFile'];
@@ -4525,6 +4731,7 @@ export type SchemaTakeEnding = components['schemas']['TakeEnding'];
 export type SchemaTurn = components['schemas']['Turn'];
 export type SchemaTurnEvent = components['schemas']['TurnEvent'];
 export type SchemaTurnView = components['schemas']['TurnView'];
+export type SchemaUsesGhostView = components['schemas']['UsesGhostView'];
 export type SchemaValidationError = components['schemas']['ValidationError'];
 export type SchemaVaultView = components['schemas']['VaultView'];
 export type SchemaVoiceEvent = components['schemas']['VoiceEvent'];
@@ -6299,6 +6506,123 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ModelSignInResult"];
+                };
+            };
+        };
+    };
+    other_tools_other_tools_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OtherToolsView"];
+                };
+            };
+        };
+    };
+    import_other_tool_apps_other_tools__tool__import_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tool: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OtherImport"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OtherImportResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    link_other_tool_other_tools__tool__link_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tool: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OtherLinkResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unlink_other_tool_other_tools__tool__link_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tool: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OtherLinkResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

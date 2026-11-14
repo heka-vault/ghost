@@ -24,6 +24,7 @@ pub mod hear;
 pub mod model;
 pub mod models;
 pub mod openapi;
+pub mod other_tools;
 pub mod passwords;
 pub mod questions;
 pub mod reach;

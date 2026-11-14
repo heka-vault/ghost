@@ -2755,6 +2755,9 @@ impl Daemon {
             clients_listening: p.clients_listening,
             questions: self.questions(),
             in_appimage: ghost_core::ghost_app::clients::in_appimage(|k| std::env::var(k).ok()),
+            other_tools: Some(Arc::new(ghost_api::deps::LiveOtherTools {
+                started_env: self.started_env.clone(),
+            })),
         });
         self.late.deps.set(deps.clone()).ok();
         let listener = match ghost_api::server::bind(&socket).await {

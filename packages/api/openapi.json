@@ -1447,6 +1447,133 @@
         ],
         "type": "object"
       },
+      "FoundAppView": {
+        "description": "An app another tool uses, as Ghost would connect it. Never a secret's value.",
+        "properties": {
+          "address": {
+            "description": "The address, without its query or user-info.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "command": {
+            "description": "The command Ghost would run, word by word, exactly as given: someone else's text.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "command_line": {
+            "description": "The same command as one line, quoted where a shell would read it. Shown only.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "file": {
+            "type": "string"
+          },
+          "key": {
+            "description": "Which entry: what an import names.",
+            "type": "string"
+          },
+          "kind": {
+            "description": "address or command.",
+            "type": "string"
+          },
+          "moved": {
+            "description": "What goes into Ghost's vault, by where it was (\"header Authorization\").",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "name": {
+            "description": "Its name in the other tool.",
+            "type": "string"
+          },
+          "needs": {
+            "description": "Passwords it refers to that Ghost does not have yet, by name.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "scope": {
+            "description": "\"every project\", or \"~/code/site only\".",
+            "type": "string"
+          },
+          "sign_in": {
+            "description": "It signs in through Ghost's own sign-in; the other tool's is never copied.",
+            "type": "boolean"
+          },
+          "skip": {
+            "description": "Why it is not offered, in a sentence; None when it can be connected.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "suggested": {
+            "description": "The name it would have in Ghost.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "scope",
+          "file",
+          "suggested",
+          "kind",
+          "address",
+          "command",
+          "command_line",
+          "sign_in",
+          "moved",
+          "needs",
+          "notes",
+          "skip"
+        ],
+        "type": "object"
+      },
+      "FoundModelView": {
+        "description": "A model connection that is already there.",
+        "properties": {
+          "how": {
+            "description": "How Ghost knows, in a sentence.",
+            "type": "string"
+          },
+          "models": {
+            "description": "What a local server lists; empty for a key.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "provider": {
+            "description": "The provider id Settings › Model takes.",
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "title",
+          "how",
+          "models"
+        ],
+        "type": "object"
+      },
       "HTTPValidationError": {
         "description": "The 422 body: a list of what was wrong.",
         "properties": {
@@ -2634,6 +2761,34 @@
         ],
         "type": "object"
       },
+      "LinkView": {
+        "description": "What letting the tool use Ghost would do, shown before it is done.",
+        "properties": {
+          "by": {
+            "description": "command (the tool's own, run by Ghost), file (Ghost writes it, after a backup) or\nyourself (the tool's own command, shown for the operator to run; Claude Code without\n`claude` on the PATH, since Ghost never writes `~/.claude.json`).",
+            "type": "string"
+          },
+          "by_address": {
+            "description": "It connects by address, with a token in its config.",
+            "type": "boolean"
+          },
+          "client": {
+            "description": "The client it would be (`ghostd mcp add`'s name).",
+            "type": "string"
+          },
+          "shown": {
+            "description": "The command, or the file and what is added to it; `<token>` stands for the token.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "client",
+          "by",
+          "shown",
+          "by_address"
+        ],
+        "type": "object"
+      },
       "ListeningRequest": {
         "description": "`PUT /listening`: turn Ghost's microphone on or off (ADR 0057).",
         "properties": {
@@ -3313,6 +3468,227 @@
           "autonomy",
           "properties",
           "required"
+        ],
+        "type": "object"
+      },
+      "OtherFileView": {
+        "description": "A file another tool keeps its apps in, as read.",
+        "properties": {
+          "path": {
+            "description": "The file, from the home folder (`~/.claude.json`).",
+            "type": "string"
+          },
+          "problem": {
+            "description": "Why it was not read, in a sentence.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "description": "read, missing, too_large, outside (a link out of the home folder) or unreadable.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "state",
+          "problem"
+        ],
+        "type": "object"
+      },
+      "OtherImport": {
+        "properties": {
+          "all": {
+            "description": "Every app offered.",
+            "type": "boolean"
+          },
+          "apps": {
+            "description": "The keys of the apps to connect.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "OtherImportResult": {
+        "properties": {
+          "apps": {
+            "items": {
+              "$ref": "#/components/schemas/AppView"
+            },
+            "type": "array"
+          },
+          "sign_in_url": {
+            "description": "The first app that wants the browser for its sign-in.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "skipped": {
+            "items": {
+              "$ref": "#/components/schemas/SkippedView"
+            },
+            "type": "array"
+          },
+          "tools": {
+            "$ref": "#/components/schemas/OtherToolsView"
+          }
+        },
+        "required": [
+          "apps",
+          "skipped",
+          "sign_in_url",
+          "tools"
+        ],
+        "type": "object"
+      },
+      "OtherLinkResult": {
+        "properties": {
+          "backup": {
+            "description": "The backup Ghost made of the tool's file.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "client": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ClientView",
+                "description": "The client made; None when Ghost was taken out."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "done": {
+            "description": "What was done, in a sentence.",
+            "type": "string"
+          },
+          "run_yourself": {
+            "description": "The command for the operator to run in a terminal, when Ghost runs and writes nothing\nof the tool's (Claude Code without `claude` on the PATH). Shown this once: by address it\ncarries the tool's token.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tools": {
+            "$ref": "#/components/schemas/OtherToolsView"
+          }
+        },
+        "required": [
+          "done",
+          "client",
+          "backup",
+          "run_yourself",
+          "tools"
+        ],
+        "type": "object"
+      },
+      "OtherToolView": {
+        "properties": {
+          "apps": {
+            "items": {
+              "$ref": "#/components/schemas/FoundAppView"
+            },
+            "type": "array"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/OtherFileView"
+            },
+            "type": "array"
+          },
+          "id": {
+            "description": "claude-code, cursor or codex.",
+            "type": "string"
+          },
+          "installed": {
+            "description": "Its folder or its command is on this computer.",
+            "type": "boolean"
+          },
+          "link": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/LinkView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "link_problem": {
+            "description": "Why Ghost can't add itself to the tool, in a sentence.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "uses_ghost": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/UsesGhostView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "installed",
+          "files",
+          "apps",
+          "uses_ghost",
+          "link",
+          "link_problem"
+        ],
+        "type": "object"
+      },
+      "OtherToolsView": {
+        "properties": {
+          "line": {
+            "description": "\"Cursor and Claude Code are set up on this computer.\", or None.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/FoundModelView"
+            },
+            "type": "array"
+          },
+          "own_sign_in": {
+            "description": "Tools here whose own sign-in Ghost may not use (Claude Code, Codex).",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "tools": {
+            "items": {
+              "$ref": "#/components/schemas/OtherToolView"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "line",
+          "tools",
+          "models",
+          "own_sign_in"
         ],
         "type": "object"
       },
@@ -6067,6 +6443,25 @@
         ],
         "type": "object"
       },
+      "SkippedView": {
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "why": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "why"
+        ],
+        "type": "object"
+      },
       "SnoozeRequest": {
         "properties": {
           "key": {
@@ -6465,6 +6860,35 @@
           "text",
           "at",
           "compacted"
+        ],
+        "type": "object"
+      },
+      "UsesGhostView": {
+        "description": "Ghost already in the tool.",
+        "properties": {
+          "client": {
+            "description": "The client it names, when it names one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "entry": {
+            "type": "string"
+          },
+          "file": {
+            "type": "string"
+          },
+          "removable": {
+            "description": "Ghost can take it back out (it is in the tool's own user file).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "entry",
+          "client",
+          "file",
+          "removable"
         ],
         "type": "object"
       },
@@ -9369,6 +9793,162 @@
         "summary": "Model Sign In",
         "tags": [
           "model"
+        ]
+      }
+    },
+    "/other-tools": {
+      "get": {
+        "description": "What the AI tools on this computer (Claude Code, Cursor, Codex) have set up, read\nfrom their own files: their apps, whether they use Ghost, and a model connection that is\nalready there (a local server, a key in Ghost's environment). Names and kinds only.",
+        "operationId": "other_tools_other_tools_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OtherToolsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Other Tools",
+        "tags": [
+          "other-tools"
+        ]
+      }
+    },
+    "/other-tools/{tool}/import": {
+      "post": {
+        "description": "Connect apps another tool uses: each one's secrets into Ghost's vault and\n`${NAME}` in apps.json, through the same path as connecting by hand. One already connected\nis skipped, so a second import changes nothing.",
+        "operationId": "import_other_tool_apps_other_tools__tool__import_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tool",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OtherImport"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OtherImportResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Import Other Tool Apps",
+        "tags": [
+          "other-tools"
+        ]
+      }
+    },
+    "/other-tools/{tool}/link": {
+      "delete": {
+        "description": "Take Ghost back out of another tool's own settings, by its command or from its\nfile after a backup. The client itself is removed on its own (`DELETE /clients/{name}`).",
+        "operationId": "unlink_other_tool_other_tools__tool__link_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tool",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OtherLinkResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Unlink Other Tool",
+        "tags": [
+          "other-tools"
+        ]
+      },
+      "post": {
+        "description": "Let another tool use Ghost: a client made as `ghostd mcp add` makes one, and Ghost\nadded to the tool by its own command or into its file after a backup beside it. The\ntoken is never returned.",
+        "operationId": "link_other_tool_other_tools__tool__link_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tool",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OtherLinkResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Link Other Tool",
+        "tags": [
+          "other-tools"
         ]
       }
     },

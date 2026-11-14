@@ -37,6 +37,34 @@ protocol's name from it. None of it reaches the model, and nothing the registry 
 header, an argument, an address) can name one of Ghost's passwords: only the settings you
 fill in are.
 
+### From the AI tools already on this computer
+
+If Claude Code, Cursor or Codex is set up here, the first run's app step and **Apps** (under
+"In your other tools") list the apps it already uses, read from its own files (ADR 0068):
+Claude Code's `~/.claude.json` and each project's `.mcp.json`, Cursor's `~/.cursor/mcp.json`,
+Codex's `~/.codex/config.toml`. Each shows what it is, an address or the exact command Ghost
+would run, and one button: **Connect**, **Sign in…** (Ghost's own sign-in; the other tool's
+is never copied) or **Connect and run** for a command. A key written into the other tool's
+entry moves into Ghost's vault when you connect, and `apps.json` names it. One already
+connected, one that points at Ghost, and one named `ghost` are not offered, and each says why.
+**Look again** reads the files again. Ghost never opens another tool's sign-in files.
+
+From a terminal, with Ghost running:
+
+```
+ghostd setup detect            # what is there; --json for a script
+ghostd setup import cursor linear
+ghostd setup import claude-code --all
+```
+
+Each import shows what it will connect, and the command it will run, and asks first unless
+`--yes`.
+
+#### What Ghost keeps from those files
+
+Their app lists, and nothing else. `~/.claude.json` also holds that tool's account and your
+projects' history; Ghost reads it for its app list only and keeps nothing else from it.
+
 ### Who publishes an app, and where it runs
 
 Anyone can publish to the registry, so a search for "posthog" finds six apps, five of them

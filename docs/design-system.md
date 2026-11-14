@@ -433,6 +433,8 @@ Development only. Add `?mock=<scenario>` before the hash: `http://localhost:1430
 | `starting` | Daemon up, voice models loading. |
 | `disconnected` | ghostd not running: requests fail, the event stream closes. |
 | `firstrun` | No secrets or endpoint set, no policy file, and only the pretend GitHub connected. |
+| `firstrun-found` | Like `firstrun`, with Claude Code and Cursor set up on this computer (ADR 0068): five apps between them (one that runs a command, two that sign in, one the same as another), a way to let each use Ghost, Ollama running with two models, and the sentence about Claude Code's own sign-in in the model step. |
+| `firstrun-malformed` | Like `firstrun`, with Cursor set up and its `mcp.json` not JSON: one line saying Ghost left it as it is, and no way to let Cursor use Ghost until it reads. |
 | `empty` | Configured, nothing has happened: Ghost alone, no audit, no policy file, no apps, no skills, no rules, no outputs, no watches or webhooks and the listener off, and nothing scheduled. |
 | `expiring` | Like `pending`, but the change expires 8 seconds after load: design the countdown and the lapse. |
 | `reconnecting` | A live session on Accounting; the daemon drops 1.5 seconds after load and stays away. |

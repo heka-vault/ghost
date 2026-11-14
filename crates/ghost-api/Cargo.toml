@@ -39,6 +39,8 @@ http-body-util.workspace = true
 hyperlocal.workspace = true
 
 [dev-dependencies]
+# Log lines captured in a buffer: an imported token never reaches one (ADR 0068).
+tracing-subscriber.workspace = true
 ghost-core = { workspace = true, features = ["fakes"] }
 tempfile.workspace = true
 tower.workspace = true

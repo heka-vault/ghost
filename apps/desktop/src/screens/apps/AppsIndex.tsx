@@ -16,6 +16,7 @@ import { useAppActions } from "./actions";
 import { AddOwnDialog } from "./AddOwnDialog";
 import { AppIcon } from "./AppIcon";
 import { ConnectDialog } from "./ConnectDialog";
+import { NoticedLine, OtherToolsApps, useOtherTools } from "./OtherTools";
 import { problemWords, sentence, summaryWords, usedWords } from "./model";
 import { twinsOf } from "./plain";
 
@@ -57,6 +58,9 @@ export function AppsIndex() {
   }, [load, appsVersion]);
 
   const actions = useAppActions({ onChanged: () => void load() });
+  // ADR 0068: what the AI tools already on this computer use, offered here too.
+  const others = useOtherTools();
+  const offered = (others.view?.tools ?? []).some((t) => t.apps.some((a) => !a.skip) || t.files.some((f) => f.problem));
 
   /** From another publisher's app to the maker's own (#37): the dialog shows that one instead. */
   const openEntry = async (name: string) => {
@@ -123,6 +127,19 @@ export function AppsIndex() {
           </Card>
         ) : null}
       </Section>
+
+      {others.view && offered && (
+        <Section id="apps-elsewhere" title="In your other tools" description="Apps the AI tools on this computer use. Connecting one moves its key into Ghost’s vault; nothing is copied from their sign-ins.">
+          <NoticedLine view={others.view} look={() => void others.look()} looking={others.looking} />
+          <OtherToolsApps
+            view={others.view}
+            onView={(v) => {
+              others.setView(v);
+              afterConnect();
+            }}
+          />
+        </Section>
+      )}
 
       <Catalog key={catalogVersion} fail={fail} onPick={setConnecting} onAddOwn={() => setAddingOwn(true)} />
 

@@ -33,6 +33,7 @@ import {
 import { AddOwnDialog } from "../apps/AddOwnDialog";
 import { AppIcon } from "../apps/AppIcon";
 import { ConnectDialog } from "../apps/ConnectDialog";
+import { FoundModels, NoticedLine, OtherToolsApps, useOtherTools } from "../apps/OtherTools";
 import { NewAgentDialog } from "../conversations/NewAgentDialog";
 import { verdictOf } from "../settings/check";
 import { GhostVoice } from "../settings/GhostVoice";
@@ -175,6 +176,8 @@ export function ModelStep({ w }: { w: Wizard }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const s = w.settings;
+  // ADR 0068: a model connection already on this computer, one click each.
+  const others = useOtherTools();
 
   const readConn = () => {
     client.modelConnection().then(setConn, () => setConn(null));
@@ -230,6 +233,13 @@ export function ModelStep({ w }: { w: Wizard }) {
         </Card>
       ) : (
         <div className="onb-model">
+          <FoundModels
+            view={others.view}
+            chosen={(values.GHOST_LLM_PROVIDER ?? "").trim()}
+            onChoose={(provider, model) =>
+              setValuesState((v) => ({ ...v, ...Object.fromEntries(CONNECTION_KEYS.map((k) => [k, ""])), GHOST_LLM_PROVIDER: provider, GHOST_LLM_MODEL: model ?? "" }))
+            }
+          />
           <ModelSection
             s={s}
             conn={conn}
@@ -676,6 +686,8 @@ export function AppStep({ w }: { w: Wizard }) {
   const [open, setOpen] = useState<CatalogEntryView | null>(null);
   const [own, setOwn] = useState(false);
   const connected = (w.apps ?? []).filter((a) => a.name !== "ghost-mock-github");
+  // ADR 0068: the apps the AI tools already on this computer use, offered first.
+  const others = useOtherTools();
 
   useEffect(() => {
     if (!live.online) return;
@@ -717,6 +729,14 @@ export function AppStep({ w }: { w: Wizard }) {
           ))}
         </div>
       )}
+      {others.view && <NoticedLine view={others.view} look={() => void others.look()} looking={others.looking} />}
+      <OtherToolsApps
+        view={others.view}
+        onView={(v) => {
+          others.setView(v);
+          void w.reload();
+        }}
+      />
       <Input leading={<Search />} value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search apps, like GitHub or Calendar…" aria-label="Search apps" />
       {problem && !entries?.length ? (
         <Notice tone="info" title="The catalog isn’t here" icon={<WifiOff />} className="onb-after-card">

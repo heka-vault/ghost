@@ -1,0 +1,23 @@
+# Codex's own settings, kept as they are
+model = "gpt-5-codex"
+
+[mcp_servers.context7]
+command = "npx"
+args = ["-y", "@upstash/context7-mcp"]
+
+[mcp_servers.figma]
+url = "https://mcp.figma.com/mcp"
+bearer_token_env_var = "FIGMA_OAUTH_TOKEN"
+
+[mcp_servers.sentry]
+url = "https://mcp.sentry.dev/mcp"
+
+[mcp_servers.docs]
+command = "docs-mcp"
+cwd = "/srv/docs"
+env = { DOCS_SECRET = "FIXTUREdocsSecretValue" }
+env_vars = ["HOME_REGION"]
+
+[mcp_servers.retired]
+command = "old-mcp"
+enabled = false

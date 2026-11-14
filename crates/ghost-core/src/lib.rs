@@ -26,6 +26,7 @@ pub mod levels;
 pub mod listening;
 pub mod mock_github;
 pub mod models;
+pub mod other_tools;
 pub mod outputs;
 pub mod password_import;
 pub mod passwords;

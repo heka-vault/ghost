@@ -116,6 +116,94 @@ impl AppsPort for Apps {
     }
 }
 
+/// The AI tools already on this computer (ADR 0068), as the routes reach them: the home
+/// folder their files are in, their commands on the PATH, a loopback GET for a local
+/// model server, and running a tool's own command. A test stands in a temp home and
+/// records the commands; nothing here is the operator's machine in a test.
+#[async_trait]
+pub trait OtherToolsPort: Send + Sync {
+    fn place(&self) -> ghost_core::other_tools::Where;
+    async fn get_local(&self, url: &str) -> Option<String>;
+    /// Run argv directly (never through a shell), with none of Ghost's passwords in its
+    /// environment. Err is a sentence.
+    async fn run(&self, argv: &[String]) -> Result<(), String>;
+    /// A timestamp for a backup's name.
+    fn stamp(&self) -> String {
+        chrono::Utc::now().format("%Y%m%dT%H%M%S").to_string()
+    }
+}
+
+/// This computer's tools, from the environment Ghost was started in.
+pub struct LiveOtherTools {
+    pub started_env: Arc<HashMap<String, String>>,
+}
+
+impl LiveOtherTools {
+    fn which(&self, binary: &str) -> Option<PathBuf> {
+        use std::os::unix::fs::PermissionsExt;
+        let path = self.started_env.get("PATH")?;
+        std::env::split_paths(path)
+            .filter(|d| d.is_absolute())
+            .map(|d| d.join(binary))
+            .find(|p| {
+                std::fs::metadata(p)
+                    .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+                    .unwrap_or(false)
+            })
+    }
+}
+
+#[async_trait]
+impl OtherToolsPort for LiveOtherTools {
+    fn place(&self) -> ghost_core::other_tools::Where {
+        use ghost_core::other_tools::{TOOLS, Where};
+        let home = self
+            .started_env
+            .get("HOME")
+            .map(PathBuf::from)
+            .filter(|p| p.is_absolute())
+            .unwrap_or_else(|| PathBuf::from("/nonexistent"));
+        let mut w = Where::new(home);
+        w.codex_home = self.started_env.get("CODEX_HOME").map(PathBuf::from);
+        for t in TOOLS {
+            if let Some(p) = self.which(t.binary()) {
+                w.binaries.insert(t, p);
+            }
+        }
+        w
+    }
+
+    async fn get_local(&self, url: &str) -> Option<String> {
+        ghost_core::other_tools::models::get_local(url).await
+    }
+
+    async fn run(&self, argv: &[String]) -> Result<(), String> {
+        let (bin, args) = argv.split_first().ok_or("nothing to run")?;
+        let env = ghost_core::redact::child_env(
+            self.started_env.iter().map(|(k, v)| (k.clone(), v.clone())),
+        );
+        let child = tokio::process::Command::new(bin)
+            .args(args)
+            .env_clear()
+            .envs(env)
+            .stdin(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .output();
+        let out = tokio::time::timeout(Duration::from_secs(30), child)
+            .await
+            .map_err(|_| "it did not finish in 30 seconds".to_string())?
+            .map_err(|e| format!("it could not be started ({})", e.kind()))?;
+        if out.status.success() {
+            return Ok(());
+        }
+        let said: String = String::from_utf8_lossy(&out.stderr)
+            .chars()
+            .take(300)
+            .collect();
+        Err(ghost_core::redact::redact_text(said.trim()))
+    }
+}
+
 /// The sign-ins, as the routes need them: an app's pending browser address, forgetting
 /// one, and the model connection's own sign-in (ADR 0037).
 #[async_trait]
@@ -320,6 +408,8 @@ pub struct Deps {
     /// This daemon runs from an AppImage, whose `ghostd` is on a temporary mount: a tool
     /// that only starts commands is given the address instead (ADR 0048).
     pub in_appimage: bool,
+    /// The AI tools already on this computer (ADR 0068); None where there is no home.
+    pub other_tools: Option<Arc<dyn OtherToolsPort>>,
 }
 
 impl Deps {
@@ -374,6 +464,7 @@ impl Deps {
             clients_listening: Vec::new(),
             questions: None,
             in_appimage: false,
+            other_tools: None,
         }
     }
 

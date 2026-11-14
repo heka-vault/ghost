@@ -41,6 +41,8 @@ percent-encoding = "2"
 hmac = "0.12"
 hex = "0.4"
 toml = { version = "0.8", features = ["preserve_order"] }
+# Another tool's config.toml edited in place (ADR 0068): the version `toml` 0.8 already uses.
+toml_edit = "0.20"
 async-trait = "0.1"
 futures = "0.3"
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls", "json", "stream", "query"] }

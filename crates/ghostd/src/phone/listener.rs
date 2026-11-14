@@ -1109,6 +1109,23 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_phone_cannot_reach_the_other_tools_on_this_computer() {
+        // ADR 0068: reading other tools' files, importing their apps and writing their
+        // config are the operator's at the desk only.
+        let p = phone();
+        let (creds, _) = pair(&p, "Pixel 9").await;
+        for (method, path) in [
+            ("GET", "/other-tools"),
+            ("POST", "/other-tools/cursor/import"),
+            ("POST", "/other-tools/cursor/link"),
+            ("DELETE", "/other-tools/cursor/link"),
+        ] {
+            let (r, _) = signed(&p.app, &creds, method, path, Some(json!({"all": true}))).await;
+            assert_eq!(r.status, StatusCode::NOT_FOUND, "{method} {path}");
+        }
+    }
+
+    #[tokio::test]
     async fn error_responses_are_signed() {
         let p = phone();
         let (creds, _) = pair(&p, "Pixel 9").await;

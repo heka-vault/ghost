@@ -32,6 +32,7 @@ pub mod reports;
 pub mod routes;
 pub mod schedules;
 pub mod session;
+pub mod setup_cli;
 pub mod speech_models;
 pub mod wake;
 pub mod wake_detectors;
