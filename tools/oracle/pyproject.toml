@@ -7,7 +7,7 @@
 # `uv run --project tools/oracle python -I <script>`.
 [project]
 name = "ghost-oracle"
-version = "2026.10.0"
+version = "2026.11.0"
 description = "The Python the Rust daemon is measured against: the model wrappers, the aiortc far end, the wake tooling"
 requires-python = ">=3.12,<3.13"
 license = "MIT"

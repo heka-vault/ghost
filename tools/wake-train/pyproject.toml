@@ -5,7 +5,7 @@
 # `make wake-train`, or `uv run --project tools/wake-train python -I -m wake_train`.
 [project]
 name = "ghost-wake-train"
-version = "2026.10.0"
+version = "2026.11.0"
 description = "Retrain the hey ghost detector on the operator's own wake takes, on this machine"
 requires-python = ">=3.12,<3.13"
 license = "MIT"
