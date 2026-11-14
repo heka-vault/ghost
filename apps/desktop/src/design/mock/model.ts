@@ -8,12 +8,13 @@ import { HttpError } from "./errors";
 import type { ModelConnectionView, ModelDraft, ModelListView, ModelCheckModel, ModelCheckView, ModelProviderView, SettingsView } from "@ghost/client-ts";
 
 export const MODEL_PROVIDERS: ModelProviderView[] = [
-  { id: "anthropic", title: "Anthropic", blurb: "Claude, with a password (API key) from the Anthropic Console.", protocol: "anthropic", base_url: "https://api.anthropic.com", password: "ANTHROPIC_API_KEY", password_optional: false, sign_in: false, local: false, default_model: "claude-sonnet-5-5" },
-  { id: "openrouter", title: "OpenRouter", blurb: "Sign in, and Claude or any other model OpenRouter offers.", protocol: "anthropic", base_url: "https://openrouter.ai/api", password: "OPENROUTER_API_KEY", password_optional: false, sign_in: true, local: false, default_model: "anthropic/claude-sonnet-5.5" },
-  { id: "openai", title: "OpenAI", blurb: "GPT models, with a password (API key) from the OpenAI platform.", protocol: "openai", base_url: "https://api.openai.com/v1", password: "OPENAI_API_KEY", password_optional: false, sign_in: false, local: false, default_model: "gpt-5" },
-  { id: "ollama", title: "Ollama", blurb: "A model running on this computer. Nothing leaves it.", protocol: "openai", base_url: "http://localhost:11434/v1", password: null, password_optional: false, sign_in: false, local: true, default_model: null },
-  { id: "lmstudio", title: "LM Studio", blurb: "A model LM Studio serves on this computer. Nothing leaves it.", protocol: "openai", base_url: "http://localhost:1234/v1", password: null, password_optional: false, sign_in: false, local: true, default_model: null },
-  { id: "custom", title: "Your own address", blurb: "Any address that speaks Anthropic’s or OpenAI’s API.", protocol: "anthropic", base_url: "", password: "LLM_API_KEY", password_optional: true, sign_in: false, local: false, default_model: null },
+  { id: "anthropic", title: "Anthropic", blurb: "Claude, with a password (API key) from the Anthropic Console.", protocol: "anthropic", base_url: "https://api.anthropic.com", password: "ANTHROPIC_API_KEY", password_optional: false, sign_in: false, local: false, program: false, default_model: "claude-sonnet-5-5" },
+  { id: "openrouter", title: "OpenRouter", blurb: "Sign in, and Claude or any other model OpenRouter offers.", protocol: "anthropic", base_url: "https://openrouter.ai/api", password: "OPENROUTER_API_KEY", password_optional: false, sign_in: true, local: false, program: false, default_model: "anthropic/claude-sonnet-5.5" },
+  { id: "openai", title: "OpenAI", blurb: "GPT models, with a password (API key) from the OpenAI platform.", protocol: "openai", base_url: "https://api.openai.com/v1", password: "OPENAI_API_KEY", password_optional: false, sign_in: false, local: false, program: false, default_model: "gpt-5" },
+  { id: "ollama", title: "Ollama", blurb: "A model running on this computer. Nothing leaves it.", protocol: "openai", base_url: "http://localhost:11434/v1", password: null, password_optional: false, sign_in: false, local: true, program: false, default_model: null },
+  { id: "lmstudio", title: "LM Studio", blurb: "A model LM Studio serves on this computer. Nothing leaves it.", protocol: "openai", base_url: "http://localhost:1234/v1", password: null, password_optional: false, sign_in: false, local: true, program: false, default_model: null },
+  { id: "custom", title: "Your own address", blurb: "Any address that speaks Anthropic’s or OpenAI’s API.", protocol: "anthropic", base_url: "", password: "LLM_API_KEY", password_optional: true, sign_in: false, local: false, program: false, default_model: null },
+  { id: "claude-code", title: "Claude Code", blurb: "Claude Code, installed and signed in on this computer. Ghost runs it to answer you; replies count against your Claude plan’s limits.", protocol: "anthropic", base_url: "", password: null, password_optional: false, sign_in: false, local: false, program: true, default_model: "haiku" },
 ];
 
 const MODELS: Record<string, { id: string; name?: string }[]> = {
@@ -34,6 +35,8 @@ const MODELS: Record<string, { id: string; name?: string }[]> = {
   ollama: [{ id: "llama4:8b" }, { id: "qwen3:14b" }],
   lmstudio: [{ id: "qwen3-30b-a3b" }],
   custom: [],
+  // What the program's own `initialize` answer lists (2.1.325).
+  "claude-code": [{ id: "default", name: "Default (recommended)" }, { id: "opus", name: "Opus" }, { id: "sonnet", name: "Sonnet" }, { id: "haiku", name: "Haiku" }],
 };
 
 const KEYS = ["GHOST_LLM_PROVIDER", "GHOST_LLM_MODEL", "GHOST_LLM_PROTOCOL", "GHOST_LLM_BASE_URL", "GHOST_LLM_PASSWORD", "GHOST_LLM_HEADERS", "GHOST_LLM_TIMEOUT_SECS"];
@@ -81,7 +84,7 @@ export class MockModel {
     const password = values.GHOST_LLM_PASSWORD || spec.password || null;
     const set = this.has(password, password && draft?.password_value ? { [password]: draft.password_value } : {});
     const problems: string[] = [];
-    if (!base) problems.push(`${spec.title} needs an address (GHOST_LLM_BASE_URL)`);
+    if (!base && !spec.program) problems.push(`${spec.title} needs an address (GHOST_LLM_BASE_URL)`);
     if (!wire) problems.push("no model is chosen (GHOST_LLM_MODEL)");
     if (password && !spec.password_optional && !set) {
       // While the keyring is locked the key can't be read, which isn't "not set" (as the daemon says).
@@ -155,6 +158,28 @@ export class MockModel {
     if (c.provider === "lmstudio") {
       const m = model("main", c.wire_model, 0);
       return { checked_at: at, where, advice: null, models: [{ ...m, reachable: false, error: "I can't reach the model right now. Check the model connection in Settings. (ConnectError: can't reach http://localhost:1234)", answered_by: null }] };
+    }
+    if (c.provider === "claude-code") {
+      // Measured 2026-11-14 through the program (ADR 0069): ready in about 0.25 s, then warm.
+      const m = model("main", c.wire_model, 540);
+      const r: ModelCheckView = {
+        checked_at: at,
+        where: "claude-code (a program on this computer)",
+        advice: null,
+        models: [
+          {
+            ...m,
+            answered_by: `Claude Code (${c.wire_model})`,
+            streaming: { state: "yes", detail: "the program was ready in 0.3 s" },
+            tools: { state: "yes", detail: "a call through Ghost’s relay and the answer after it took 1.1 s" },
+            caching: { state: "yes", detail: "1869 tokens read from the cache" },
+            thinking: { state: "not_applicable", detail: "Claude Code decides its own thinking; Ghost asks it for low effort" },
+            thinking_mode: null,
+          },
+        ],
+      };
+      if (!Object.keys(draft.values ?? {}).some((k) => draft.values[k])) this.last = r;
+      return r;
     }
     const word = c.provider === "ollama" ? 238 : c.provider === "openrouter" ? 1840 : 712;
     const models = [model("main", c.wire_model, word)];
