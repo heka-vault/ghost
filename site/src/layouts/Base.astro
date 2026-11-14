@@ -1,8 +1,9 @@
 ---
 /**
- * Every page's head: the title, the description, the cards a link unfurls into (a still of the
- * float), the favicon from Wisp. Fonts are self-hosted (fontsource); nothing on the site is
- * fetched from anyone else, there are no cookies and no analytics.
+ * Every page's head: the title, the description, the cards a link unfurls into (the reach: the
+ * lit Wisp, its beams, the name and the line), the icons from the mark (`marks.mjs site`). Fonts
+ * are self-hosted (fontsource); nothing on the site is fetched from anyone else, there are no
+ * cookies and no analytics.
  */
 import "@fontsource-variable/inter/opsz.css";
 import "@fontsource-variable/jetbrains-mono";
@@ -15,7 +16,7 @@ interface Props {
 }
 const { title, description } = Astro.props;
 const canonical = new URL(Astro.url.pathname, Astro.site);
-const og = new URL("/og.png", Astro.site);
+const og = new URL("/og.jpg", Astro.site);
 ---
 
 <!doctype html>
@@ -28,6 +29,7 @@ const og = new URL("/og.png", Astro.site);
     <title>{title}</title>
     <meta name="description" content={description} />
     <link rel="canonical" href={canonical} />
+    <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="sitemap" href="/sitemap-index.xml" />
@@ -41,11 +43,13 @@ const og = new URL("/og.png", Astro.site);
     <meta property="og:image" content={og} />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="Ghost floating over a desktop, a beam out to each app it is looking in" />
+    <meta property="og:image:type" content="image/jpeg" />
+    <meta property="og:image:alt" content="Ghost, the lit ghost in its ring of light, a beam out to each place it is looking in: Linear, Calendar, Agents, Docs, Memory and GitHub. Floats over your work when you call it." />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />
     <meta name="twitter:image" content={og} />
+    <meta name="twitter:image:alt" content="Ghost, the lit ghost in its ring of light, a beam out to each place it is looking in" />
   </head>
   <body>
     <slot />

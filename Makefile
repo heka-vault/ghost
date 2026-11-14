@@ -145,9 +145,10 @@ desktop-web: ## the same UI in a browser at http://localhost:1420; ?mock=busy an
 screenshots: ## the README's screenshots and the floating room's from the mock UI (make desktop-web running; Chrome, ImageMagick, Node 22+): make screenshots [SHOTS="home apps"]
 	@scripts/screenshots.sh $(SHOTS)
 
-marks: ## the desktop's icons, tray icons and favicons, and the phone's launcher icon, adaptive layers, splash and status-bar icon, from packages/ui/src/mark.ts (Chrome, ImageMagick, Node 22.15+); every variant: node packages/ui/scripts/marks.mjs all <dir>
+marks: ## the desktop's icons, tray icons and favicons, the phone's launcher icon, adaptive layers, splash and status-bar icon, the site's icons and social card, the README's header and the avatar, from packages/ui/src/mark.ts (Chrome, ImageMagick, Node 22.15+); every variant: node packages/ui/scripts/marks.mjs all <dir>
 	@node packages/ui/scripts/marks.mjs desktop
 	@node packages/ui/scripts/marks.mjs mobile
+	@node packages/ui/scripts/marks.mjs site
 
 reload: ## rebuild and restart the daemon that make dev or make daemon runs, after a Rust change
 	@scripts/dev.sh reload

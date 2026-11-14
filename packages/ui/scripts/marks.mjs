@@ -8,6 +8,7 @@
  *   node packages/ui/scripts/marks.mjs mobile       the phone's launcher icon, adaptive layers, splash, favicon and status-bar icon (committed)
  *   node packages/ui/scripts/marks.mjs launcher <file>  a review sheet: the adaptive icon through Android's masks, themed, the splash and the status bar
  *   node packages/ui/scripts/marks.mjs all <dir>    every variant as SVG and PNG into <dir>, for the phone and the site
+ *   node packages/ui/scripts/marks.mjs site         the site's icons and social card, the README's header and the organisation's avatar (committed)
  *   node packages/ui/scripts/marks.mjs dock <file>  a review sheet: the icon at its real pixels on a dock, a tray and a tab
  *
  * `make marks` runs the first two. Everything is rendered at its own pixel size (no downscaling a
@@ -36,13 +37,19 @@ const M = await import(join(HERE, "..", "src", "mark.ts"));
 const { launch, open, magick } = await import(join(HERE, "chrome.mjs"));
 
 const INTER = join(REPO, "apps/desktop/node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2");
+const MONO = join(REPO, "apps/desktop/node_modules/@fontsource-variable/jetbrains-mono/files/jetbrains-mono-latin-wght-normal.woff2");
+const face = (family, file) => `@font-face{font-family:'${family}';font-weight:100 900;src:url(data:font/woff2;base64,${readFileSync(file).toString("base64")}) format('woff2')}`;
 const fontFace = () => {
   try {
-    return `@font-face{font-family:'Inter Variable';font-weight:100 900;src:url(data:font/woff2;base64,${readFileSync(INTER).toString("base64")}) format('woff2')}`;
+    return face("Inter Variable", INTER);
   } catch {
     return "";
   }
 };
+/** Both of the brand's faces, for a drawing with words in it that must not fall back (the card). */
+const bothFaces = () => face("Inter Variable", INTER) + face("JetBrains Mono Variable", MONO);
+/** A square drawing on the night, full bleed: where the host rounds the corners itself (iOS, GitHub). */
+const fullBleed = (px, svg) => svg.replace(/(<svg[^>]*>)/, `$1<rect width="100" height="100" fill="${M.NIGHT}"/>`);
 
 /** Render SVGs to PNGs at their own pixel sizes in one Chrome page. `files`: { name, svg, px, w?, h? }. */
 async function rasterize(files, outDir, work) {
@@ -189,6 +196,33 @@ if (cmd === "desktop") {
     await cdp.close();
   }
   console.log(`marks: ${arg}`);
+} else if (cmd === "site") {
+  // The site (site/public: the favicon's .ico for browsers that don't take the SVG, the home-screen
+  // icon, the social card), the README's header for GitHub's light and dark themes (docs/brand), and
+  // the organisation's avatar, uploaded by hand (docs/brand/avatar-512.png).
+  const pub = join(REPO, "site/public");
+  const brand = join(REPO, "docs/brand");
+  const fonts = bothFaces();
+  const files = [
+    ...[16, 32, 48].map((px) => ({ name: `ico/${px}.png`, px, svg: M.markSvg(px, { id: `i${px}` }) })),
+    { name: "apple-touch-icon.png", px: 180, svg: fullBleed(180, M.markSvg(180)) },
+    { name: "card.png", px: 1200, w: 1200, h: 630, svg: M.reachCardSvg({ fontFace: fonts }) },
+    { name: "avatar-512.png", px: 512, svg: fullBleed(512, M.markSvg(512)) },
+  ];
+  for (const theme of ["dark", "light"]) {
+    // Shown 56 px tall; drawn at twice that, so it is sharp on a 2x screen and the ladder is the 112 px one.
+    const svg = M.wordmarkSvg(112, theme, { fontFace: fonts, id: `w${theme[0]}` });
+    files.push({ name: `lockup-${theme}.png`, px: 112, w: Number(/width="(\d+)"/.exec(svg)[1]), h: 112, svg });
+  }
+  await rasterize(files, join(work, "site"), join(work, "site-work"));
+  const at = (name) => join(work, "site", name);
+  mkdirSync(brand, { recursive: true });
+  await magick([...[16, 32, 48].map((px) => at(`ico/${px}.png`)), join(pub, "favicon.ico")]);
+  await magick([at("apple-touch-icon.png"), "-strip", join(pub, "apple-touch-icon.png")]);
+  await magick([at("card.png"), "-strip", "-quality", "88", "-sampling-factor", "4:4:4", join(pub, "og.jpg")]);
+  for (const name of ["avatar-512.png", "lockup-dark.png", "lockup-light.png"]) await magick([at(name), "-strip", join(brand, name)]);
+  rmSync(join(work, "site"), { recursive: true, force: true });
+  console.log(`marks: favicon.ico, apple-touch-icon.png and og.jpg in ${pub}; avatar-512.png and lockup-{dark,light}.png in ${brand}`);
 } else if (cmd === "all") {
   if (!arg) throw new Error("marks: all <dir>");
   const out = arg;
@@ -247,6 +281,6 @@ if (cmd === "desktop") {
   }
   console.log(`marks: ${arg}`);
 } else {
-  console.error("marks: desktop | mobile | all <dir> | dock <file.png> | launcher <file.png>");
+  console.error("marks: desktop | mobile | site | all <dir> | dock <file.png> | launcher <file.png>");
   process.exit(2);
 }

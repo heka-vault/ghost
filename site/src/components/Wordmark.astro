@@ -1,10 +1,25 @@
 ---
-/** Wisp at rest (the brand glyph, packages/ui) and the name. */
-import { wispGlyph } from "@ghost/ui/src/wisp";
-const d = wispGlyph(false);
+/**
+ * The lockup (docs/design-system.md, The mark): the mark's chip, Wisp lit on the night tile, and
+ * "Ghost" in Inter 800 at −0.035 em. The chip is the 32 px drawing (the mitts, no ring), from
+ * `markSvg` in packages/ui, inlined so it costs no request. The first lockup on a page draws it
+ * (`id` names it); a later one passes `use` with that name and only refers to it, so the page
+ * carries the drawing once (about 2 KB).
+ */
+import { markSvg } from "@ghost/ui/src/mark";
+
+type Props = { id: string; use?: never } | { use: string; id?: never };
+const { id, use } = Astro.props;
+const attrs = 'class="mark__chip" aria-hidden="true" focusable="false"';
+const svg = use
+  ? `<svg ${attrs} xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 100 100"><use href="#${use}-chip"/></svg>`
+  : markSvg(32, { id })
+      .replace("<svg ", `<svg ${attrs} `)
+      .replace(/(<\/defs>)/, `$1<g id="${id}-chip">`)
+      .replace(/<\/svg>$/, "</g></svg>");
 ---
 
 <span class="mark">
-  <svg class="mark__wisp" viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path fill="currentColor" d={d}></path></svg>
+  <Fragment set:html={svg} />
   <span class="mark__name">Ghost</span>
 </span>
