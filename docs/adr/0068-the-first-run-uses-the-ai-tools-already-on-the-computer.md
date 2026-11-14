@@ -93,9 +93,13 @@ written into `apps.json`.
 not Cursor's session, not a keychain: `~/.claude/` (all of it, `.credentials.json` included),
 `~/.codex/auth.json`, `~/.config/Cursor/`, and any file named for credentials, a token, a key
 or `auth.json`, whatever path or link leads to it. Those are licensed to that tool; the model
-step says so in one sentence where it shows "Claude Code is installed", and points at a key,
+step says so in one sentence where it shows Codex is installed, and points at a key,
 OpenRouter's sign-in or a local model. The one function that opens a file refuses them, and
 `a_sign_in_file_is_never_opened` plants each one and checks every path opened.
+
+*Amended by ADR 0069 (2026-11-14):* Claude Code is no longer one of the tools whose sign-in the
+model step says Ghost can't use. Ghost still never opens it; it runs the operator's installed,
+signed-in program as it is, and asks the program (`claude auth status`) whether it is signed in.
 
 **A link out of the home folder is not followed**; one inside it (a dotfiles folder) is. A file
 over its bound, not JSON or TOML, or not text, is one line saying so; it is never a crash, and

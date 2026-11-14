@@ -59,9 +59,9 @@ pub const EFFORT: &str = "low";
 pub const READY_WITHIN: Duration = Duration::from_secs(30);
 /// How long a turn waits with nothing from the program before it is a timeout.
 pub const QUIET_MOST: Duration = Duration::from_secs(120);
-/// After the reply stopped for its tool calls, how long Ghost waits for one more to reach
-/// the relay before the ones there are the reply's. The program calls a tool as its block
-/// closes (2026-11-14: 4 ms after it), so this only gathers a batch.
+/// After the reply stopped for its tool calls with fewer at the relay than it announced, how
+/// long Ghost waits for the rest before the ones there are the reply's (the program may run
+/// the rest one at a time, after these are answered). With every call there, none.
 pub const GATHER: Duration = Duration::from_millis(150);
 /// The most a turn waits for an interrupted reply to end.
 pub const DRAIN_WITHIN: Duration = Duration::from_secs(5);
@@ -82,6 +82,11 @@ pub struct Settings {
     /// program.
     pub started_env: HashMap<String, String>,
     pub quiet_most: Duration,
+    /// MEASUREMENT ONLY: variables the perf harness (`examples/claude_code_perf.rs`) gives
+    /// the program to time it through an address of the harness's own, where the program's
+    /// own sign-in can't be used. The daemon never sets it; it is empty on every product
+    /// path, which `the_program_runs_with_its_own_tools_settings_and_apps_off` holds.
+    pub harness_env: BTreeMap<String, String>,
 }
 
 impl Settings {
@@ -95,6 +100,7 @@ impl Settings {
             model: model.into(),
             started_env,
             quiet_most: QUIET_MOST,
+            harness_env: BTreeMap::new(),
         }
     }
 }
@@ -103,6 +109,7 @@ impl Settings {
 pub fn environment(settings: &Settings) -> BTreeMap<String, String> {
     let mut env = program::clean_env(&settings.started_env);
     env.insert("MCP_TOOL_TIMEOUT".into(), TOOL_TIMEOUT_MS.into());
+    env.extend(settings.harness_env.clone());
     env
 }
 
@@ -754,11 +761,17 @@ async fn read(st: &mut OwnedMutexGuard<State>, settings: &Settings, tx: &Tx) -> 
                 let id = format!("ghost-cc-{}", st.next_id);
                 calls.push(ToolCall::new(id.clone(), parked.name, parked.arguments));
                 st.parked.push((id, parked.answer));
-                // A call with no reply in flight (the next of a batch the program runs one
-                // at a time), or the last the reply announced: the reply's calls are these,
-                // once no other follows within `GATHER`.
-                if !in_message || (stopped_for_tools && calls.len() >= blocks) {
+                if stopped_for_tools && !in_message {
+                    // The reply has ended: every call it announced is here, or the rest
+                    // come one at a time after these are answered.
+                    if calls.len() >= blocks {
+                        return flush(calls, tx);
+                    }
                     gather_until = Some(tokio::time::Instant::now() + GATHER);
+                } else if !in_message && !stopped_for_tools {
+                    // No reply in flight: the next call of a batch the program runs one at a
+                    // time, after the stage answered the last.
+                    return flush(calls, tx);
                 }
             }
             Incoming::Line(v) => match wire::read(&v) {
@@ -795,12 +808,15 @@ async fn read(st: &mut OwnedMutexGuard<State>, settings: &Settings, tx: &Tx) -> 
                 Wire::MessageStop => {
                     in_message = false;
                     if stopped_for_tools {
-                        // Its calls reach the relay as each block closes; wait for the rest
-                        // the reply announced, a moment at most once one is here.
+                        // Each call reaches the relay as its block closes (2026-11-14: 4 ms
+                        // after it), before this. All here: the reply's calls, now. Some
+                        // here: a moment for the rest, which the program may run one at a
+                        // time instead. None yet: they are on their way.
                         if !calls.is_empty() && calls.len() >= blocks {
+                            return flush(calls, tx);
+                        }
+                        if !calls.is_empty() {
                             gather_until = Some(tokio::time::Instant::now() + GATHER);
-                        } else if !calls.is_empty() {
-                            gather_until = Some(tokio::time::Instant::now() + GATHER * 4);
                         }
                     }
                 }
@@ -993,6 +1009,7 @@ mod tests {
                 "{name} is used but not required of the program"
             );
         }
+        assert!(s.harness_env.is_empty(), "a product path never sets the harness's variables");
         let env = environment(&s);
         assert_eq!(
             env.keys().map(String::as_str).collect::<Vec<_>>(),
