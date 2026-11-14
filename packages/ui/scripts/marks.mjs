@@ -5,10 +5,12 @@
  * apps draw the SVG with), ImageMagick (ICO and WebP).
  *
  *   node packages/ui/scripts/marks.mjs desktop      the desktop app's icons, tray icons and favicons (committed)
+ *   node packages/ui/scripts/marks.mjs mobile       the phone's launcher icon, adaptive layers, splash, favicon and status-bar icon (committed)
+ *   node packages/ui/scripts/marks.mjs launcher <file>  a review sheet: the adaptive icon through Android's masks, themed, the splash and the status bar
  *   node packages/ui/scripts/marks.mjs all <dir>    every variant as SVG and PNG into <dir>, for the phone and the site
  *   node packages/ui/scripts/marks.mjs dock <file>  a review sheet: the icon at its real pixels on a dock, a tray and a tab
  *
- * `make marks` runs the first. Everything is rendered at its own pixel size (no downscaling a
+ * `make marks` runs the first two. Everything is rendered at its own pixel size (no downscaling a
  * master), so the ladder's levels of detail land on whole pixels.
  */
 import { registerHooks } from "node:module";
@@ -98,6 +100,95 @@ if (cmd === "desktop") {
   writeFileSync(join(pub, "favicon.svg"), M.markSvg(32, { id: "fav" }) + "\n");
   await magick([join(icons, "icon.ico"), join(pub, "favicon.ico")]);
   console.log(`marks: ${files.length} icons in ${icons}, favicon.svg and favicon.ico in ${pub}`);
+} else if (cmd === "mobile") {
+  const assets = join(REPO, "apps/mobile/assets");
+  const files = [
+    // The legacy launcher icon (Android before 8) and Expo's default: the mark, full size.
+    { name: "icon.png", px: 1024, svg: M.markSvg(1024) },
+    { name: "android-icon-background.png", px: 1024, svg: M.adaptiveSvg("background", "idle", 1024) },
+    { name: "android-icon-foreground.png", px: 1024, svg: M.adaptiveSvg("foreground", "idle", 1024) },
+    { name: "android-icon-monochrome.png", px: 1024, svg: M.adaptiveSvg("monochrome", "idle", 1024) },
+    // The splash: the lit figure inside the same safe circle (Android 12's splash masks its icon to a circle), on the night.
+    { name: "splash-icon.png", px: 1024, svg: M.adaptiveSvg("foreground", "idle", 1024) },
+    { name: "favicon.png", px: 48, svg: M.markSvg(48) },
+  ];
+  await rasterize(files, assets, work);
+  const drawable = join(REPO, "apps/mobile/modules/ghost-call/android/src/main/res/drawable/ghost_link.xml");
+  writeFileSync(drawable, M.notificationVector());
+  console.log(`marks: ${files.length} files in ${assets}, and ${drawable}`);
+} else if (cmd === "launcher") {
+  if (!arg) throw new Error("marks: launcher <file.png>");
+  const uri = (svg) => `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
+  const bg = uri(M.adaptiveSvg("background"));
+  const fg = uri(M.adaptiveSvg("foreground"));
+  const mono = uri(M.adaptiveSvg("monochrome"));
+  // Android's masks over the 72dp the launcher shows of the 108dp layers; the 66dp circle is the only safe area.
+  const squircle = (() => {
+    const pts = [];
+    for (let i = 0; i < 96; i++) {
+      const t = (i / 96) * 2 * Math.PI;
+      const c = Math.cos(t);
+      const sn = Math.sin(t);
+      pts.push(`${(54 + 36 * Math.sign(c) * Math.abs(c) ** 0.4).toFixed(2)} ${(54 + 36 * Math.sign(sn) * Math.abs(sn) ** 0.4).toFixed(2)}`);
+    }
+    return `M${pts.join("L")}Z`;
+  })();
+  const MASKS = {
+    circle: '<circle cx="54" cy="54" r="36"/>',
+    squircle: `<path d="${squircle}"/>`,
+    "rounded square": '<rect x="18" y="18" width="72" height="72" rx="14"/>',
+    teardrop: '<path d="M54 18A36 36 0 0 1 90 54V82A8 8 0 0 1 82 90H54A36 36 0 0 1 18 54A36 36 0 0 1 54 18Z"/>',
+  };
+  const icon = (mask, px, layers, i, safe = false) =>
+    `<svg width="${px}" height="${px}" viewBox="18 18 72 72"><defs><clipPath id="m${i}">${MASKS[mask]}</clipPath></defs><g clip-path="url(#m${i})">${layers}</g>${safe ? '<circle cx="54" cy="54" r="33" fill="none" stroke="#ff4d5e" stroke-width="0.4" stroke-dasharray="1.5 1"/>' : ""}</svg>`;
+  const full = `<image href="${bg}" width="108" height="108"/><image href="${fg}" width="108" height="108"/>`;
+  // Material You's themed icon: the monochrome layer tinted, on a pale or deep wallpaper colour.
+  const themed = (back, ink) => `<rect width="108" height="108" fill="${back}"/><image href="${mono}" width="108" height="108" style="filter:url(#tint-${ink.slice(1)})"/>`;
+  const tintFilter = (ink) => {
+    const n = parseInt(ink.slice(1), 16);
+    const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => (v / 255).toFixed(3));
+    return `<filter id="tint-${ink.slice(1)}"><feColorMatrix values="0 0 0 0 ${r}  0 0 0 0 ${g}  0 0 0 0 ${b}  0 0 0 1 0"/></filter>`;
+  };
+  let i = 0;
+  const row = (title, cells) => `<div class="t">${title}</div><div class="r">${cells.join("")}</div>`;
+  const cell = (inner, label) => `<div class="c">${inner}<span>${label}</span></div>`;
+  const masks = Object.keys(MASKS);
+  const html =
+    `<!doctype html><meta charset="utf-8"><style>body{margin:0;padding:24px;background:#2b2d31;color:#eee;font:13px Inter,sans-serif}.t{margin:18px 0 8px;font-weight:600}.r{display:flex;gap:22px;align-items:flex-end;flex-wrap:wrap}.c{display:flex;flex-direction:column;align-items:center;gap:6px}.wall{display:flex;gap:18px;padding:18px;border-radius:16px;align-items:center}</style>` +
+    `<svg width="0" height="0" style="position:absolute">${tintFilter("#0b1c37")}${tintFilter("#d6e3ff")}${tintFilter("#3a2a00")}</svg>` +
+    row("The adaptive icon through each mask, 192 px, the 66dp safe circle dashed", masks.map((m) => cell(icon(m, 192, full, i++, true), m))) +
+    row("At launcher size, 48 px (a home screen at 1x), on a dark and a light wallpaper", [
+      `<div class="wall" style="background:linear-gradient(135deg,#1c2a3a,#3b2f4a)">${masks.map((m) => icon(m, 48, full, i++)).join("")}</div>`,
+      `<div class="wall" style="background:linear-gradient(135deg,#e8eef6,#f6e9e3)">${masks.map((m) => icon(m, 48, full, i++)).join("")}</div>`,
+    ]) +
+    row("Themed icons (Android 13+): the monochrome layer in the wallpaper's colours, 192 and 48 px", [
+      cell(icon("circle", 192, themed("#d6e3ff", "#0b1c37"), i++), "light"),
+      cell(icon("circle", 192, themed("#0b1c37", "#d6e3ff"), i++), "dark"),
+      cell(icon("squircle", 192, themed("#ffdf9e", "#3a2a00"), i++), "light, warm"),
+      `<div class="wall" style="background:#eef2fa">${masks.map((m) => icon(m, 48, themed("#d6e3ff", "#0b1c37"), i++)).join("")}</div>`,
+      `<div class="wall" style="background:#10141c">${masks.map((m) => icon(m, 48, themed("#0b1c37", "#d6e3ff"), i++)).join("")}</div>`,
+    ]) +
+    row("The splash (Android 12+: the icon in a 160dp circle, on the night), at 1x", [
+      `<div style="width:206px;height:458px;background:${M.NIGHT};border-radius:18px;display:flex;align-items:center;justify-content:center"><img src="${uri(M.adaptiveSvg("foreground"))}" width="120" height="120" style="border-radius:50%"></div>`,
+    ]) +
+    row("The status bar's icon (24dp) at 1x, 2x and 3x, white as Android paints it, on dark and light shades", [
+      `<div class="wall" style="background:#000">${[24, 48, 72].map((px) => `<img width="${px}" height="${px}" src="${uri(M.notificationSvg())}">`).join("")}</div>`,
+      `<div class="wall" style="background:#5f6368">${[24, 48, 72].map((px) => `<img width="${px}" height="${px}" src="${uri(M.notificationSvg())}">`).join("")}</div>`,
+    ]) +
+    `</body>`;
+  mkdirSync(work, { recursive: true });
+  const page = join(work, "launcher.html");
+  writeFileSync(page, html);
+  const cdp = await launch();
+  try {
+    const p = await open(cdp, page, { width: 1100, height: 1600, scale: 2 });
+    const h = await p.evaluate("document.body.scrollHeight");
+    writeFileSync(arg, await p.shot({ x: 0, y: 0, width: 1100, height: h }));
+    await p.close();
+  } finally {
+    await cdp.close();
+  }
+  console.log(`marks: ${arg}`);
 } else if (cmd === "all") {
   if (!arg) throw new Error("marks: all <dir>");
   const out = arg;
@@ -156,6 +247,6 @@ if (cmd === "desktop") {
   }
   console.log(`marks: ${arg}`);
 } else {
-  console.error("marks: desktop | all <dir> | dock <file.png>");
+  console.error("marks: desktop | mobile | all <dir> | dock <file.png> | launcher <file.png>");
   process.exit(2);
 }

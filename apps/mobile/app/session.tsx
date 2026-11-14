@@ -265,7 +265,7 @@ function AskStage({ p, phase, stale, muted, lostFor }: { p: PendingProposal; pha
       : `Say ${quoted("yes")} to go ahead, or ${quoted("no")} to leave it.`;
   return (
     <View style={{ width: "100%", alignItems: "center" }}>
-      <VoicePresence phase={phase} size={96} label="" />
+      <VoicePresence phase={phase} size={96} label="" mark="waiting" />
       <Text size="sm" weight="semibold" caps color="warn" style={{ marginTop: space[4] }}>
         Ghost is asking
       </Text>
