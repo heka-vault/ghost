@@ -34,7 +34,7 @@ use crate::models::AppView;
 /// A file another tool keeps its apps in, as read.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct OtherFileView {
-    /// `~/.cursor/mcp.json`.
+    /// The file, from the home folder (`~/.claude.json`).
     pub path: String,
     /// read, missing, too_large, outside (a link out of the home folder) or unreadable.
     pub state: String,
@@ -220,7 +220,9 @@ fn bridge(deps: &Deps) -> Result<Bridge, String> {
     }
     match deps.clients_listening.first() {
         Some(a) => Ok(Bridge::Address(a.clone())),
-        None => Err("Ghost is not listening for other tools (GHOST_MCP_LISTEN is empty).".into()),
+        None => {
+            Err("Ghost is not listening for outside tools, so another tool cannot reach it.".into())
+        }
     }
 }
 

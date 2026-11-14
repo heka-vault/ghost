@@ -95,6 +95,12 @@ export type PhoneAddress = Schemas["PhoneAddress"];
 /** An outside tool the operator connected to Ghost (ADR 0048). Never its token. */
 export type ClientView = Schemas["ClientView"];
 export type ClientsView = Schemas["ClientsView"];
+export type OtherToolsView = Schemas["OtherToolsView"];
+export type OtherToolView = Schemas["OtherToolView"];
+export type FoundAppView = Schemas["FoundAppView"];
+export type FoundModelView = Schemas["FoundModelView"];
+export type OtherImportResult = Schemas["OtherImportResult"];
+export type OtherLinkResult = Schemas["OtherLinkResult"];
 /** What connecting a tool answers, once: its token and what to paste into the tool. */
 export type ClientCreated = Schemas["ClientCreated"];
 export type SkillInfo = Schemas["SkillInfo"];
@@ -637,6 +643,25 @@ export class GhostClient {
   /** Remove a tool: its token stops working at once. */
   removeClient(name: string) {
     return unwrap(this.api.DELETE("/clients/{name}", { params: { path: { name } } }));
+  }
+
+  // --- the AI tools already on this computer (ADR 0068) ---------------------------------------
+  /** What Claude Code, Cursor and Codex have set up, read from their own files: their apps,
+   *  whether they use Ghost, and a model connection already here. Names and kinds only. */
+  otherTools() {
+    return unwrap(this.api.GET("/other-tools"));
+  }
+  /** Connect apps another tool uses, by their keys: each secret into the vault. */
+  importOtherApps(tool: string, apps: string[]) {
+    return unwrap(this.api.POST("/other-tools/{tool}/import", { params: { path: { tool } }, body: { apps, all: false } }));
+  }
+  /** Let another tool use Ghost: a client, and Ghost added to that tool after a backup. */
+  linkOtherTool(tool: string) {
+    return unwrap(this.api.POST("/other-tools/{tool}/link", { params: { path: { tool } } }));
+  }
+  /** Take Ghost back out of another tool's settings. The client stays until it is removed. */
+  unlinkOtherTool(tool: string) {
+    return unwrap(this.api.DELETE("/other-tools/{tool}/link", { params: { path: { tool } } }));
   }
 
   // --- skills (ADR 0023, ADR 0035) -----------------------------------------------------------

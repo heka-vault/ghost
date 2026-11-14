@@ -18,6 +18,7 @@ import { Check, Copy, PlugZap } from "lucide-react";
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
 import { Button, Card, Checkbox, Dialog, Field, IconButton, Input, ListRow, Notice, Section, Skeleton, errorText, relativeTime, useConfirm, useLive, useToast } from "../../ui";
+import { OtherToolsApps, useOtherTools } from "../apps/OtherTools";
 import { nameProblem, toolName, toolTitle } from "./tools";
 
 export function OutsideToolsSection() {
@@ -30,6 +31,10 @@ export function OutsideToolsSection() {
   const [connecting, setConnecting] = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
   const connectButton = useRef<HTMLButtonElement>(null);
+  // ADR 0068: the AI tools on this computer, and Ghost's line in one whose client was removed.
+  const others = useOtherTools();
+  const [leftIn, setLeftIn] = useState<{ id: string; title: string } | null>(null);
+  const [takingOut, setTakingOut] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -55,6 +60,9 @@ export function OutsideToolsSection() {
     try {
       setView(await client.removeClient(tool.name));
       toast({ title: `${tool.title} removed`, description: "Its token no longer works." });
+      // A tool Ghost added itself to still names Ghost: offer to take that line out too.
+      const named = others.view?.tools.find((o) => o.uses_ghost?.client === tool.name && o.uses_ghost.removable);
+      if (named) setLeftIn({ id: named.id, title: named.title });
       requestAnimationFrame(() => connectButton.current?.focus({ preventScroll: true }));
     } catch (e) {
       toast({ title: `Couldn’t remove ${tool.title}`, description: errorText(e), tone: "danger" });
@@ -146,6 +154,42 @@ export function OutsideToolsSection() {
           )}
         </Card>
       )}
+
+      {leftIn && (
+        <Notice
+          tone="neutral"
+          title={`${leftIn.title}’s settings still name Ghost`}
+          onDismiss={() => setLeftIn(null)}
+          action={
+            <Button
+              size="sm"
+              loading={takingOut}
+              onClick={async () => {
+                setTakingOut(true);
+                try {
+                  const r = await client.unlinkOtherTool(leftIn.id);
+                  others.setView(r.tools);
+                  toast({ title: `Ghost taken out of ${leftIn.title}`, description: r.backup ? `The file as it was is in ${r.backup}.` : r.done });
+                  setLeftIn(null);
+                } catch (e) {
+                  toast({ title: `Couldn’t change ${leftIn.title}`, description: errorText(e), tone: "danger" });
+                } finally {
+                  setTakingOut(false);
+                }
+              }}
+            >
+              Take it out
+            </Button>
+          }
+        >
+          It can’t reach Ghost now. Ghost can take its line back out of {leftIn.title}’s own settings, after a backup beside the file.
+        </Notice>
+      )}
+
+      <OtherToolsApps view={others.view} onView={(v) => {
+        others.setView(v);
+        void load();
+      }} links />
 
       {view && (
         <p className="set-help is-readable">

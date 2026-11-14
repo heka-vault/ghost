@@ -86,6 +86,11 @@ export interface Scenario {
   floatingSite?: boolean;
   /** The realtime voice chosen (ADR 0063), its key in the vault, a day of use and a check. */
   realtime?: boolean;
+  /**
+   * The AI tools already on this computer (ADR 0068): none (today's first run), Claude Code and
+   * Cursor with five apps and Ollama running (`found`), or Cursor with a file Ghost can't read.
+   */
+  otherTools?: "none" | "found" | "malformed";
 }
 
 export const SCENARIOS: Scenario[] = [
@@ -98,6 +103,8 @@ export const SCENARIOS: Scenario[] = [
   { name: "starting", label: "Starting", description: "The daemon is up and loading its voice models.", daemon: true, phase: "starting", modelsReady: false, session: null, pending: false, configured: true, data: "normal" },
   { name: "disconnected", label: "Not running", description: "ghostd is not running.", daemon: false, phase: "passive", modelsReady: false, session: null, pending: false, configured: true, data: "normal" },
   { name: "firstrun", label: "First run", description: "Installed, no passwords or model set yet.", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: false, data: "empty" },
+  { name: "firstrun-found", label: "First run, tools found", description: "Installed, nothing set; Claude Code and Cursor are on this computer with five apps between them, and Ollama is running.", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: false, data: "empty", otherTools: "found" },
+  { name: "firstrun-malformed", label: "First run, a file Ghost can't read", description: "Installed, nothing set; Cursor is here, and its mcp.json isn't JSON.", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: false, data: "empty", otherTools: "malformed" },
   { name: "empty", label: "Empty", description: "Configured, but nothing has happened yet.", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: true, data: "empty" },
   { name: "expiring", label: "Okay running out", description: "A confirm-level change that expires 8 seconds after load.", daemon: true, phase: "listening", modelsReady: true, session: "ghost", pending: true, configured: true, data: "normal", pendingExpiresIn: 8 },
   { name: "reconnecting", label: "Reconnecting", description: "A live session; the daemon drops 1.5 seconds after load and stays away.", daemon: true, phase: "listening", modelsReady: true, session: "accounting", pending: false, configured: true, data: "normal", dropAfterMs: 1500 },

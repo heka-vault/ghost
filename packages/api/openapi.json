@@ -3443,7 +3443,7 @@
         "description": "A file another tool keeps its apps in, as read.",
         "properties": {
           "path": {
-            "description": "`~/.cursor/mcp.json`.",
+            "description": "The file, from the home folder (`~/.claude.json`).",
             "type": "string"
           },
           "problem": {

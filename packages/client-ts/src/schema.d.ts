@@ -3214,7 +3214,7 @@ export interface components {
         };
         /** @description A file another tool keeps its apps in, as read. */
         OtherFileView: {
-            /** @description `~/.cursor/mcp.json`. */
+            /** @description The file, from the home folder (`~/.claude.json`). */
             path: string;
             /** @description Why it was not read, in a sentence. */
             problem: string | null;

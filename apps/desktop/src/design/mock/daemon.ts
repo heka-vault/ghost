@@ -60,6 +60,7 @@ import { HttpError } from "./errors";
 import { type HearDesign, MockHear } from "./hear";
 import { MockWakeTakes } from "./wakeTakes";
 import { isConnectionKey, isModelOnly, MockModel } from "./model";
+import { MockOtherTools } from "./otherTools";
 import { MockSchedules } from "./schedules";
 import { type AppFixture, type CatalogSeed, DEFAULT_LIMITS, GENERIC_TOOLS, TOOLS_BY_CATALOG } from "./fixtures/apps";
 import type { AgentRecord } from "./fixtures/conversations";
@@ -264,6 +265,8 @@ export class MockDaemon {
   private wakeTakes = new MockWakeTakes();
   /** What the agents do on their own (ADR 0047): the schedules and their runs. */
   private schedules: MockSchedules;
+  /** The AI tools already on this computer (ADR 0068), from the scenario. */
+  private otherTools: MockOtherTools;
   /** Each call an agent made, as counts and sizes (ADR 0060). */
   private reach: MockReach;
   private reachTimer: ReturnType<typeof setInterval> | null = null;
@@ -389,6 +392,21 @@ export class MockDaemon {
       },
       later: (fn, ms) => this.later(ms, fn),
       ran: (run, phase) => this.emit({ type: "run", run, phase }),
+    });
+    this.otherTools = new MockOtherTools(scenario.otherTools ?? "none", {
+      connect: (name, entry, title) => {
+        const made = this.connect({ config: JSON.stringify({ mcpServers: { [name]: { ...entry, title } } }) } as AppConnect);
+        return { name: made.apps[0]?.name ?? name, sign_in_url: made.sign_in_url ?? null };
+      },
+      addClient: (name) => {
+        const title = name
+          .split("-")
+          .map((w) => w[0].toUpperCase() + w.slice(1))
+          .join(" ");
+        const client: ClientView = { name, title, created_at: new Date().toISOString(), last_used_at: null };
+        this.clients = [...this.clients.filter((c) => c.name !== name), client].sort((x, y) => x.name.localeCompare(y.name));
+        return client;
+      },
     });
     // What the day's agents read (ADR 0060), made up from its runs and the session.
     this.reach = new MockReach([...f.apps.filter((a) => a.view.state === "connected").map((a) => a.view.name), "ghost"]);
@@ -1915,6 +1933,10 @@ export class MockDaemon {
       if (answer !== undefined) return answer;
     }
 
+    if (path.startsWith("/other-tools")) {
+      const answer = this.otherTools.handle(method, path, b);
+      if (answer !== undefined) return answer;
+    }
     // Outside tools (ADR 0048): a token is made up here and shown once, as the daemon does.
     if (method === "GET" && path === "/clients") return this.clientsView();
     if (method === "POST" && path === "/clients") {
