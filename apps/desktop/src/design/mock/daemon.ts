@@ -406,6 +406,7 @@ export class MockDaemon {
     }
     this.playPieces();
     this.playFloating();
+    this.playFloatingTour();
     return () => this.listeners.delete(l);
   }
   /**
@@ -659,6 +660,99 @@ export class MockDaemon {
       step(9000, loop);
     };
     loop();
+  }
+  /**
+   * `?mock=floating-tour`: the README's pictures (`scripts/floating-shots.mjs`), once, on a fixed
+   * clock from the first subscriber: a whole turn in 12 s, then a yes, then a question
+   * (`Scenario.floatingTour` has the times). Synthetic words only.
+   */
+  private tourPlayed = false;
+  private playFloatingTour() {
+    if (!this.scenario.floatingTour || this.tourPlayed) return;
+    this.tourPlayed = true;
+    // The pictures are taken on this clock (scripts/floating-shots.mjs reads it).
+    (globalThis as { ghostTourStart?: number }).ghostTourStart = Date.now();
+    let n = 0;
+    const id = () => `tour${n++}`;
+    const at = (ms: number, f: () => void) => this.later(ms, f);
+    const call = (ms: number, name: string, cid: string) => at(ms, () => this.act("call", { name, id: cid }));
+    const done = (ms: number, name: string, cid: string) => at(ms, () => this.act("result", { name, id: cid }));
+    const turn = (from: number, to: number, words: string) => {
+      at(from, () => this.act("you_started"));
+      at(to, () => {
+        this.act("you_stopped");
+        this.addTurn("user", words, "voice");
+        this.heard(words);
+        this.pushStatus({ phase: "thinking" });
+      });
+    };
+
+    // 1. A whole turn: the wake, your words, six places, the reply, the goodbye.
+    at(700, () => this.wake("ghost"));
+    turn(1700, 3000, "Get me ready for the launch review.");
+    // Linear isn't connected in the mock: a tool no app claims is named from its own name.
+    const six: [string, string, number, number][] = [
+      ["github_pull_requests_list", id(), 3200, 5500],
+      ["calendar_events_today", id(), 3350, 5100],
+      ["ghost_recall", id(), 3500, 4900],
+      ["ghost_ask_agent", id(), 3700, 6000],
+      ["ghost_docs_search", id(), 3900, 5300],
+      ["linear_issues_search", id(), 4050, 5700],
+    ];
+    for (const [name, cid, out, back] of six) {
+      call(out, name, cid);
+      done(back, name, cid);
+    }
+    at(6300, () => this.reply("Three issues are still open, two pull requests wait on review, and the review is at four.", 3200));
+    at(9700, () => {
+      this.pushStatus({ ending: true });
+      this.reply("Talk soon.", 1300);
+    });
+
+    // 2. A change waiting for a yes, held long enough to be seen, then said yes to.
+    at(13_000, () => this.wake("ghost"));
+    turn(13_400, 14_200, "Close the duplicate.");
+    const g = id();
+    call(14_300, "github_issue_list", g);
+    done(14_700, "github_issue_list", g);
+    at(14_800, () => {
+      this.propose({
+        source: "github",
+        operation: "github_issue_write",
+        target: "ghost-mock/app#151",
+        summary: "Close app#151 as a duplicate of #148",
+        rationale: "Same login bug; 148 has the fix in review.",
+      });
+      this.reply("Close app 151 as a duplicate? Say yes, or press Yes.", 2600);
+    });
+    at(20_000, () => {
+      if (!this.pending) return;
+      this.addTurn("user", "Yes.", "voice");
+      this.heard("Yes.");
+      this.confirm();
+    });
+
+    // 3. An agent's question, held, then answered by voice.
+    at(23_000, () => {
+      const q: QuestionView = {
+        key: `question:tour-${Date.now()}`, kind: "question", source: "agent:accounting", asked_by: "Accounting", asked_at: now(),
+        question: "Send the Q3 summary to Dana now, or wait for the card fees line?", detail: null,
+        choices: ["Send it", "Wait"], choices_only: true, state: "open", urgency: "notify", in_run: true,
+        expires_at: new Date(Date.now() + 3_600_000).toISOString(), answer: null, answered_at: null, answered_via: null, choice: null, change_id: null,
+      };
+      this.questions = [...this.questions, q];
+      this.emit({ type: "question", question: q });
+      this.reply("Accounting asks: send the summary now, or wait?", 2600);
+    });
+    at(30_000, () => {
+      const q = this.questions.find((x) => x.key.startsWith("question:tour-") && x.state === "open");
+      if (!q) return;
+      const answered: QuestionView = { ...q, state: "answered", answer: "Wait", choice: "Wait", answered_at: now(), answered_via: "voice" };
+      this.questions = this.questions.map((x) => (x.key === q.key ? answered : x));
+      this.emit({ type: "question", question: answered });
+      this.pushStatus({ ending: true });
+      this.reply("Okay.", 1000);
+    });
   }
   private emit(e: GhostEvent) {
     for (const l of this.listeners) l(e);

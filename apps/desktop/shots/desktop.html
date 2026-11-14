@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>Ghost · README desktop</title>
+    <!--
+      A made-up desktop for the README's pictures of the floating room (scripts/floating-shots.mjs):
+      a wallpaper, an editor, a terminal and a browser, every word and pixel synthetic. The real
+      floating page (floating.html with the mock daemon) is laid over it in a transparent
+      iframe, as the floating surface is laid over a real desktop. Development only: not built.
+
+      ?float=<query for floating.html>   e.g. ?float=mock%3Dfloating-tour%26placement%3Dcorner
+    -->
+    <style>
+      :root {
+        --bar: #07080c;
+        --win: #0d1018;
+        --win-2: #121623;
+        --line: #1d2333;
+        --ink: #c9d3e6;
+        --mute: #66708a;
+        --cyan: #5fe3ff;
+        --pink: #ff4fa3;
+        --amber: #ffb547;
+        --green: #63f2a8;
+        --violet: #a98bff;
+        --red: #ff5d6c;
+        --mono: "JetBrains Mono Variable", ui-monospace, monospace;
+        --sans: "Inter Variable", system-ui, sans-serif;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #020308; color: var(--ink); font-family: var(--sans); }
+
+      /* ---------------------------------------------------------------- the wallpaper */
+      .wall { position: fixed; inset: 0; overflow: hidden;
+        background:
+          radial-gradient(120% 60% at 70% 100%, rgb(255 60 120 / 0.35), transparent 60%),
+          radial-gradient(80% 50% at 20% 105%, rgb(40 200 255 / 0.25), transparent 60%),
+          linear-gradient(#03040a 0%, #090616 45%, #1a0820 78%, #2a0a22 100%); }
+      .wall canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+      /* ---------------------------------------------------------------- the top bar */
+      .bar { position: fixed; top: 0; left: 0; right: 0; height: 28px; background: var(--bar); display: flex; align-items: center;
+        justify-content: space-between; padding: 0 14px; font: 600 12px var(--sans); color: #dfe6f5; z-index: 2; }
+      .bar .pill { background: #1a1e2b; border-radius: 10px; padding: 2px 10px; }
+      .bar .tray { display: flex; gap: 12px; color: #aab3c8; font-weight: 500; }
+
+      /* ---------------------------------------------------------------- windows */
+      .win { position: fixed; background: var(--win); border-radius: 10px; overflow: hidden;
+        box-shadow: 0 0 0 1px #000, 0 0 0 2px rgb(255 255 255 / 0.04), 0 24px 60px rgb(0 0 0 / 0.65); }
+      .head { height: 30px; background: #0a0c13; display: flex; align-items: center; padding: 0 10px; gap: 10px;
+        font: 600 11px var(--sans); color: #8d97ad; border-bottom: 1px solid var(--line); }
+      .head .t { flex: 1; text-align: center; }
+      .dots { display: flex; gap: 6px; }
+      .dots i { width: 10px; height: 10px; border-radius: 50%; background: #262c3b; display: block; }
+
+      /* the editor */
+      .editor { left: 22px; top: 42px; width: 668px; height: 432px; display: grid; grid-template-rows: 30px 1fr; }
+      .editor .body { display: grid; grid-template-columns: 168px 1fr; min-height: 0; }
+      .tree { background: #0a0d14; border-right: 1px solid var(--line); padding: 10px 0; font: 11px/19px var(--mono); color: #7c86a0; }
+      .tree div { padding-left: calc(10px + var(--d, 0) * 12px); white-space: nowrap; }
+      .tree .on { background: #151b2b; color: #e6edf9; box-shadow: inset 2px 0 var(--cyan); }
+      .tree .dir { color: #a3adc4; }
+      .code { min-width: 0; display: grid; grid-template-rows: 28px 1fr; }
+      .tabs { display: flex; background: #0a0c13; border-bottom: 1px solid var(--line); font: 11px var(--mono); }
+      .tabs span { padding: 7px 14px; color: #6d7790; border-right: 1px solid var(--line); }
+      .tabs .on { color: #e6edf9; background: var(--win); box-shadow: inset 0 -2px var(--pink); }
+      pre { margin: 0; padding: 10px 0; font: 11.5px/18.5px var(--mono); color: #c3cde0; counter-reset: ln; overflow: hidden; }
+      pre span.l { display: block; padding-left: 48px; position: relative; white-space: pre; }
+      pre span.l::before { counter-increment: ln; content: counter(ln); position: absolute; left: 0; width: 34px; text-align: right; color: #3a4258; }
+      pre span.l.cur { background: rgb(95 227 255 / 0.06); }
+      .k { color: var(--pink); } .f { color: var(--cyan); } .s { color: var(--green); } .c { color: #59627a; font-style: italic; }
+      .ty { color: var(--amber); } .n { color: var(--violet); } .m { color: #e9a8ff; }
+      .caret { display: inline-block; width: 7px; height: 14px; background: var(--cyan); vertical-align: -2px; box-shadow: 0 0 8px var(--cyan); }
+
+      /* the terminal */
+      .term { left: 22px; top: 488px; width: 600px; height: 210px; display: grid; grid-template-rows: 30px 1fr; background: #06070c; }
+      .term pre { padding: 8px 12px; font-size: 11px; line-height: 16.5px; }
+      .term .ok { color: var(--green); } .p { color: var(--cyan); } .d { color: #5b647c; } .y { color: var(--amber); }
+
+      /* the browser */
+      .browser { left: 520px; top: 70px; width: 560px; height: 560px; display: grid; grid-template-rows: 30px 34px 1fr; background: #0c0f17; }
+      .url { display: flex; align-items: center; gap: 10px; padding: 0 12px; border-bottom: 1px solid var(--line); background: #0a0c13; }
+      .url b { flex: 1; height: 22px; border-radius: 11px; background: #141927; font: 500 11px/22px var(--mono); color: #8f9ab3; padding: 0 12px; }
+      .page { padding: 18px 22px; overflow: hidden; }
+      .page h1 { margin: 0 0 4px; font: 700 20px var(--sans); color: #eef3fb; letter-spacing: -0.01em; }
+      .page .sub { font: 12px var(--sans); color: var(--mute); margin-bottom: 16px; }
+      .cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+      .col h2 { font: 700 10px var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: #8892aa; margin: 0 0 8px; }
+      .card { background: var(--win-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px; margin-bottom: 8px; font: 12px/1.35 var(--sans); color: #d4dceb; }
+      .card small { display: block; margin-top: 6px; font: 10px var(--mono); color: var(--mute); }
+      .tag { display: inline-block; font: 600 9px var(--mono); padding: 1px 6px; border-radius: 4px; margin-right: 4px; }
+      .tag.r { background: rgb(255 93 108 / 0.15); color: var(--red); }
+      .tag.g { background: rgb(99 242 168 / 0.13); color: var(--green); }
+      .tag.v { background: rgb(169 139 255 / 0.15); color: var(--violet); }
+      .tag.a { background: rgb(255 181 71 / 0.14); color: var(--amber); }
+      .bars { margin-top: 14px; display: flex; gap: 6px; align-items: end; height: 70px; padding: 10px; background: var(--win-2); border: 1px solid var(--line); border-radius: 8px; }
+      .bars i { flex: 1; background: linear-gradient(var(--cyan), rgb(95 227 255 / 0.15)); border-radius: 2px 2px 0 0; display: block; }
+
+      /* Ghost, laid over everything */
+      iframe { position: fixed; inset: 0; width: 100%; height: 100%; border: 0; background: transparent; z-index: 5; }
+    </style>
+  </head>
+  <body>
+    <div class="wall"><canvas id="city"></canvas></div>
+
+    <div class="bar">
+      <span class="pill">Activities</span>
+      <span>Thu 14:32</span>
+      <span class="tray"><span>⌁</span><span>◖ 62%</span><span>⏻</span></span>
+    </div>
+
+    <!-- The browser, behind on the right: a made-up launch board on a made-up local site. -->
+    <div class="win browser">
+      <div class="head"><span class="dots"><i></i><i></i><i></i></span><span class="t">Launch review · Board</span></div>
+      <div class="url"><span style="color: var(--mute)">◀ ▶ ⟳</span><b>board.local/launch/review</b></div>
+      <div class="page">
+        <h1>Launch review</h1>
+        <div class="sub">Thursday 16:00 · 9 open · 2 waiting on review</div>
+        <div class="cols">
+          <div class="col">
+            <h2>Blocked</h2>
+            <div class="card"><span class="tag r">P1</span>Invoice totals off by a cent<small>billing · #212</small></div>
+            <div class="card"><span class="tag a">P2</span>Migration step times out<small>deploy · #219</small></div>
+          </div>
+          <div class="col">
+            <h2>In review</h2>
+            <div class="card"><span class="tag v">PR</span>Retry the export with backoff<small>infra · #148</small></div>
+            <div class="card"><span class="tag v">PR</span>Pricing page copy<small>site · #151</small></div>
+          </div>
+          <div class="col">
+            <h2>Done</h2>
+            <div class="card"><span class="tag g">✓</span>Status page<small>ops · #133</small></div>
+            <div class="card"><span class="tag g">✓</span>Receipts in PDF<small>billing · #140</small></div>
+          </div>
+        </div>
+        <div class="bars" id="bars"></div>
+      </div>
+    </div>
+
+    <!-- The editor: this project's own code, as someone would have it open. -->
+    <div class="win editor">
+      <div class="head"><span class="dots"><i></i><i></i><i></i></span><span class="t">turn.rs — ghost</span></div>
+      <div class="body">
+        <div class="tree">
+          <div class="dir">▾ crates</div>
+          <div class="dir" style="--d: 1">▸ ghost-core</div>
+          <div class="dir" style="--d: 1">▾ ghost-voice</div>
+          <div class="dir" style="--d: 2">▾ src</div>
+          <div style="--d: 3">acks.rs</div>
+          <div style="--d: 3">activity.rs</div>
+          <div style="--d: 3">headless.rs</div>
+          <div style="--d: 3">prompt.rs</div>
+          <div style="--d: 3">tap.rs</div>
+          <div class="on" style="--d: 3">turn.rs</div>
+          <div style="--d: 3">vad.rs</div>
+          <div class="dir" style="--d: 1">▸ ghostd</div>
+          <div class="dir">▸ apps</div>
+          <div class="dir">▸ docs</div>
+          <div>CLAUDE.md</div>
+          <div>Makefile</div>
+        </div>
+        <div class="code">
+          <div class="tabs"><span class="on">turn.rs</span><span>tap.rs</span><span>acks.rs</span></div>
+<pre><span class="l"><span class="c">/// When the operator's turn is over: a pause long enough, and words that end a thought.</span></span><span class="l"><span class="k">pub fn</span> <span class="f">turn_closed</span>(pause: <span class="ty">Duration</span>, words: &amp;<span class="ty">str</span>, held: <span class="ty">bool</span>) -&gt; <span class="ty">Close</span> {</span><span class="l">    <span class="k">if</span> held {</span><span class="l">        <span class="k">return</span> <span class="ty">Close</span>::<span class="m">Wait</span>;</span><span class="l">    }</span><span class="l">    <span class="k">let</span> trailing = words.<span class="f">trim_end</span>().<span class="f">ends_with</span>([<span class="s">','</span>, <span class="s">'-'</span>]);</span><span class="l">    <span class="k">let</span> needed = <span class="k">if</span> trailing { <span class="n">LONG_PAUSE</span> } <span class="k">else</span> { <span class="n">SHORT_PAUSE</span> };</span><span class="l">    <span class="k">match</span> pause {</span><span class="l">        p <span class="k">if</span> p &gt;= needed =&gt; <span class="ty">Close</span>::<span class="m">Now</span>,</span><span class="l">        p <span class="k">if</span> p &gt;= <span class="n">SHORT_PAUSE</span> =&gt; <span class="ty">Close</span>::<span class="m">Soon</span>(needed - p),</span><span class="l">        _ =&gt; <span class="ty">Close</span>::<span class="m">Wait</span>,</span><span class="l">    }</span><span class="l">}</span><span class="l"> </span><span class="l"><span class="c">#[cfg(test)]</span></span><span class="l"><span class="k">mod</span> tests {</span><span class="l">    <span class="k">use super</span>::*;</span><span class="l"> </span><span class="l">    <span class="c">#[test]</span></span><span class="l cur">    <span class="k">fn</span> <span class="f">a_trailing_comma_waits_for_more</span>() {<span class="caret"></span></span><span class="l">        <span class="k">let</span> c = <span class="f">turn_closed</span>(<span class="ty">Duration</span>::<span class="f">from_millis</span>(<span class="n">600</span>), <span class="s">"and then,"</span>, <span class="k">false</span>);</span></pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- The terminal: the tests running. -->
+    <div class="win term">
+      <div class="head"><span class="dots"><i></i><i></i><i></i></span><span class="t">~/ghost — cargo</span></div>
+<pre><span class="p">❯</span> cargo nextest run -p ghost-voice turn
+<span class="d">    Finished</span> test [unoptimized] target(s) in 4.12s
+<span class="d">    Starting</span> 14 tests across 1 binary
+<span class="ok">        PASS</span> <span class="d">[ 0.004s]</span> ghost-voice turn::tests::a_full_stop_closes_now
+<span class="ok">        PASS</span> <span class="d">[ 0.003s]</span> ghost-voice turn::tests::a_held_turn_never_closes
+<span class="ok">        PASS</span> <span class="d">[ 0.005s]</span> ghost-voice turn::tests::filler_keeps_the_turn_open
+<span class="ok">        PASS</span> <span class="d">[ 0.004s]</span> ghost-voice turn::tests::a_long_pause_closes_anything
+<span class="y">        RUN </span> <span class="d">[      ]</span> ghost-voice turn::tests::a_trailing_comma_waits_for_more
+</pre>
+    </div>
+
+    <iframe id="ghost" title="Ghost" allowtransparency="true"></iframe>
+
+    <script type="module">
+      import "@fontsource-variable/inter/opsz.css";
+      import "@fontsource-variable/jetbrains-mono";
+
+      // Ghost: the real floating page with the mock daemon, over the desktop.
+      const q = new URLSearchParams(location.search).get("float") ?? "mock=floating-tour";
+      document.getElementById("ghost").src = `/floating.html?${q}`;
+
+      // A fixed seed: the same city in every picture.
+      let seed = 7;
+      const rnd = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
+
+      const bars = document.getElementById("bars");
+      for (let i = 0; i < 24; i++) bars.insertAdjacentHTML("beforeend", `<i style="height:${18 + Math.round(rnd() * 82)}%"></i>`);
+
+      // The city: towers against a pink haze, lit windows, a few neon signs, rain.
+      const cv = document.getElementById("city");
+      const W = innerWidth, H = innerHeight, dpr = devicePixelRatio || 1;
+      cv.width = W * dpr; cv.height = H * dpr;
+      const g = cv.getContext("2d");
+      g.scale(dpr, dpr);
+      const towers = (count, minH, maxH, shade, windows) => {
+        let x = -20;
+        while (x < W + 20) {
+          const w = 26 + rnd() * 70, h = minH + rnd() * (maxH - minH), top = H - h;
+          g.fillStyle = shade;
+          g.fillRect(x, top, w, h);
+          if (rnd() < 0.3) g.fillRect(x + w / 2 - 1, top - 30 - rnd() * 40, 2, 70);
+          for (let wy = top + 8; wy < H - 6; wy += 9)
+            for (let wx = x + 5; wx < x + w - 5; wx += 7)
+              if (rnd() < windows) {
+                const hue = rnd();
+                g.fillStyle = hue < 0.55 ? "rgba(255,190,120,0.55)" : hue < 0.85 ? "rgba(95,227,255,0.5)" : "rgba(255,79,163,0.6)";
+                g.fillRect(wx, wy, 3, 4);
+              }
+          if (rnd() < 0.22) {
+            const c = rnd() < 0.5 ? "#ff4fa3" : "#5fe3ff";
+            g.save(); g.shadowColor = c; g.shadowBlur = 18; g.fillStyle = c;
+            g.fillRect(x + w * 0.2, top + 20 + rnd() * 60, 3, 40 + rnd() * 60); g.restore();
+          }
+          x += w + 2 + rnd() * count;
+        }
+      };
+      towers(40, 260, 560, "#0b0814", 0.05);
+      const haze = g.createLinearGradient(0, H * 0.45, 0, H);
+      haze.addColorStop(0, "rgba(255,60,140,0)"); haze.addColorStop(1, "rgba(255,60,140,0.18)");
+      g.fillStyle = haze; g.fillRect(0, 0, W, H);
+      towers(10, 140, 380, "#050409", 0.09);
+      g.strokeStyle = "rgba(160,200,255,0.06)"; g.lineWidth = 1;
+      for (let i = 0; i < 260; i++) {
+        const x = rnd() * W, y = rnd() * H, l = 10 + rnd() * 24;
+        g.beginPath(); g.moveTo(x, y); g.lineTo(x - l * 0.18, y + l); g.stroke();
+      }
+    </script>
+  </body>
+</html>
