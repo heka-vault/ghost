@@ -84,3 +84,18 @@ describe("isRoomKey", () => {
     expect(isRoomKey(k(".", { ctrlKey: true, shiftKey: true }))).toBe(false);
   });
 });
+
+describe("the first run's moment (ADR 0059 as amended 2026-11-14)", () => {
+  const floating = { ...base, deskSession: true, floating: true, windowActive: true };
+  it("floats over the window the newcomer is using while its wake beat is open", () => {
+    expect(postureOf(floating).posture).toBe("desk");
+    expect(postureOf({ ...floating, introducing: true }).posture).toBe("float");
+  });
+  it("still lets the floating rule decide: a share or a desktop that can't float keeps it in the window", () => {
+    // `floating` is false while the screen is shared and Ghost is kept out of it.
+    expect(postureOf({ ...floating, floating: false, introducing: true }).posture).toBe("desk");
+    expect(postureOf({ ...floating, deskSession: false, introducing: true }).posture).toBe("desk");
+    // A held room still wins.
+    expect(postureOf({ ...floating, hold: "room", introducing: true }).posture).toBe("room");
+  });
+});

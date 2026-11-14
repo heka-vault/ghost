@@ -10,6 +10,7 @@
  *   - A live session at this desk floats, when the operator turned the floating room on and it
  *     can show now (the platform has it, nothing is capturing the screen), unless this window
  *     is the one the operator is using: the windowed app is the place you open on purpose.
+ *     The first run's wake beat is the one exception: its moment floats over the window.
  *     A held room in the window still wins.
  *   - The operator's hold wins: “Room” (Ctrl+. or the rail's button) until they leave it with
  *     Escape, the button or the key again; “Desk” never goes to the room by itself.
@@ -51,11 +52,18 @@ export interface PostureInput {
   floating?: boolean;
   /** This window has the keyboard and is on screen. Absent: it is (the window's own view). */
   windowActive?: boolean;
+  /**
+   * The first run's wake beat is open (ADR 0059 as amended 2026-11-14): the session floats
+   * even while this window has the keyboard, so a newcomer's first “Hey Ghost” brings Ghost
+   * over their desktop. `floating` still decides: a share or a desktop that can't float keeps
+   * it in the window.
+   */
+  introducing?: boolean;
 }
 
 export function postureOf(i: PostureInput): { posture: Posture; reason: PostureReason } {
   if (i.hold === "room") return { posture: "room", reason: "held" };
-  if (i.deskSession && i.floating && i.windowActive === false) return { posture: "float", reason: "session" };
+  if (i.deskSession && i.floating && (i.windowActive === false || i.introducing)) return { posture: "float", reason: "session" };
   if (i.hold === "desk") return { posture: "desk", reason: "desk" };
   const sessionIdle = i.sessionIdleMs === undefined ? SESSION_IDLE_MS : i.sessionIdleMs;
   if (i.deskSession && sessionIdle != null && i.idleMs >= sessionIdle) return { posture: "room", reason: "session" };

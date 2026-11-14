@@ -39,7 +39,7 @@ import { createField, type Field, type FieldInputs } from "./field";
 import { layoutOf, type Layout } from "./layout";
 import { litOf, namesText, type Place, reachOf, returnOf, sizeOf, thisTurn } from "./reach";
 import { captionsShown, captionText, fpsOf, goneAfterGoodbye, isForward, labelOf, type Scene, sceneOf } from "./scene";
-import { answerShare, hitRects, log, openApp, sendAway, setRegion, sound as readSound, type Sound, summon, useShellWord } from "./shell";
+import { answerShare, forwarded, hitRects, log, openApp, sendAway, setRegion, sound as readSound, type Sound, summon, useShellWord } from "./shell";
 
 const params = new URLSearchParams(window.location.search);
 const reducedQuery = typeof matchMedia !== "undefined" ? matchMedia("(prefers-reduced-motion: reduce)") : null;
@@ -98,7 +98,7 @@ export function FloatingRoom({ stage = false }: { stage?: boolean } = {}) {
   const word = useShellWord();
   // The stage is its own window, meant to be seen: no share hides it, Ghost in the middle,
   // Ghost's words captioned for the people watching.
-  const shell = stage ? { ...word, mainActive: false, capture: null, sharing: "none" as const, placement: "centre" as const, captions: "always" as const } : word;
+  const shell = stage ? { ...word, mainActive: false, capture: null, sharing: "none" as const, placement: "centre" as const, captions: "always" as const, firstMeeting: false } : word;
   const view = useViewport();
   const session = status?.session_id ?? null;
   const deskSession = connected && !!session && status?.session_origin !== "phone";
@@ -137,6 +137,8 @@ export function FloatingRoom({ stage = false }: { stage?: boolean } = {}) {
     sessionIdleMs: null,
     floating: shell.sharing === "none" || shell.sharing === "shown",
     windowActive: shell.mainActive,
+    // The first run's wake beat (ADR 0059 as amended 2026-11-14): its moment floats over it.
+    introducing: shell.firstMeeting,
   }).posture;
   const ruled = sceneOf({
     posture,
@@ -182,6 +184,8 @@ export function FloatingRoom({ stage = false }: { stage?: boolean } = {}) {
       setArriving(!reduced());
       moved.current.arrive = performance.now();
       setTrigger((n) => n + 1);
+      // The first run says the moment happened over the desktop.
+      if (!stage && shell.firstMeeting) forwarded();
       return;
     }
     if (!forwardWanted && wasForward.current) {
@@ -553,6 +557,8 @@ export function FloatingRoom({ stage = false }: { stage?: boolean } = {}) {
               {label}
               {micOff && scene !== "listening" ? <span className="flt-label__mic"> · mic off</span> : null}
             </p>
+            {/* The first meeting: how to send Ghost back, said once, in Ghost's own words. */}
+            {forward && !stage && shell.firstMeeting && <p className="flt-hint">Say “that’s all” to send me back</p>}
             {forward && !stage && (
               <p className="flt-acts">
                 <button type="button" data-hit className="flt-pill" onClick={openApp}>

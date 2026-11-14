@@ -58,6 +58,23 @@ pub struct Settings {
     pub captions: Captions,
     /// While the screen is shared: hide Ghost (default), show it, or ask each time.
     pub while_shared: WhileShared,
+    /// The first run has offered it (ADR 0059 as amended 2026-11-14): its wake beat turns the
+    /// floating room on once, where the desktop can float, and never again, so an operator
+    /// who turned it off keeps it off. Absent from an older file: not offered.
+    pub offered: bool,
+}
+
+/// The first run's offer: on, once, where this desktop can float; recorded as offered either
+/// way. None when it was offered before: the operator's choice since then stands.
+pub fn offer(s: &Settings, supported: bool) -> Option<Settings> {
+    if s.offered {
+        return None;
+    }
+    Some(Settings {
+        on: s.on || supported,
+        offered: true,
+        ..s.clone()
+    })
 }
 
 /// Where on the monitor the floating room comes forward (docs/design-system.md, the layout
@@ -189,6 +206,12 @@ pub enum ToSurface {
     Settings {
         settings: Settings,
     },
+    /// The first run's wake beat is open (ADR 0059 as amended 2026-11-14): a session at this
+    /// desk comes forward even while the main window has the keyboard, so the newcomer sees
+    /// Ghost over their desktop the first time they call it. A share still decides.
+    FirstMeeting {
+        on: bool,
+    },
 }
 
 /// The surface to the shell, one JSON object per line on its stdout.
@@ -204,6 +227,8 @@ pub enum FromSurface {
     Share {
         show: bool,
     },
+    /// Ghost came forward over the desktop: the first run says the moment happened there.
+    Forward,
 }
 
 fn hidden_if_older() -> Sharing {
@@ -237,6 +262,8 @@ impl Status {
 struct Inner {
     status: Status,
     main_active: bool,
+    /// The first run's wake beat is open.
+    first_meeting: bool,
     /// The share now on, if any, and the operator's word for it.
     share: Share,
     /// The surface's stdin, while it runs.
@@ -274,6 +301,7 @@ impl Host {
                     helper: false,
                 },
                 main_active: false,
+                first_meeting: false,
                 share: Share::default(),
                 tx: None,
                 generation: 0,
@@ -382,6 +410,33 @@ impl Host {
         }
     }
 
+    /// The first run's offer (`offer`): on once, kept, and the surface started.
+    pub fn first_run_offer(self: &Arc<Self>) -> Result<Status, String> {
+        let (now, supported) = {
+            let i = self.lock();
+            (
+                i.status.settings.clone(),
+                !matches!(i.status.support, Support::No { .. }),
+            )
+        };
+        match offer(&now, supported) {
+            Some(next) => self.set(next),
+            None => Ok(self.status()),
+        }
+    }
+
+    /// The first run's wake beat opened or closed.
+    pub fn first_meeting(&self, on: bool) {
+        {
+            let mut i = self.lock();
+            if i.first_meeting == on {
+                return;
+            }
+            i.first_meeting = on;
+        }
+        self.send(&ToSurface::FirstMeeting { on });
+    }
+
     pub fn main_active(&self, active: bool) {
         {
             let mut i = self.lock();
@@ -444,6 +499,9 @@ impl Host {
                     capture: i.status.capture,
                     sharing: i.status.sharing,
                 },
+                ToSurface::FirstMeeting {
+                    on: i.first_meeting,
+                },
             ];
             for m in first {
                 let _ = tx.send(serde_json::to_string(&m).unwrap_or_default());
@@ -479,6 +537,9 @@ impl Host {
                             .run_on_main_thread(move || crate::tray::show_window(&app));
                     }
                     Ok(FromSurface::Share { show }) => host.share_answer(show),
+                    Ok(FromSurface::Forward) => {
+                        let _ = host.app.emit("ghost://floating-forward", ());
+                    }
                     Err(_) => eprintln!("ghost: floating: {line}"),
                 }
             }
@@ -584,6 +645,18 @@ pub fn floating_set(
     host.inner().set(settings)
 }
 
+/// The first run's wake beat: the floating room on, once (`offer`).
+#[tauri::command]
+pub fn floating_first_run(host: tauri::State<'_, Arc<Host>>) -> Result<Status, String> {
+    host.inner().first_run_offer()
+}
+
+/// The first run's wake beat opened (`on`) or closed.
+#[tauri::command]
+pub fn floating_first_meeting(host: tauri::State<'_, Arc<Host>>, on: bool) {
+    host.first_meeting(on);
+}
+
 pub fn setup(app: &AppHandle) -> Arc<Host> {
     let host = Host::new(app.clone());
     app.manage(host.clone());
@@ -631,6 +704,7 @@ mod tests {
             placement: Placement::Corner,
             captions: Captions::Muted,
             while_shared: WhileShared::Ask,
+            offered: true,
         };
         save(&path, &s).unwrap();
         assert_eq!(load(&path), s);
@@ -654,6 +728,36 @@ mod tests {
                 && line.contains(r#""while_shared":"ask""#),
             "{line}"
         );
+    }
+
+    #[test]
+    fn the_first_run_turns_it_on_once_and_never_overrides_the_choice_after() {
+        // A fresh install on a desktop that floats: on, and offered.
+        let fresh = Settings::default();
+        let on = offer(&fresh, true).expect("offered the first time");
+        assert!(on.on && on.offered);
+        // The operator turned it off afterwards: the first run, opened again, leaves it off.
+        let off = Settings { on: false, ..on };
+        assert_eq!(offer(&off, true), None);
+        // A desktop that can't float: offered, still off, and not offered again later.
+        let refused = offer(&fresh, false).unwrap();
+        assert!(!refused.on && refused.offered);
+        assert_eq!(offer(&refused, true), None);
+        // An install from before the offer (no `offered` in its file) that turned it on
+        // keeps everything else it chose.
+        let mine = Settings {
+            on: true,
+            placement: Placement::Corner,
+            ..Settings::default()
+        };
+        let after = offer(&mine, true).unwrap();
+        assert_eq!(after.placement, Placement::Corner);
+        assert!(after.on);
+        // An older file reads as not offered.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("floating.json");
+        std::fs::write(&path, r#"{"on":false,"monitor":"other"}"#).unwrap();
+        assert!(!load(&path).offered);
     }
 
     #[test]
@@ -719,6 +823,7 @@ mod tests {
             ToSurface::Settings {
                 settings: Settings::default(),
             },
+            ToSurface::FirstMeeting { on: true },
         ] {
             let line = serde_json::to_string(&m).unwrap();
             assert!(!line.contains('\n'));
@@ -726,6 +831,8 @@ mod tests {
         }
         let line = serde_json::to_string(&FromSurface::OpenApp).unwrap();
         assert_eq!(line, r#"{"t":"open_app"}"#);
+        let line = serde_json::to_string(&FromSurface::Forward).unwrap();
+        assert_eq!(line, r#"{"t":"forward"}"#);
         let line = serde_json::to_string(&FromSurface::Share { show: true }).unwrap();
         assert_eq!(line, r#"{"t":"share","show":true}"#);
         // A capture line from a shell before the share choice: hidden, as it always was.

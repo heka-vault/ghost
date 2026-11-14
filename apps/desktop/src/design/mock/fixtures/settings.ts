@@ -168,7 +168,19 @@ export default function settings(s: Scenario): SettingsFixture {
             repair: "ask",
             can_repair: true,
           }
-        : null,
+        : // First run: a laptop's own microphone and speakers, nothing taking Ghost's voice out yet.
+          {
+            case: "unprotected",
+            summary: "Ghost listens to the built-in microphone, and nothing takes its own voice out of it.",
+            advice: null,
+            suggest: [],
+            session_input: "alsa_input.pci-0000_00_1f.3.analog-stereo",
+            wake_input: "alsa_input.pci-0000_00_1f.3.analog-stereo",
+            problem: null,
+            fell_back: null,
+            repair: "ask",
+            can_repair: true,
+          },
       devices: [
         { index: 0, name: "HDA Intel PCH: ALC1220 Analog (hw:0,0)", max_input_channels: 2, max_output_channels: 0, default_samplerate: 44100, is_default_input: false, is_default_output: false },
         { index: 2, name: "HDA Intel PCH: HDMI 0 (hw:0,3)", max_input_channels: 0, max_output_channels: 8, default_samplerate: 44100, is_default_input: false, is_default_output: false },

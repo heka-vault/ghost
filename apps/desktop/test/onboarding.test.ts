@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { EMPTY, type Facts, firstSentence, parseSaved, inputName, progressOf, STEPS, taskNumber, TASKS, wakeHelp } from "../src/screens/onboarding/state";
+import { EMPTY, type Facts, firstSentence, MEET, micHealthyOf, parseSaved, inputName, pathToMoment, progressOf, requiredAt, routeAfter, STEPS, taskNumber, TASKS, timeLeft, wakeHelp } from "../src/screens/onboarding/state";
+import { offerOnce } from "../src/app/floating";
 import { exchangeOf } from "../src/screens/onboarding/watch";
 
 
@@ -116,5 +117,104 @@ describe("an input's name", () => {
     expect(inputName("alsa_input.usb-Shure_MV7+-00.analog-stereo")).toBe("Shure MV7+");
     expect(inputName("ghost.mic")).toBe("ghost.mic");
     expect(inputName("default source")).toBe("default source");
+  });
+});
+
+describe("the path to the moment (2026-11-14)", () => {
+  // A fresh install: no model yet, the speech models here, a healthy microphone.
+  const fresh: Facts = { ...known, modelReady: false, micHealthy: true, micNone: false };
+
+  it("puts the three beats first and everything else after them, optional", () => {
+    expect(MEET.map((s) => s.id)).toEqual(["model", "hear", "wake"]);
+    const order = STEPS.map((s) => s.id);
+    for (const later of ["voice", "app", "agent", "ask"] as const) expect(order.indexOf(later)).toBeGreaterThan(order.indexOf("wake"));
+    expect(STEPS.filter((s) => s.part === "yours").map((s) => s.id)).toEqual(["voice", "app", "agent", "ask"]);
+  });
+
+  // The PR's table. A required action added before the wake beat fails here.
+  it("reaches the wake beat in the stated number of actions for each newcomer", () => {
+    expect(pathToMoment(fresh, "found")).toEqual({ steps: ["welcome", "model", "wake"], clicks: 3, fields: 0 });
+    expect(pathToMoment(fresh, "key")).toEqual({ steps: ["welcome", "model", "wake"], clicks: 3, fields: 1 });
+    expect(pathToMoment(fresh, "nothing")).toEqual({ steps: ["welcome", "model", "wake"], clicks: 2, fields: 0 });
+    // A model already connected (an update, a second run): Welcome straight to the moment.
+    expect(pathToMoment({ ...fresh, modelReady: true }, "found")).toEqual({ steps: ["welcome", "wake"], clicks: 1, fields: 0 });
+  });
+
+  it("asks about the microphone only when it needs something", () => {
+    const unhealthy = { ...fresh, micHealthy: false };
+    expect(pathToMoment(unhealthy, "nothing")).toEqual({ steps: ["welcome", "model", "hear", "wake"], clicks: 3, fields: 0 });
+    // Not known yet (Ghost still starting): the step is shown rather than guessed past.
+    expect(routeAfter("model", { ...fresh, micHealthy: null }, { met: null, waitingForEars: false })).toBe("hear");
+    // No microphone at all: the moment is typed, on the wake beat.
+    expect(routeAfter("model", { ...fresh, micHealthy: null, micNone: true }, { met: null, waitingForEars: false })).toBe("wake");
+    expect(requiredAt("wake", "nothing")).toEqual({ clicks: 0, fields: 0 });
+  });
+
+  it("goes back to the model after a moment with none, then on to a first real question", () => {
+    expect(routeAfter("wake", fresh, { met: "voice", waitingForEars: false })).toBe("model");
+    expect(routeAfter("model", { ...fresh, modelReady: true }, { met: "voice", waitingForEars: false })).toBe("ask");
+    expect(routeAfter("wake", { ...fresh, modelReady: true }, { met: "voice", waitingForEars: false })).toBe("voice");
+  });
+
+  it("comes back to the moment once Ghost's ears are here, from wherever they made it theirs", () => {
+    const s = { met: null, waitingForEars: true };
+    expect(routeAfter("voice", { ...fresh, speechReady: false }, s)).toBe("app");
+    expect(routeAfter("voice", fresh, s)).toBe("wake");
+    expect(routeAfter("agent", fresh, s)).toBe("wake");
+    // Once met, Make it yours goes on in order.
+    expect(routeAfter("voice", fresh, { met: "voice", waitingForEars: true })).toBe("app");
+  });
+
+  it("counts a healthy microphone as heard, and the moment as met", () => {
+    expect(progressOf({ ...fresh }, EMPTY).state.hear).toBe("done");
+    expect(progressOf({ ...fresh, micHealthy: false }, EMPTY).state.hear).toBe("open");
+    expect(progressOf(fresh, { ...EMPTY, met: "typed" }).met).toBe(true);
+    // A typed moment is not its name heard.
+    expect(progressOf(fresh, { ...EMPTY, met: "typed" }).state.wake).toBe("open");
+  });
+
+  it("reads the microphone as healthy only from Ghost's own reading", () => {
+    const ok = { case: "unprotected", problem: null, fell_back: null };
+    expect(micHealthyOf(ok, false)).toBe(true);
+    expect(micHealthyOf(ok, true)).toBe(false);
+    expect(micHealthyOf({ ...ok, problem: "It stopped hearing." }, false)).toBe(false);
+    expect(micHealthyOf({ ...ok, fell_back: "USB mic isn’t there" }, false)).toBe(false);
+    expect(micHealthyOf({ ...ok, case: "unknown" }, false)).toBe(false);
+    expect(micHealthyOf(null, false)).toBeNull();
+  });
+
+  it("says how long the download has left, once it has a rate", () => {
+    expect(timeLeft([], 100)).toBeNull();
+    expect(timeLeft([{ at: 0, bytes: 0 }, { at: 10_000, bytes: 1e8 }], 2.9e9)).toBe("about 5 min left");
+    expect(timeLeft([{ at: 0, bytes: 0 }, { at: 10_000, bytes: 1e9 }], 1.2e9)).toBe("under a minute left");
+    expect(timeLeft([{ at: 0, bytes: 0 }, { at: 10_000, bytes: 1e6 }], 1e10)).toBe("about 27 h 47 min left");
+    expect(timeLeft([{ at: 0, bytes: 5 }, { at: 10_000, bytes: 5 }], 100)).toBeNull();
+  });
+
+  it("keeps what an earlier first run stored, and the moment's own fields", () => {
+    // An install that finished the first run before this change: still finished, nothing offered.
+    const old = parseSaved(JSON.stringify({ step: "done", finished: true, heard: "voice" }));
+    expect(old.finished).toBe(true);
+    expect(old.floatOffered).toBe(false);
+    expect(old.met).toBeNull();
+    const s = parseSaved(JSON.stringify({ met: "typed", metWhere: "floating", floatOffered: true, waitingForEars: true, metAt: "2026-11-14T15:04:00Z" }));
+    expect([s.met, s.metWhere, s.floatOffered, s.waitingForEars]).toEqual(["typed", "floating", true, true]);
+    expect(parseSaved(JSON.stringify({ met: "model", metWhere: "moon" })).met).toBeNull();
+  });
+});
+
+describe("the floating room's first-run offer (ADR 0059 as amended 2026-11-14)", () => {
+  const off = { on: false, monitor: "other" as const };
+  it("turns it on once, where the desktop can float, and never again", () => {
+    const first = offerOnce(off, true);
+    expect(first).toMatchObject({ on: true, offered: true });
+    expect(offerOnce({ ...first!, on: false }, true)).toBeNull();
+    expect(offerOnce(off, false)).toMatchObject({ on: false, offered: true });
+  });
+});
+
+describe("the microphone's name", () => {
+  it("calls a sound card on the board the built-in microphone", () => {
+    expect(inputName("alsa_input.pci-0000_00_1f.3.analog-stereo")).toBe("the built-in microphone");
   });
 });

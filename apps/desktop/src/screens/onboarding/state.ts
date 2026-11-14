@@ -2,7 +2,14 @@
  * Owner: onboarding. The first run's steps and what outlives a step: which step is open (in the
  * address, so every step has one), what was skipped, how Ghost woke and whether it answered (in
  * localStorage, so setup resumes where the operator stopped). Pure: `progressOf` decides what is
- * done from what Ghost itself reports, and is tested on its own.
+ * done from what Ghost itself reports, `routeAfter` where Continue and Skip go, and both are
+ * tested on their own.
+ *
+ * Two parts (2026-11-14, the owner: “reduce the steps it takes to get to the first ‘hey ghost’
+ * and them seeing Ghost in the floating room”): **Meet Ghost**, three beats and nothing else
+ * before them (a model, its ears, “Hey Ghost” answered over the desktop), then **Make it yours**
+ * (its voice, an app, an agent, a first real question), each optional. A beat that can finish
+ * by itself is a glance, not a form: a healthy microphone skips its step.
  */
 
 export type StepId = "welcome" | "model" | "hear" | "wake" | "voice" | "app" | "agent" | "ask" | "done";
@@ -15,19 +22,24 @@ export interface StepDef {
   task: boolean;
   /** What the step needs from outside this computer: said on the rail, so nobody waits on a network they don't have. */
   network: "none" | "maybe" | "needs";
+  /** Meet Ghost (the three beats before the moment) or Make it yours (after it, optional). */
+  part: "meet" | "yours" | null;
 }
 
 export const STEPS: StepDef[] = [
-  { id: "welcome", label: "Welcome", task: false, network: "none" },
-  { id: "model", label: "Connect a model", task: true, network: "maybe" },
-  { id: "hear", label: "Let Ghost hear you", task: true, network: "none" },
-  { id: "wake", label: "Say “Hey Ghost”", task: true, network: "none" },
-  { id: "voice", label: "Choose its voice", task: true, network: "none" },
-  { id: "app", label: "Connect an app", task: true, network: "needs" },
-  { id: "agent", label: "Hire an agent", task: true, network: "none" },
-  { id: "ask", label: "Ask it something", task: true, network: "maybe" },
-  { id: "done", label: "Done", task: false, network: "none" },
+  { id: "welcome", label: "Welcome", task: false, network: "none", part: null },
+  { id: "model", label: "Connect a model", task: true, network: "maybe", part: "meet" },
+  { id: "hear", label: "Let Ghost hear you", task: true, network: "none", part: "meet" },
+  { id: "wake", label: "Say “Hey Ghost”", task: true, network: "none", part: "meet" },
+  { id: "voice", label: "Choose its voice", task: true, network: "none", part: "yours" },
+  { id: "app", label: "Connect an app", task: true, network: "needs", part: "yours" },
+  { id: "agent", label: "Hire an agent", task: true, network: "none", part: "yours" },
+  { id: "ask", label: "Ask it something", task: true, network: "maybe", part: "yours" },
+  { id: "done", label: "Done", task: false, network: "none", part: null },
 ];
+/** The three beats before the moment. */
+export const MEET = STEPS.filter((s) => s.part === "meet");
+export const partOf = (id: StepId) => STEPS.find((s) => s.id === id)?.part ?? null;
 
 export const TASKS = STEPS.filter((s) => s.task);
 export const stepLabel = (id: StepId) => STEPS.find((s) => s.id === id)?.label ?? id;
@@ -61,6 +73,13 @@ export interface Facts {
   agents: number | null;
   /** GHOST_VOICE_MODE is written in the settings. */
   voiceSet: boolean | null;
+  /**
+   * The microphone needs nothing from the operator (ADR 0064's reading): an input Ghost chose
+   * or was given that is there, hearing, and listening is on. Absent or null: not known.
+   */
+  micHealthy?: boolean | null;
+  /** There is no microphone at all: the moment is typed. */
+  micNone?: boolean | null;
 }
 
 export type TaskState = "done" | "skipped" | "open" | "unknown";
@@ -73,6 +92,8 @@ export interface Progress {
   next: StepId;
   /** Ghost can answer a spoken question: a model, ears and its name heard. */
   canTalk: boolean;
+  /** The first meeting happened: Ghost answered the first “Hey Ghost” (or typed first line). */
+  met: boolean;
 }
 
 /**
@@ -83,11 +104,11 @@ export interface Progress {
  * The wake only by voice, never a click. The voice once a mode is written or chosen here. An
  * app, an agent: any. The question once Ghost answered one asked while this step was open.
  */
-export function progressOf(f: Facts, saved: Pick<Saved, "skipped" | "heard" | "answered" | "voiceChosen">): Progress {
+export function progressOf(f: Facts, saved: Pick<Saved, "skipped" | "heard" | "answered" | "voiceChosen"> & Partial<Pick<Saved, "met">>): Progress {
   const yes = (v: boolean | null): boolean | null => v;
   const tasks: Record<Exclude<StepId, "welcome" | "done">, boolean | null> = {
     model: yes(f.modelReady),
-    hear: f.speechReady === null ? null : f.speechReady && (!!f.echo || saved.heard === "voice"),
+    hear: f.speechReady === null ? null : f.speechReady && (!!f.echo || saved.heard === "voice" || f.micHealthy === true),
     wake: saved.heard === "voice" ? true : f.speechReady === null ? null : false,
     voice: saved.voiceChosen || f.voiceSet === true ? true : f.voiceSet === null ? null : false,
     app: f.apps === null ? null : f.apps > 0,
@@ -101,7 +122,107 @@ export function progressOf(f: Facts, saved: Pick<Saved, "skipped" | "heard" | "a
   const done = TASKS.filter((t) => state[t.id] === "done").length;
   const open = TASKS.find((t) => state[t.id] === "open") ?? TASKS.find((t) => state[t.id] === "skipped");
   if (done === TASKS.length) state.done = "done";
-  return { state, done, total: TASKS.length, next: open?.id ?? "done", canTalk: tasks.model === true && tasks.wake === true };
+  return { state, done, total: TASKS.length, next: open?.id ?? "done", canTalk: tasks.model === true && tasks.wake === true, met: !!saved.met };
+}
+
+/* ------------------------------------------------------------------------- where next */
+
+const after = (id: StepId): StepId => STEPS[Math.min(STEPS.length - 1, stepIndex(id) + 1)].id;
+
+/**
+ * Where Continue and Skip go from a step. Nothing is asked before the moment that can finish by
+ * itself: a model already ready passes its step, and a healthy microphone (or none at all,
+ * where the moment is typed) passes Let Ghost hear you. After a moment with no model the first
+ * run goes back to the model step, and once a model is given, on to a first real question. A
+ * person who went on to Make it yours while Ghost's ears downloaded comes back to the moment
+ * as soon as they are here.
+ */
+export function routeAfter(from: StepId, f: Facts, s: Pick<Saved, "met" | "waitingForEars">): StepId {
+  if (s.waitingForEars && !s.met && f.speechReady === true && partOf(from) === "yours") return "wake";
+  switch (from) {
+    case "welcome":
+      return f.modelReady === true ? routeAfter("model", f, s) : "model";
+    case "model":
+      if (s.met) return "ask";
+      return f.micHealthy === true || f.micNone === true ? "wake" : "hear";
+    case "wake":
+      return s.met && f.modelReady === false ? "model" : "voice";
+    default:
+      return after(from);
+  }
+}
+
+/** Who a newcomer is, for the measured path: what their computer already offers Ghost. */
+export type Newcomer = "found" | "key" | "nothing";
+
+/**
+ * What a step asks of a newcomer before it lets them on, as the screen has it: the clicks
+ * (a select counts as one) and the typed fields. The path to the moment is measured from this
+ * (test/onboarding.test.ts, and the PR's table), so a required action added before the wake
+ * beat fails a test. The wake beat itself asks for nothing but the words.
+ */
+export function requiredAt(step: StepId, who: Newcomer): { clicks: number; fields: number } {
+  switch (step) {
+    case "welcome":
+      return { clicks: 1, fields: 0 }; // Get started
+    case "model":
+      // found: the model it found, Save and continue; key: the provider, the key, Save and
+      // continue; nothing: Skip, meet Ghost first.
+      return who === "found" ? { clicks: 2, fields: 0 } : who === "key" ? { clicks: 2, fields: 1 } : { clicks: 1, fields: 0 };
+    case "hear":
+      return { clicks: 1, fields: 0 }; // Continue
+    default:
+      return { clicks: 0, fields: 0 };
+  }
+}
+
+/** The steps from Welcome to the wake beat, and what they ask, for one newcomer. */
+export function pathToMoment(f: Facts, who: Newcomer): { steps: StepId[]; clicks: number; fields: number } {
+  const steps: StepId[] = [];
+  let at: StepId = "welcome";
+  let clicks = 0;
+  let fields = 0;
+  for (let i = 0; at !== "wake" && i < STEPS.length; i++) {
+    steps.push(at);
+    const r = requiredAt(at, who);
+    clicks += r.clicks;
+    fields += r.fields;
+    at = routeAfter(at, f, { met: null, waitingForEars: false });
+  }
+  return { steps: [...steps, "wake"], clicks, fields };
+}
+
+/* ------------------------------------------------------------------------ the downloads */
+
+/**
+ * How long the speech models have left, in words, from two readings of the download: the
+ * first run shows it while the person sets up the rest. Null until there is a rate.
+ */
+export function timeLeft(samples: readonly { at: number; bytes: number }[], total: number): string | null {
+  if (samples.length < 2) return null;
+  const a = samples[0];
+  const b = samples[samples.length - 1];
+  const secs = (b.at - a.at) / 1000;
+  const rate = secs > 0 ? (b.bytes - a.bytes) / secs : 0;
+  if (rate <= 0) return null;
+  const left = Math.max(0, total - b.bytes) / rate;
+  if (left < 60) return "under a minute left";
+  const m = Math.round(left / 60);
+  if (m < 60) return `about ${m} min left`;
+  const h = Math.floor(m / 60);
+  const r = m % 60;
+  return r ? `about ${h} h ${r} min left` : `about ${h} h left`;
+}
+
+/**
+ * The microphone needs nothing from the person (ADR 0064): a reading with no problem, no
+ * fallback and a known case, and listening on. Unprotected (speakers with nothing taking
+ * Ghost's voice out) still hears; the echo canceller is offered beside the moment, never
+ * before it.
+ */
+export function micHealthyOf(m: { case: string; problem: string | null; fell_back: string | null } | null | undefined, listeningOff: boolean): boolean | null {
+  if (!m) return null;
+  return !listeningOff && !m.problem && !m.fell_back && m.case !== "unknown";
 }
 
 /* ------------------------------------------------------------------ resume (localStorage) */
@@ -121,9 +242,32 @@ export interface Saved {
   voiceChosen: boolean;
   /** The operator finished or closed setup: the shell stops sending them here. */
   finished: boolean;
+  /** The first meeting happened, and how it opened: the name said, or a typed first line. */
+  met: "voice" | "typed" | null;
+  /** When, for “It came forward at 3:04 PM”. */
+  metAt: string | null;
+  /** Where Ghost answered: over the desktop (the floating room) or in this window. */
+  metWhere: "floating" | "window" | null;
+  /** The first run turned the floating room on once (the shell keeps the same, `floating::offer`). */
+  floatOffered: boolean;
+  /** They went on to Make it yours while Ghost's ears downloaded: come back when they're here. */
+  waitingForEars: boolean;
 }
 
-export const EMPTY: Saved = { step: null, skipped: [], heard: null, heardAt: null, answered: false, voiceChosen: false, finished: false };
+export const EMPTY: Saved = {
+  step: null,
+  skipped: [],
+  heard: null,
+  heardAt: null,
+  answered: false,
+  voiceChosen: false,
+  finished: false,
+  met: null,
+  metAt: null,
+  metWhere: null,
+  floatOffered: false,
+  waitingForEars: false,
+};
 
 export function storageKey(scenario: string | null): string {
   // v4: the steps of the real first run (2026-11-12). In mock mode each scenario resumes on its own.
@@ -142,6 +286,11 @@ export function parseSaved(raw: string | null): Saved {
       answered: v.answered === true,
       voiceChosen: v.voiceChosen === true,
       finished: v.finished === true,
+      met: v.met === "voice" || v.met === "typed" ? v.met : null,
+      metAt: typeof v.metAt === "string" ? v.metAt : null,
+      metWhere: v.metWhere === "floating" || v.metWhere === "window" ? v.metWhere : null,
+      floatOffered: v.floatOffered === true,
+      waitingForEars: v.waitingForEars === true,
     };
   } catch {
     return EMPTY;
@@ -237,6 +386,8 @@ export function firstSentence(t: string): string {
 export function inputName(node: string): string {
   const m = /^alsa_input\.(.+?)(?:#(\d+))?$/.exec(node.trim());
   if (!m) return node;
+  // A sound card on the board (`pci-0000_00_1f.3`): the computer's own microphone.
+  if (/^pci-[0-9a-f_.:]+$/i.test(m[1].split(".analog")[0].split(".iec")[0]) || /^pci-[0-9a-f]{4}_/i.test(m[1])) return "the built-in microphone";
   let name = m[1].replace(/^(usb|pci|platform)-/, "");
   name = name.split(".")[0]; // the profile: iec958-stereo, analog-stereo
   name = name.replace(/_[0-9A-Fa-f]{8,}(-\d+)?$/, "").replace(/-\d+$/, ""); // the serial
