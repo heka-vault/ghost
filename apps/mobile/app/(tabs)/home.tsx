@@ -21,7 +21,7 @@ import { staleLine, waitingRows } from "../../src/desk/waiting";
 import { update, usePhone } from "../../src/phone/store";
 import { opacityDisabled, radius, space, useColors } from "../../src/theme";
 import { TouchButton } from "../../src/ui/Button";
-import { AgentMark, GhostGlyph } from "../../src/ui/Brand";
+import { AgentMark } from "../../src/ui/Brand";
 import { TargetText } from "../../src/ui/entries";
 import { Cta, LinkDot, linkLabel, Screen, Skeleton, viaLabel } from "../../src/ui/parts";
 import { Text } from "../../src/ui/Text";
@@ -169,7 +169,14 @@ export default function Home() {
               hitSlop={24}
               style={({ pressed }) => ({ opacity: ready || inSession ? (pressed ? 0.82 : 1) : opacityDisabled, transform: [{ scale: pressed && ready ? 0.96 : 1 }] })}
             >
-              <VoicePresence phase={hero.presence} size={320} label={hero.question ? undefined : ""} float={ready && !starting} wave={wave} />
+              <VoicePresence
+                phase={hero.presence}
+                size={320}
+                label={hero.question ? undefined : ""}
+                float={ready && !starting}
+                wave={wave}
+                mark={hero.question ? "waiting" : status?.not_listening && link === "online" && !inSession ? "off" : null}
+              />
             </Pressable>
             <Text size="3xl" weight="semibold" align="center" style={{ marginTop: space[6] }}>
               {hero.title}

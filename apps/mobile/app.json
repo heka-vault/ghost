@@ -10,7 +10,7 @@
     "android": {
       "package": "dev.heka.ghost",
       "adaptiveIcon": {
-        "backgroundColor": "#5560E8",
+        "backgroundColor": "#05060a",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -46,6 +46,16 @@
         }
       ],
       "expo-secure-store",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 240,
+          "resizeMode": "contain",
+          "backgroundColor": "#05060a",
+          "dark": { "image": "./assets/splash-icon.png", "backgroundColor": "#05060a" }
+        }
+      ],
       [
         "expo-camera",
         {

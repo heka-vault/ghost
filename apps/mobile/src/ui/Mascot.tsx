@@ -11,9 +11,9 @@
  * redrawing every frame: the float around it moves on the native driver. Reduced motion shows the
  * mood's one still pose and never moves.
  */
-import { createMotion, detailFor, type MascotAttrs, type MascotEl, type MascotFrame, stillPose, WISP } from "@ghost/ui";
+import { createMotion, detailFor, INK, type MascotAttrs, type MascotEl, type MascotFrame, stillPose, WISP } from "@ghost/ui";
 import { createElement, type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
-import Svg, { Circle, Defs, Ellipse, G, Line, Mask, Path, Rect } from "react-native-svg";
+import Svg, { Circle, Defs, Ellipse, G, Line, Mask, Path, RadialGradient, Rect, Stop } from "react-native-svg";
 
 import { useReducedMotion } from "./motion";
 
@@ -30,15 +30,24 @@ function blinkCurve(u: number): number {
   return u < 60 ? u / 60 : 1 - (u - 60) / 110;
 }
 
-function draw(el: MascotEl, attrs: MascotAttrs, key: number): ReactNode {
+/** `light`: the body and mitts (`data-flesh`) take this fill instead of the colour. */
+function draw(el: MascotEl, attrs: MascotAttrs, key: number, light?: string): ReactNode {
   const live = el.part ? attrs[el.part] : undefined;
-  return createElement(TAGS[el.tag] as never, { key, ...el.props, ...live }, el.children?.map((c, i) => draw(c, attrs, i)));
+  const { "data-flesh": flesh, ...props } = el.props ?? {};
+  const lit = light && flesh ? { fill: light } : undefined;
+  return createElement(TAGS[el.tag] as never, { key, ...props, ...live, ...lit }, el.children?.map((c, i) => draw(c, attrs, i)));
 }
 
 export interface MascotProps {
-  /** Pixel size of the square. Under 24 draws the simple body; 40 and up adds the arms. */
+  /** Pixel size of the square. Under 24 draws the simple body (larger eyes); 32 and up adds the mitts. */
   size?: number;
   color: string;
+  /**
+   * Lit from within, as the mark and the floating room draw Ghost (mark.ts `litFigure`): white
+   * in the head cooling to this colour at the edge. One gradient fill, no filter, so a frame
+   * costs what a flat one does. Ghost's alone; an agent is flat in its colour.
+   */
+  lit?: string;
   /** Increment to play once. */
   trigger?: number;
   /** Blink now and then while at rest. */
@@ -49,7 +58,7 @@ export interface MascotProps {
   frame?: MascotFrame;
 }
 
-export function Mascot({ size = 96, color, trigger = 0, blinks = false, mood = null, frame }: MascotProps) {
+export function Mascot({ size = 96, color, trigger = 0, blinks = false, mood = null, frame, lit }: MascotProps) {
   const still = useReducedMotion();
   const { simple, props } = detailFor(size);
   const d = useMemo(() => ({ simple, props }), [simple, props]);
@@ -134,9 +143,17 @@ export function Mascot({ size = 96, color, trigger = 0, blinks = false, mood = n
           <Rect x={-24} y={-24} width={72} height={72} fill="#fff" />
           {scene.holes.map((el, i) => draw(el, attrs, i))}
         </Mask>
+        {lit ? (
+          <RadialGradient id={`${maskId}-lit`} cx={11.4} cy={9} r={13} gradientUnits="userSpaceOnUse">
+            <Stop offset={0} stopColor="#ffffff" />
+            <Stop offset={0.38} stopColor="#f4feff" />
+            <Stop offset={0.72} stopColor={INK} />
+            <Stop offset={1} stopColor={lit} />
+          </RadialGradient>
+        ) : null}
       </Defs>
       <G transform={attrs.root?.transform as string | undefined}>
-        <G mask={`url(#${maskId})`}>{scene.body.map((el, i) => draw(el, attrs, i))}</G>
+        <G mask={`url(#${maskId})`}>{scene.body.map((el, i) => draw(el, attrs, i, lit ? `url(#${maskId}-lit)` : undefined))}</G>
         {scene.over.map((el, i) => draw(el, attrs, i))}
       </G>
       {scene.free.map((el, i) => draw(el, attrs, i))}

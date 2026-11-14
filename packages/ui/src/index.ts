@@ -22,7 +22,7 @@ export type { Attrs as MascotAttrs, Character, Ctx as MascotCtx, Detail as Masco
 export { WISP, wavePose, wispGlyph } from "./wisp";
 export { EYES as WISP_EYES, HEM, MITTS_FROM, SMALL_EYES_UNDER, WISP_BOX, hemCurves, hemPath, mittPaths, mittPlaces, wispPath } from "./figure";
 export type { Cubic, Eye } from "./figure";
-export { ARCS, EYE_INK, INK, MARK_STATES, NIGHT, OFF_RED, adaptiveSvg, desktopIconFiles, figurePaths, ladder, markSvg, monoSvg, offStrike, REACH_PLACES, reachCardSvg, trayIconFiles, traySvg, wordmarkSvg } from "./mark";
+export { ARCS, EYE_INK, INK, MARK_STATES, NIGHT, OFF_RED, adaptiveSvg, desktopIconFiles, figurePaths, ladder, markSvg, monoSvg, notificationSvg, notificationVector, offStrike, REACH_PLACES, reachCardSvg, trayIconFiles, traySvg, wordmarkSvg } from "./mark";
 export type { Ladder, MarkFile, MarkOptions, MarkState, ReachPlace, RingMode } from "./mark";
 export { addActivity, appOf, callsOf, mergeActivity, secondsBetween, youSpeaking } from "./activity";
 export type { Activity, ActivityKind, Call } from "./activity";
