@@ -1,0 +1,27 @@
+[package]
+name = "ghost-reports"
+description = "Ghost's error reports (ADR 0067): a panic, a page's uncaught error or a typed failure, scrubbed, spooled and sent to the project's error tracking from a released build"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+# A leaf crate: the daemon and the desktop shell both use it, and the shell does not depend
+# on ghost-core. Nothing here reads the vault: the daemon hands its redaction in.
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+regex.workspace = true
+sha2.workspace = true
+hex.workspace = true
+tokio.workspace = true
+reqwest.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+wiremock.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
