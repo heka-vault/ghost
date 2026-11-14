@@ -43,6 +43,7 @@ import { SpeechModelsRow, useSpeechModels } from "./speech";
 import type { Wizard } from "./index";
 import { firstSentence, inputName, phraseCase, splitList, wakeHelp } from "./state";
 import { keeping } from "../hear/wakeTakes";
+import { ErrorReportsLine } from "../settings/ErrorReports";
 import { exchangeOf, isAwake, useWakeWatch } from "./watch";
 
 /* ------------------------------------------------------------------------------ shared */
@@ -560,6 +561,8 @@ export function WakeStep({ w }: { w: Wizard }) {
             </>
           )}
         </p>
+        {/* ADR 0067: on by default in a released build, so said here at the same weight. */}
+        <ErrorReportsLine />
         {list.length > 1 && !success && !quiet && <p className="onb-try__meta">It also answers to {list.slice(1).map((o) => quoted(phraseCase(o))).join(" and ")}.</p>}
         {(quiet || off) && !success && (
           <div className="onb-ladder">

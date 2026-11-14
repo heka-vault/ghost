@@ -10,10 +10,12 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import { App } from "./app/App";
+import { installErrorReporting } from "./app/reportError";
 import { type DesignState, DesignProvider } from "./design/context";
 import { makeTransport } from "./transport";
 
 async function boot() {
+  installErrorReporting("main");
   let transport: Transport;
   let design: DesignState | null = null;
 

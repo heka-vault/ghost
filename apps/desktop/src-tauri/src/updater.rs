@@ -308,6 +308,11 @@ pub fn update_install(app: AppHandle) -> Result<UpdateView, String> {
     tauri::async_runtime::spawn(async move {
         if let Err(error) = install(&task, update).await {
             eprintln!("ghost: update: {error}");
+            // ADR 0067: by kind and the bundle type, never the installer's words.
+            ghost_reports::failure(
+                ghost_reports::Failure::new(ghost_reports::FailureKind::UpdateFailed)
+                    .fact("installer", installer().unwrap_or("none")),
+            );
             let u = updater(&task);
             u.set(&task, |v| v.phase = Phase::Failed { error });
             u.installing.store(false, Ordering::SeqCst);

@@ -2,6 +2,7 @@ import { RotateCcw, TriangleAlert } from "lucide-react";
 import { Component, type ErrorInfo, type ReactNode } from "react";
 
 import { Button, EmptyState } from "../ui";
+import { reportPageError } from "./reportError";
 
 interface Props {
   /** Shown in the message: which screen failed. */
@@ -22,6 +23,8 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error(`[ghost] ${this.props.name} crashed`, error, info.componentStack);
+    // ADR 0067: an error report, when the operator has not turned them off.
+    void reportPageError("main", "boundary", error);
   }
 
   render() {
