@@ -10,7 +10,7 @@
  */
 import { lineHue } from "./brand";
 
-export const AGENT_SHAPES = ["wisp", "drop", "bell", "hood", "cloud", "lantern", "star", "moth"] as const;
+export const AGENT_SHAPES = ["wisp", "drop", "bell", "cloud", "lantern", "star", "moth"] as const;
 export type AgentShape = (typeof AGENT_SHAPES)[number];
 export const AGENT_HUES = 8;
 
@@ -19,7 +19,6 @@ export const SHAPE_NAMES: Record<AgentShape, string> = {
   wisp: "Wisp",
   drop: "Drop",
   bell: "Bell",
-  hood: "Hood",
   cloud: "Cloud",
   lantern: "Lantern",
   star: "Star",
@@ -70,8 +69,6 @@ export const SHAPES: Record<Exclude<AgentShape, "wisp">, ShapeDrawing> = {
   drop: { body: "M12 1.8 C 12 1.8 4.6 9.6 4.6 14.6 A 7.4 7.4 0 0 0 19.4 14.6 C 19.4 9.6 12 1.8 12 1.8 Z", eyes: EYES(14.2, 2.5) },
   // A bell: dome and a flared, scalloped skirt.
   bell: { body: "M12 2.6 C 7.6 2.6 6 6 6 10 V 15.6 L 3.6 20.6 Q 5.7 19 7.8 20.6 Q 9.9 19 12 20.6 Q 14.1 19 16.2 20.6 Q 18.3 19 20.4 20.6 L 18 15.6 V 10 C 18 6 16.4 2.6 12 2.6 Z", eyes: EYES(10.6) },
-  // A hooded one: a pointed cowl and a jagged hem.
-  hood: { body: "M12 1.6 L 17.4 8.4 C 18.6 10 19.2 11.8 19.2 14 V 21 L 16.8 19.2 L 14.4 21 L 12 19.2 L 9.6 21 L 7.2 19.2 L 4.8 21 V 14 C 4.8 11.8 5.4 10 6.6 8.4 Z", eyes: EYES(13.2) },
   // A cloud: three puffs on top, a scalloped bottom.
   cloud: { body: "M5.2 15.4 C 2.4 15.2 1.8 10.8 4.6 10 C 4.4 6.6 8.4 5.2 10.2 7.4 C 11.2 3.8 16.6 3.8 17.2 7.8 C 20.8 7.6 22.4 12.4 19 14.4 V 19.6 Q 17.25 18 15.5 19.6 Q 13.75 18 12 19.6 Q 10.25 18 8.5 19.6 Q 6.85 18 5.2 19.6 Z", eyes: EYES(12.6, 2.7) },
   // A lantern: a handle and a rounded case.

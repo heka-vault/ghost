@@ -1952,7 +1952,7 @@ pub struct ConversationView {
     /// The running session is with it.
     pub active: bool,
     pub is_ghost: bool,
-    /// How it is drawn, `"<shape>:<colour>"` (shapes: wisp, drop, bell, hood, cloud,
+    /// How it is drawn, `"<shape>:<colour>"` (shapes: wisp, drop, bell, cloud,
     /// lantern, star, moth; colours 0 to 7). Null: the one the desktop picks from its slug.
     #[serde(default)]
     #[schema(required)]
