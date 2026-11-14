@@ -376,7 +376,8 @@ export function wordmarkSvg(height = 64, theme: "dark" | "light" = "dark", o: { 
   const tileH = height;
   const fs = height * 0.62;
   const gap = height * 0.28;
-  const textW = fs * 2.62;
+  // "Ghost" in Inter 800 at −0.035 em is 2.79 em wide (measured in Chrome); a little room for the "t".
+  const textW = fs * 2.84;
   const W = Math.ceil(tileH + gap + textW);
   const inner = markSvg(Math.round(height), { id: o.id ?? "gw" })
     .replace(/^<svg[^>]*>/, `<svg x="0" y="0" width="${tileH}" height="${tileH}" viewBox="0 0 100 100">`);
@@ -417,4 +418,87 @@ export function desktopIconFiles(): MarkFile[] {
 export function trayIconFiles(px = 32): MarkFile[] {
   const states: (MarkState | "rest")[] = ["rest", "listening", "reaching", "speaking", "waiting", "off"];
   return states.map((s) => ({ name: `tray-${s}.png`, px, svg: traySvg(px, s) }));
+}
+
+/** A place the reach card's beams go to: its name, the small capitals under it, where it sits. */
+export interface ReachPlace {
+  name: string;
+  sub?: string;
+  /** Degrees from Wisp (0 is right, -90 up) and the beam's length in px. */
+  deg: number;
+  len: number;
+}
+
+/** The places on the social card: the floating room's own, at its angles. */
+export const REACH_PLACES: ReachPlace[] = [
+  { name: "Linear", sub: "ISSUES", deg: -96, len: 228 },
+  { name: "Calendar", sub: "TODAY", deg: -36, len: 236 },
+  { name: "Agents", sub: "LEDGER", deg: 14, len: 232 },
+  { name: "GitHub", sub: "PULL REQUESTS", deg: -146, len: 196 },
+  { name: "Memory", deg: 150, len: 190 },
+  { name: "Docs", sub: "HANDBOOK", deg: 82, len: 212 },
+];
+
+/**
+ * The reach (docs/design-system.md, The mark: big surfaces only): the lit Wisp reaching, in its
+ * ring of ticks, a violet beam out to each named place, beside the name and the line. The social
+ * card a link unfurls into (`site/public/og.jpg`) and any other big surface. Every px is a CSS
+ * pixel of the card; the text needs Inter and JetBrains Mono where it is drawn (`fontFace`).
+ */
+export function reachCardSvg(o: { width?: number; height?: number; fontFace?: string; line?: string[]; places?: ReachPlace[] } = {}): string {
+  const W = o.width ?? 1200;
+  const H = o.height ?? 630;
+  const tint = MARK_STATES.reaching.tint;
+  const cx = W * 0.67;
+  const cy = H * 0.5;
+  const size = H * 0.44;
+  const places = o.places ?? REACH_PLACES;
+  const line = o.line ?? ["Floats over your work", "when you call it."];
+  const mono = "'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, monospace";
+  const sans = "'Inter Variable', Inter, system-ui, sans-serif";
+  let beams = "";
+  let nodes = "";
+  places.forEach((p, i) => {
+    const a = (p.deg * Math.PI) / 180;
+    const x = cx + p.len * Math.cos(a);
+    const y = cy + p.len * Math.sin(a);
+    const g = `rb${i}`;
+    beams +=
+      `<linearGradient id="${g}" x1="${n(cx)}" y1="${n(cy)}" x2="${n(x)}" y2="${n(y)}" gradientUnits="userSpaceOnUse"><stop offset="0.3" stop-color="${tint}" stop-opacity="0.9"/><stop offset="1" stop-color="${tint}" stop-opacity="0.35"/></linearGradient>` +
+      `<line x1="${n(cx)}" y1="${n(cy)}" x2="${n(x)}" y2="${n(y)}" stroke="${tint}" stroke-opacity="0.35" stroke-width="7" filter="url(#rcb)"/>` +
+      `<line x1="${n(cx)}" y1="${n(cy)}" x2="${n(x)}" y2="${n(y)}" stroke="url(#${g})" stroke-width="1.6"/>`;
+    // A packet of light on its way back, two thirds out.
+    const t = 0.62 + 0.08 * (i % 2);
+    nodes += `<circle cx="${n(cx + p.len * t * Math.cos(a))}" cy="${n(cy + p.len * t * Math.sin(a))}" r="3" fill="#ffffff" fill-opacity="0.85" filter="url(#rcg)"/>`;
+    nodes += `<circle cx="${n(x)}" cy="${n(y)}" r="11" fill="${tint}" fill-opacity="0.35" filter="url(#rcg)"/><circle cx="${n(x)}" cy="${n(y)}" r="5" fill="#ffffff"/><circle cx="${n(x)}" cy="${n(y)}" r="5" fill="none" stroke="${tint}" stroke-width="2"/>`;
+    // The label beside the node, on the side away from Wisp.
+    const right = Math.cos(a) > 0.25;
+    const left = Math.cos(a) < -0.25;
+    const anchor = right ? "start" : left ? "end" : "middle";
+    const lx = right ? x + 16 : left ? x - 16 : x;
+    const up = Math.sin(a) < -0.5;
+    const ly = right || left ? y + (p.sub ? -4 : 8) : up ? y - (p.sub ? 34 : 18) : y + 34;
+    nodes += `<text x="${n(lx)}" y="${n(ly)}" text-anchor="${anchor}" font-family="${sans}" font-weight="700" font-size="22" letter-spacing="-0.3" fill="${INK}">${p.name}</text>`;
+    if (p.sub) nodes += `<text x="${n(lx)}" y="${n(ly + 19)}" text-anchor="${anchor}" font-family="${mono}" font-weight="600" font-size="11" letter-spacing="3.2" fill="${tint}">${p.sub}</text>`;
+  });
+  const wisp = markSvg(256, { state: "reaching", tile: false, ring: "ticks", id: "rc" }).replace(
+    /^<svg[^>]*>/,
+    `<svg x="${n(cx - size / 2)}" y="${n(cy - size / 2)}" width="${n(size)}" height="${n(size)}" viewBox="0 0 100 100">`,
+  );
+  const tx = W * 0.075;
+  const style = o.fontFace ? `<style>${o.fontFace}</style>` : "";
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${style}<defs>` +
+    `<radialGradient id="rcl" cx="${n(cx)}" cy="${n(cy)}" r="${n(W * 0.42)}" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="${tint}" stop-opacity="0.32"/><stop offset="0.4" stop-color="${tint}" stop-opacity="0.1"/><stop offset="1" stop-color="${tint}" stop-opacity="0"/></radialGradient>` +
+    `<filter id="rcb" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="4"/></filter>` +
+    `<filter id="rcg" x="-200%" y="-200%" width="500%" height="500%"><feGaussianBlur stdDeviation="3"/></filter></defs>` +
+    `<rect width="${W}" height="${H}" fill="${NIGHT}"/><rect width="${W}" height="${H}" fill="url(#rcl)"/>` +
+    beams +
+    nodes +
+    wisp +
+    `<text x="${n(tx)}" y="${n(H * 0.47)}" font-family="${sans}" font-weight="800" font-size="120" letter-spacing="${n(-0.035 * 120)}" fill="${INK}">Ghost</text>` +
+    line.map((l, i) => `<text x="${n(tx + 3)}" y="${n(H * 0.47 + 62 + i * 40)}" font-family="${sans}" font-weight="450" font-size="32" letter-spacing="-0.3" fill="#c5cdd8">${l}</text>`).join("") +
+    `<text x="${n(tx + 4)}" y="${n(H * 0.47 + 62 + line.length * 40 + 44)}" font-family="${mono}" font-weight="600" font-size="16" letter-spacing="${n(0.32 * 16)}" fill="${MARK_STATES.idle.tint}">SAY “GHOST”</text>` +
+    `</svg>`
+  );
 }

@@ -22,6 +22,8 @@ import {
   traySvg,
   adaptiveSvg,
   wordmarkSvg,
+  reachCardSvg,
+  REACH_PLACES,
   desktopIconFiles,
   trayIconFiles,
 } from "@ghost/ui";
@@ -206,8 +208,27 @@ describe("the rules of the mark", () => {
     expect(a.filter((x) => b.includes(x))).toEqual([]);
   });
 
-  it("the wordmark says Ghost beside the tile", () => {
-    expect(wordmarkSvg(64)).toContain(">Ghost</text>");
+  it("the wordmark says Ghost beside the tile, with room for the whole word", () => {
+    const svg = wordmarkSvg(64);
+    expect(svg).toContain(">Ghost</text>");
+    // "Ghost" in Inter 800 at −0.035 em is 2.79 em wide (measured in Chrome): it must not be cut at the "t".
+    const width = Number(/width="(\d+)"/.exec(svg)?.[1]);
+    const fs = 64 * 0.62;
+    const x = Number(/<text x="([\d.]+)"/.exec(svg)?.[1]);
+    expect(width - x).toBeGreaterThanOrEqual(fs * 2.79);
+  });
+
+  it("the social card is the reach: Wisp reaching, a beam and a name for every place, the line", () => {
+    const svg = reachCardSvg();
+    expect(svg).toContain('width="1200" height="630"');
+    expect(svg).toContain(">Ghost</text>");
+    expect(svg).toContain("#a98bff");
+    for (const p of REACH_PLACES) expect(svg).toContain(`>${p.name}</text>`);
+    expect((svg.match(/<line /g) ?? []).length).toBeGreaterThanOrEqual(REACH_PLACES.length * 2);
+    expect(svg).not.toContain("evenodd");
+    // Wisp at rest is in it: the hem and the mitts.
+    expect(svg).toContain(hemPath(0));
+    for (const m of mittPaths()) expect(svg).toContain(m);
   });
 
   it("names every file the desktop ships", () => {

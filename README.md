@@ -1,4 +1,9 @@
-# Ghost
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/lockup-dark.png">
+    <img src="docs/brand/lockup-light.png" alt="Ghost" height="56">
+  </picture>
+</h1>
 
 [![ci](https://github.com/heka-vault/ghost/actions/workflows/ci.yml/badge.svg)](https://github.com/heka-vault/ghost/actions/workflows/ci.yml)
 

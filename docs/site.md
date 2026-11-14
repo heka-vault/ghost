@@ -61,15 +61,24 @@ page links to them.
   (`docs/screenshots/floating-{hero,speaking,yes}.webp`) and one of the site's own
   (`site/src/assets/float-listening.webp`, the README's desk and crop), and the desktop app's
   screenshots, all straight from `docs/screenshots/`.
-- **The site's stills** (`site/src/assets/float-{wide,tall,listening}.webp`,
-  `site/public/og.jpg`, `site/public/apple-touch-icon.png`) are taken from the float page:
-  `pnpm --dir site site:build && pnpm --dir site site:stills` (Chrome or Chromium and
-  ImageMagick, like `make screenshots`).
+- **The site's stills** (`site/src/assets/float-{wide,tall,listening}.webp`) are taken from the
+  float page: `pnpm --dir site site:build && pnpm --dir site site:stills` (Chrome or Chromium
+  and ImageMagick, like `make screenshots`). The still is the live float caught at one moment,
+  so when the live one takes its place Wisp's body doesn't change: take the stills again
+  whenever the floating room's drawing does.
+- **The mark** (docs/design-system.md, The mark): the nav and the footer carry the lockup
+  (`Wordmark.astro`: the 32 px chip from `markSvg`, inlined, and "Ghost" in Inter 800 at
+  −0.035 em). The icons and the social card are the mark's own files, not stills:
+  `node packages/ui/scripts/marks.mjs site` (part of `make marks`) writes `site/public/favicon.ico`,
+  `apple-touch-icon.png` and `og.jpg` (the reach: the lit Wisp reaching, a beam to each named
+  place, the name and the line; `reachCardSvg`), with the README's header and the
+  organisation's avatar (`docs/brand/`).
 - **The version** on the page (the Download button, the file names) is the repository's own,
   read from the root `package.json` at build time, which `scripts/version.py` keeps with every
   other copy; the button goes to the latest release.
-- **The favicon** is Wisp's glyph from `packages/ui` (`wispGlyph`), rendered at build time
-  (`site/src/pages/favicon.svg.ts`).
+- **The favicon** is the mark's 16 px drawing from `packages/ui` (`markSvg`), rendered at build
+  time (`site/src/pages/favicon.svg.ts`), with `/favicon.ico` beside it for browsers that don't
+  take an SVG.
 - **Nothing is fetched from anyone else**: fonts are self-hosted (fontsource), no analytics,
   no cookies. Keep it that way.
 - **The copy** makes only the promises the README and CLAUDE.md's rules make. When the product

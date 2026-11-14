@@ -1,16 +1,17 @@
 #!/usr/bin/env node
 /**
  * The site's stills, taken from its own float page (the app's floating room on the mock), so the
- * picture a visitor sees first, the one with JavaScript off or reduced motion, and the card a
- * link unfurls into are the moving hero caught at one moment: Ghost looking in six places.
+ * picture a visitor sees first, the one with JavaScript off or reduced motion, is the moving hero
+ * caught at one moment: Ghost looking in six places. It is the same Wisp the live float draws, so
+ * the still hands over to the live one with no change of body. (The icons and the card a link
+ * unfurls into are the mark's, not stills: `node packages/ui/scripts/marks.mjs site`.)
  *
  *   pnpm --dir site site:build && node site/scripts/stills.mjs
  *
  * Needs Chrome or Chromium (CHROME=/path) and ImageMagick for WebP and JPEG. Writes
  * src/assets/float-wide.webp (1680x1000), src/assets/float-tall.webp (780x1040, a phone's top),
- * src/assets/float-listening.webp (1440x810, the README's desk and crop, beside its stills),
- * public/og.jpg (1200x630) and public/apple-touch-icon.png (180x180). Nothing leaves the
- * machine: the pages are served from dist on loopback.
+ * and src/assets/float-listening.webp (1440x810, the README's desk and crop, beside its
+ * stills). Nothing leaves the machine: the pages are served from dist on loopback.
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -72,8 +73,6 @@ const shots = [
   [{ width: 390, height: 520, scale: 2, query: "&placement=centre", when: reaching }, "src/assets/float-tall.webp", ["-quality", "78"]],
   // Listening, on the README's own desk and crop, to sit beside its stills.
   [{ width: 1280, height: 720, scale: 2, query: "&arrange=readme", when: listening, clip: { x: 560, y: 28, width: 720, height: 405 } }, "src/assets/float-listening.webp", ["-resize", "1440x810", "-quality", "80"]],
-  // The card a link unfurls into.
-  [{ width: 1200, height: 630, when: reaching }, "public/og.jpg", ["-quality", "86"]],
 ];
 for (const [opts, out, args] of shots) {
   const png = join(tmp, out.replace(/\W/g, "_") + ".png");
@@ -81,13 +80,6 @@ for (const [opts, out, args] of shots) {
   magick([png, ...args, join(site, out)]);
   console.log(`stills: ${out}`);
 }
-
-// The home-screen icon: the favicon's Wisp, full bleed (the phone rounds the corners itself).
-const icon = await browser.newPage({ viewport: { width: 180, height: 180 } });
-const svg = readFileSync(join(dist, "favicon.svg"), "utf8").replace('rx="8" ', "");
-await icon.setContent(`<style>html,body{margin:0;background:#05060a}svg{display:block;width:180px;height:180px}</style>${svg}`);
-await icon.screenshot({ path: join(site, "public", "apple-touch-icon.png") });
-console.log("stills: public/apple-touch-icon.png");
 
 await browser.close();
 server.close();
