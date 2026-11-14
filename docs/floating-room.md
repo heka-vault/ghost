@@ -1,9 +1,10 @@
 # The floating room
 
-ADR 0059. The room posture without a window: Ghost is a thin line of light at the bottom edge
-of a monitor until its name is called, then comes forward over the desktop with no
+ADR 0059. Ghost big and present, without a window: a thin line of light at the bottom edge
+of a monitor until its name is called, then Ghost comes forward over the desktop with no
 application chrome, and goes back to the line when the session ends. The windowed app (Today,
-the briefing) stays the place you open on purpose.
+the briefing) stays the place you open on purpose. These are the two ways to see Ghost; since
+2026-11-14 there is no room view inside the window (ADR 0059 as amended that day).
 
 ![Ghost beside the work, beams lit to the six places a turn reached](screenshots/floating-hero.webp)
 
@@ -12,18 +13,20 @@ in the [README](../README.md#over-your-desktop).*
 
 ## Turning it on
 
-Settings › General › The room › **Float over the desktop**, or the tray's **Float over the
-desktop**. Off by default, until the first run's wake beat turns it on once (below). Under it, **Ghost appears on**: the other monitor (default), a
+Settings › General › The floating room › **Float over the desktop**, the rail's floating
+switch above the microphone, or the tray's **Float over the desktop**. Off by default, until the first run's wake beat turns it on once (below). Under it, **Ghost appears on**: the other monitor (default), a
 named monitor, or where I am; **Where on the screen**: beside your work (default: the owner,
 seeing it come forward on the other monitor in a column rather than over the whole screen, "I
 liked Ghost showing up without taking the full screen"), in the corner, or in the centre; and **Captions**: off (default), when the sound is off, or always.
 The choices are kept beside the window
 (`~/.config/dev.heka.ghost/floating.json`), not in Ghost's folder: it is how this desk shows
-Ghost, like the room's own delays.
+Ghost.
 
 When it is on and you call Ghost while the main window isn't the one you are using, the
 session comes forward over the desktop. If the main window is focused, the session stays in
-it (and goes to its room after 20 s, as before). A room you hold in the window (Ctrl+.) wins.
+it: Today's talk bar becomes a live strip (what Ghost is doing, a yes or a question waiting with
+its buttons) and the conversation screen shows the session as it goes. Nothing fills the window
+by itself.
 
 ## The first run's moment (2026-11-14)
 
@@ -40,11 +43,14 @@ to meet you.”, then an invitation, or the sentence that it needs a model), and
 keyboard (`introducing` in `posture.ts`). The surface comes forward, lit, shows nothing but its
 state and one line under Wisp (“Say “that’s all” to send me back”), and tells the shell it came
 forward, which the first run then says (“It came forward over your desktop at 3:04 PM”). Where it
-can't float (no X11, a share Ghost is kept out of), the first run holds the window's room view for
-the session instead. A typed first line (no microphone) gets the same.
+can't float (no X11, a share Ghost is kept out of), the moment happens on the beat itself: the lit
+mark, Ghost's state, its first line as it is spoken, and one sentence saying why it answered there
+(“Ghost answered here. On this desktop it can’t float over your work: …”). A typed first line (no
+microphone) gets the same.
 
 In the mock: `floating.html?mock=floating&first=1&main=active` comes forward though the main
-window is in use; `?mock=firstrun&heyghost=2500#/welcome` plays the whole moment on the wizard.
+window is in use; `?mock=firstrun&heyghost=2500#/welcome` plays the whole moment on the wizard, and with
+`&floating=refused` or `&floating=on&capture=yes` the moment in the window.
 
 ## Where it works
 
@@ -127,7 +133,7 @@ remote desktop. Not seen: a program that grabs XWayland's pixels itself (`ffmpeg
 and any desktop other than GNOME; Settings says so when it can't tell, and the tray switch
 turns the floating room off at once.
 
-What it does then is the operator's choice, Settings › General › The room › **While my screen
+What it does then is the operator's choice, Settings › General › The floating room › **While my screen
 is shared** (`floating.json`'s `while_shared`, `src-tauri/src/floating/share.rs`):
 
 - **Hide Ghost** (the default, and what it always did): the surface draws nothing at all, not
@@ -181,7 +187,7 @@ stream with `pipewiresrc`.
 
 ## Ghost on stage
 
-The tray's **Ghost on stage**, or Settings › The room › **Open the stage**: the floating
+The tray's **Ghost on stage**, or Settings › General › The floating room › **Open the stage**: the floating
 room drawn in an ordinary window titled **Ghost · Stage** (`stage.html`,
 `src-tauri/src/floating/stage.rs`), on an opaque designed backdrop, driven by the same live
 events as the floating room. In a meeting, share that window; or record it. It shows what the
