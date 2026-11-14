@@ -78,7 +78,7 @@ pub struct Verdict {
 }
 
 impl Verdict {
-    fn of(state: State, detail: impl Into<String>) -> Self {
+    pub fn of(state: State, detail: impl Into<String>) -> Self {
         let d = detail.into();
         Self {
             state,

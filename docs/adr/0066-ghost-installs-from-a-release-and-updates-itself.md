@@ -35,6 +35,20 @@ again; `ghostd models fetch` does the same on a desk with no display. The daemon
 which already waited for missing files (ADR 0038), is woken as the download ends. The routes
 are the operator's: the phone, outside tools and Ghost's own app have none of this.
 
+*Amended 2026-11-14 (#135):* there is one download per file, whoever starts it. The terminal's
+`ghostd models fetch`, the app, a second `fetch` and a restarted daemon share a folder, not a
+process, so before a byte is asked for the fetcher takes an advisory lock (`flock`) on
+`<file>.lock` beside the `.part`, which the kernel lets go when the holder closes it or dies. A
+fetcher that cannot take it asks for nothing: it follows the holder, reading progress from the
+`.part`'s size four times a second (`fetch.following` in the view; "Already downloading: 41%"
+from the command), checks the file against its pin once it is in place, and takes the lock
+and carries on from the `.part` when the holder went away without finishing. Where a file
+system takes no lock, each fetcher downloads as before (a debug line). While files are missing
+the daemon looks once a second whether another process finished them, so the first run moves
+on and `models_ready` flips with no restart, and whether one is downloading them, which the
+app's download then follows; that look stops when the models load, so a turn never pays for
+it. The person who installed Ghost may open it while `ghostd models fetch` runs.
+
 **The release carries Ghost's echo canceller** (issue #116, ADR 0064). The installer and its
 two templates (`infra/pipewire/`) are bundle resources, found beside the daemon's binary
 (`/usr/lib/heka-ghost-desktop/pipewire/`, the AppImage's the same under its mount). The

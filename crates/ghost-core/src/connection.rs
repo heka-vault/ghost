@@ -188,6 +188,9 @@ pub struct Provider {
     /// The Chat Completions field for the output cap: OpenAI's own API wants
     /// `max_completion_tokens`; the compatible servers know `max_tokens`.
     pub cap_param: &'static str,
+    /// A program on this computer Ghost runs, not an address it calls (ADR 0069: Claude
+    /// Code): no address, no password, no fast model.
+    pub program: bool,
 }
 
 const PROVIDER_DEFAULTS: Provider = Provider {
@@ -202,10 +205,17 @@ const PROVIDER_DEFAULTS: Provider = Provider {
     local: false,
     default_model: "",
     cap_param: "max_tokens",
+    program: false,
 };
 
+/// The provider that runs the operator's own Claude Code (ADR 0069).
+pub const CLAUDE_CODE: &str = "claude-code";
+/// The alias Claude Code is asked for when none is chosen: Haiku measured the quickest to a
+/// first word and to a tool call over the program (ADR 0069's table, 2026-11-14).
+pub const CLAUDE_CODE_DEFAULT_MODEL: &str = "haiku";
+
 /// The providers, in the order the desktop offers them.
-pub static PROVIDERS: [Provider; 6] = [
+pub static PROVIDERS: [Provider; 7] = [
     Provider {
         id: "anthropic",
         title: "Anthropic",
@@ -264,6 +274,17 @@ pub static PROVIDERS: [Provider; 6] = [
         base_url: "",
         password: "LLM_API_KEY",
         password_optional: true,
+        ..PROVIDER_DEFAULTS
+    },
+    Provider {
+        id: CLAUDE_CODE,
+        title: "Claude Code",
+        blurb: "Claude Code, installed and signed in on this computer. Ghost runs it to answer \
+                you; replies count against your Claude plan’s limits.",
+        protocol: Protocol::Anthropic,
+        base_url: "",
+        default_model: CLAUDE_CODE_DEFAULT_MODEL,
+        program: true,
         ..PROVIDER_DEFAULTS
     },
 ];
@@ -665,7 +686,8 @@ impl ModelConnection {
     /// The fast model as the provider names it; None when none is set, or when it is the
     /// main model under another spelling.
     pub fn fast_wire_model(&self) -> Option<String> {
-        if self.fast_model.is_empty() {
+        // A program answers every call itself (ADR 0069): no fast model beside it.
+        if self.fast_model.is_empty() || self.spec().program {
             return None;
         }
         let model = if self.provider == "openrouter" {
@@ -728,7 +750,7 @@ impl ModelConnection {
     pub fn problems(&self, env: &impl Env, locked: bool) -> Vec<String> {
         let spec = self.spec();
         let mut out = self.problems_in_settings.clone();
-        if self.base_url.is_empty() {
+        if self.base_url.is_empty() && !spec.program {
             out.push(format!(
                 "{} needs an address (GHOST_LLM_BASE_URL)",
                 spec.title
@@ -760,7 +782,9 @@ impl ModelConnection {
 
     pub fn describe(&self) -> String {
         let where_ = host(&self.base_url);
-        let where_ = if where_.is_empty() {
+        let where_ = if self.spec().program {
+            "a program on this computer"
+        } else if where_.is_empty() {
             "no address"
         } else {
             &where_
@@ -1459,10 +1483,49 @@ mod tests {
                         .iter()
                         .any(|x| x.contains("needs an address"))
                 );
+            } else if p.program {
+                // A program on this computer (ADR 0069): no address, no password, and it
+                // is ready with neither.
+                assert!(c.base_url.is_empty() && c.password.is_empty());
+                assert!(
+                    c.problems(&HashMap::<String, String>::new(), false)
+                        .is_empty()
+                );
             } else {
                 assert!(c.base_url.starts_with("http"));
             }
         }
+    }
+
+    #[test]
+    fn claude_code_is_a_program_with_no_fast_model_beside_it() {
+        let env1 = env(&[
+            ("GHOST_LLM_PROVIDER", CLAUDE_CODE),
+            ("GHOST_LLM_FAST_MODEL", "haiku"),
+            ("GHOST_LLM_MODEL", "sonnet"),
+        ]);
+        let c = ModelConnection::from_env(&env1);
+        assert_eq!(c.wire_model(), "sonnet");
+        assert_eq!(
+            c.fast_wire_model(),
+            None,
+            "the program answers every call itself"
+        );
+        assert_eq!(c.fast_target(&env1).map(|t| t.model), None);
+        assert_eq!(
+            c.describe(),
+            "sonnet via claude-code (anthropic, a program on this computer)"
+        );
+        let plain = env(&[("GHOST_LLM_PROVIDER", CLAUDE_CODE)]);
+        assert_eq!(
+            ModelConnection::from_env(&plain).wire_model(),
+            CLAUDE_CODE_DEFAULT_MODEL
+        );
+        assert_eq!(provider(CLAUDE_CODE).unwrap().title, "Claude Code");
+        assert!(
+            !provider(CLAUDE_CODE).unwrap().local,
+            "it answers from Anthropic, not here"
+        );
     }
 
     #[test]

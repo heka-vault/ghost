@@ -5,11 +5,30 @@
  * is malformed. Importing connects through the daemon's own connect; letting a tool use Ghost
  * makes a client as Settings › Outside tools does. Synthetic paths and names only.
  */
-import type { FoundAppView, OtherImportResult, OtherLinkResult, OtherToolsView, OtherToolView } from "@ghost/client-ts";
+import type { ClaudeCodeView, FoundAppView, OtherImportResult, OtherLinkResult, OtherToolsView, OtherToolView } from "@ghost/client-ts";
 
 import { HttpError } from "./errors";
 
-export type OtherToolsMode = "none" | "found" | "malformed";
+export type OtherToolsMode = "none" | "found" | "malformed" | "claude-plan" | "claude-key" | "claude-signedout" | "claude-unsupported";
+
+/** The operator's Claude Code as the program says it is signed in (ADR 0069), in the
+ *  daemon's own sentences (`ghost_core::other_tools::program`). */
+const CLAUDE_CODE: Record<"plan" | "key" | "signedout" | "unsupported", ClaudeCodeView> = {
+  plan: { state: "plan", version: "2.1.325", line: "Signed in with a Claude Pro plan. Replies count against its limits.", note: null },
+  key: { state: "api_key", version: "2.1.325", line: "Signed in with an API key. Replies are billed to that key, not to a plan.", note: null },
+  signedout: { state: "signed_out", version: "2.1.325", line: "Claude Code is installed but not signed in. Run `claude auth login` in a terminal, then Look again.", note: null },
+  unsupported: {
+    state: "unsupported",
+    version: "1.0.31",
+    line: "This version of Claude Code (1.0.31) lacks --strict-mcp-config, --effort that Ghost needs to run it with its own tools off, so Ghost won't use it. Update it with `claude update` in a terminal, then Look again.",
+    note: null,
+  },
+};
+
+/** Claude Code alone on this computer, in one of its states. */
+function claudeOnly(state: keyof typeof CLAUDE_CODE): OtherToolsView {
+  return { line: "Claude Code is set up on this computer.", tools: [], models: [], claude_code: CLAUDE_CODE[state], own_sign_in: [] };
+}
 
 export interface OtherToolsHooks {
   /** Connect an app as a pasted `mcpServers` entry would; the daemon's own connect. */
@@ -84,7 +103,8 @@ function found(): OtherToolsView {
     line: "Claude Code and Cursor are set up on this computer.",
     tools: [claude, cursor],
     models: [{ provider: "ollama", title: "Ollama", how: "Ollama is running on this computer, with 2 models.", models: ["llama3.2:latest", "qwen3:8b"] }],
-    own_sign_in: ["Claude Code"],
+    claude_code: CLAUDE_CODE.plan,
+    own_sign_in: [],
   };
 }
 
@@ -104,6 +124,7 @@ function malformed(): OtherToolsView {
       },
     ],
     models: [],
+    claude_code: null,
     own_sign_in: [],
   };
 }
@@ -115,7 +136,14 @@ export class MockOtherTools {
     mode: OtherToolsMode,
     private hooks: OtherToolsHooks,
   ) {
-    this.view = mode === "found" ? found() : mode === "malformed" ? malformed() : { line: null, tools: [], models: [], own_sign_in: [] };
+    this.view =
+      mode === "found"
+        ? found()
+        : mode === "malformed"
+          ? malformed()
+          : mode.startsWith("claude-")
+            ? claudeOnly(mode.slice("claude-".length) as keyof typeof CLAUDE_CODE)
+            : { line: null, tools: [], models: [], claude_code: null, own_sign_in: [] };
   }
 
   handle(method: string, path: string, body: Record<string, unknown>): unknown | undefined {

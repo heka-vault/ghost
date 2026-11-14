@@ -1029,8 +1029,10 @@ pub fn build_session(p: SessionParams) -> GhostSession {
                 settings.barge_in_min_words,
                 Some(analyzer),
                 settings.turn_grace_secs,
-                // With the realtime voice in front the agent never answers early (ADR 0063).
-                settings.turn_speculate && rt_shared.is_none(),
+                // With the realtime voice in front the agent never answers early (ADR 0063),
+                // nor on a model that keeps its own history (ADR 0069: Claude Code), which
+                // can't take back an answer to words the operator went on from.
+                settings.turn_speculate && rt_shared.is_none() && p.model.speculates(),
                 turns.clone(),
             )
             .with_confident_close(

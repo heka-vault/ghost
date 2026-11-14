@@ -130,7 +130,7 @@ import {
 } from "./model";
 import { GhostVoice } from "./GhostVoice";
 import { RealtimeVoiceSection } from "./RealtimeVoice";
-import { MODEL_FORM_ID, ModelSection } from "./ModelSection";
+import { MODEL_FORM_ID, ModelPageSection } from "./ModelSection";
 import { type BarState, CommandCopy, Row, SaveBar, SetupSection, type SetupStep, secretActionId } from "./parts";
 import { PasswordsSection } from "./Passwords";
 import { OutsideToolsSection } from "./OutsideTools";
@@ -966,7 +966,7 @@ export default function SettingsScreen({ params: route }: RouteProps) {
           <form id={MODEL_FORM_ID} onSubmit={submit} autoComplete="off" className="sr-only">
             <button type="submit" tabIndex={-1} aria-hidden />
           </form>
-          <ModelSection
+          <ModelPageSection
             s={s}
             conn={conn}
             values={v}

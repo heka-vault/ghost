@@ -332,6 +332,8 @@ export class MockDaemon {
       this.speechStarted = Date.now() - 40_000;
       this.models = { ...this.models, ready: false };
     }
+    // `&speech=following`: a terminal's download under way, so the ears aren't here yet either.
+    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("speech") === "following") this.models = { ...this.models, ready: false };
     this.skills = f.skills;
     this.waitingItems = f.waiting;
     // The daemon's own item while the keyring is locked (ghostd::passwords::problems).
@@ -952,29 +954,34 @@ export class MockDaemon {
 
   /**
    * The speech models (ADR 0066): every file here (loaded or loading) unless the address says
-   * `&speech=missing`, a fresh install's 2.9 GB, which Download fetches in eight seconds.
+   * `&speech=missing`, a fresh install's 2.9 GB, which Download fetches in eight seconds, or
+   * `&speech=following`, the same download already under way from a terminal's `ghostd models
+   * fetch` (#135), which the daemon follows from 41% without Download being pressed.
    */
   private speech(): SpeechModelsView {
     const total = 2_903_552_740;
     const base = { folder: "/home/you/.cache/ghost/models/parakeet-tdt-0.6b-v3", free_bytes: 120e9 };
     const how = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("speech") : null;
-    const fresh = how === "missing" || how === "slow" || how === "fetching";
+    const following = how === "following";
+    const fresh = how === "missing" || how === "slow" || how === "fetching" || following;
     // `&speech=slow` and `&speech=fetching` take three minutes, so the time left reads.
     const takes = how === "slow" || how === "fetching" ? 180_000 : 8000;
-    if (this.models.ready || (!fresh && this.speechStarted === null)) return { ...base, ready: this.models.ready, missing: [], missing_bytes: 0, fetch: { state: "idle", done_bytes: 0, total_bytes: 0, file: null, error: null } };
+    // The terminal's download started before the app opened: 41% done, eight seconds to go.
+    if (following && this.speechStarted === null && !this.models.ready) this.speechStarted = Date.now() - 0.41 * 8000;
+    if (this.models.ready || (!fresh && this.speechStarted === null)) return { ...base, ready: this.models.ready, missing: [], missing_bytes: 0, fetch: { state: "idle", done_bytes: 0, total_bytes: 0, file: null, error: null, following: false } };
     const missing = [
       { model: "Parakeet", name: "encoder-model.onnx.data", bytes: 2_435_420_160 },
       { model: "Kokoro", name: "kokoro-v1.0.onnx", bytes: 325_532_387 },
     ];
-    if (this.speechStarted === null) return { ...base, ready: false, missing, missing_bytes: total, fetch: { state: "idle", done_bytes: 0, total_bytes: 0, file: null, error: null } };
+    if (this.speechStarted === null) return { ...base, ready: false, missing, missing_bytes: total, fetch: { state: "idle", done_bytes: 0, total_bytes: 0, file: null, error: null, following: false } };
     const share = Math.min(1, (Date.now() - this.speechStarted) / takes);
     if (share >= 1) {
       this.models = { ...this.models, ready: true, kokoro_present: true };
       this.status = { ...this.status, models_ready: true };
-      return { ...base, ready: true, missing: [], missing_bytes: 0, fetch: { state: "done", done_bytes: total, total_bytes: total, file: null, error: null } };
+      return { ...base, ready: true, missing: [], missing_bytes: 0, fetch: { state: "done", done_bytes: total, total_bytes: total, file: null, error: null, following: false } };
     }
     const done = Math.round(total * share);
-    return { ...base, ready: false, missing, missing_bytes: total - done, fetch: { state: "fetching", done_bytes: done, total_bytes: total, file: share < 0.85 ? "encoder-model.onnx.data" : "kokoro-v1.0.onnx", error: null } };
+    return { ...base, ready: false, missing, missing_bytes: total - done, fetch: { state: "fetching", done_bytes: done, total_bytes: total, file: share < 0.85 ? "encoder-model.onnx.data" : "kokoro-v1.0.onnx", error: null, following } };
   }
 
   // ------------------------------------------------------------------ session

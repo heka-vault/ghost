@@ -42,6 +42,7 @@
 
 pub mod capabilities;
 pub mod check;
+pub mod claude_code;
 pub mod context;
 pub mod model;
 mod reply;
@@ -53,8 +54,9 @@ pub use context::{
 };
 pub use model::{
     ANTHROPIC_BETA, CUT_OFF_LINE, CUT_OFF_NOTE, DEFAULT_THINKING, Event, FinishReason,
-    LLM_MAX_TOKENS, LlmError, MOST_WAIT, Measured, Model, Options, Probe, REASONING_EFFORT, Usage,
-    WARM_PLACEHOLDER, comes_back, prefill_supported, retry_after, shared, spoken_failure,
+    LLM_MAX_TOKENS, LlmError, MOST_WAIT, Measured, Model, Options, Probe, ProgramFailure,
+    REASONING_EFFORT, Usage, WARM_PLACEHOLDER, comes_back, prefill_supported, retry_after, shared,
+    spoken_failure,
 };
 pub use tools::{
     BRING_UP_TOOL, CHANGE_TOOL, HANG_UP_TOOL, HOLD_TOOL, OfferAll, Offered, Offering, Offers,

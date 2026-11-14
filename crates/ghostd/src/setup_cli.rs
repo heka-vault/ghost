@@ -154,6 +154,25 @@ pub fn report(v: &Value) -> Vec<String> {
             }
         }
     }
+    // ADR 0069: the operator's own Claude Code, as a model Ghost can run.
+    let cc = &v["claude_code"];
+    if cc.is_object() {
+        out.push(String::new());
+        let version = cc["version"]
+            .as_str()
+            .map(|v| format!(" {v}"))
+            .unwrap_or_default();
+        out.push(format!("Claude Code{version} is installed."));
+        out.push(format!("  {}", s(&cc["line"])));
+        if matches!(s(&cc["state"]), "plan" | "api_key") {
+            out.push(
+                "  Ghost can run it to answer you: choose Claude Code in Settings › Model.".into(),
+            );
+        }
+        if let Some(note) = cc["note"].as_str() {
+            out.push(format!("  {note}"));
+        }
+    }
     let own: Vec<&str> = v["own_sign_in"]
         .as_array()
         .into_iter()
@@ -493,6 +512,7 @@ mod tests {
                     ]
                 }],
                 "models": [{"provider": "ollama", "title": "Ollama", "how": "Ollama is running on this computer, with 1 model.", "models": ["llama3.2"]}],
+                "claude_code": {"state": "plan", "version": "2.1.325", "line": "Signed in with a Claude plan. Replies count against its limits.", "note": null},
                 "own_sign_in": []
             }),
             calls: Mutex::default(),
@@ -521,6 +541,9 @@ mod tests {
         assert!(said.contains("not offered: Connects over SSE."));
         assert!(said.contains("can use Ghost: ghostd setup link cursor"));
         assert!(said.contains("Ollama is running"));
+        assert!(said.contains("Claude Code 2.1.325 is installed."));
+        assert!(said.contains("Replies count against its limits."));
+        assert!(said.contains("choose Claude Code in Settings › Model"));
         assert_eq!(api.calls.lock().unwrap().len(), 1);
         let (_, json) = run(&api, &["detect", "--json"], "").await;
         assert_eq!(serde_json::from_str::<Value>(&json).unwrap(), api.detected);

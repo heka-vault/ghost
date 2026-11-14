@@ -182,6 +182,20 @@ in `~/.config/ghost/settings.env`, which holds settings only, never a password:
 | Ollama on this machine | `GHOST_LLM_PROVIDER=ollama` and `GHOST_LLM_MODEL=<a model you pulled>` | none |
 | LM Studio on this machine | `GHOST_LLM_PROVIDER=lmstudio` and `GHOST_LLM_MODEL=<the loaded model>` | none |
 | Any address that speaks Anthropic's or OpenAI's API | `GHOST_LLM_PROVIDER=custom`, `GHOST_LLM_BASE_URL=…`, `GHOST_LLM_PROTOCOL=anthropic` or `openai`, `GHOST_LLM_MODEL=…` | `LLM_API_KEY` |
+| Claude Code, installed and signed in on this computer | `GHOST_LLM_PROVIDER=claude-code` (and `GHOST_LLM_MODEL=haiku`, `sonnet`, `opus` or another name it takes; `haiku` when empty) | none: Ghost runs the program, signed in as it is |
+
+**Claude Code.** When Claude Code is signed in on this computer, the first run offers it first:
+Ghost runs that program to answer you, one process per conversation, with its own tools,
+settings, hooks, plugins and apps off; Ghost's tools reach it through Ghost's own gate
+([ADR 0069](docs/adr/0069-ghost-can-run-the-operators-own-claude-code-as-its-model.md)). Ghost
+never reads or copies its sign-in and never signs it in: if it isn't signed in, run
+`claude auth login` in a terminal, then Look again. Replies count against your Claude plan's
+limits, the same ones your coding uses (or are billed to its API key, if it is signed in with
+one). Every turn counts: what you say, each tool Ghost calls and the answer after it, and
+Claude Code's own prompt on top of Ghost's. When the plan's limit is reached Ghost says so
+and answers again when it resets, or with another model you choose. Ghost doesn't use a
+second, faster model or start answering before you finish with this connection, so the first
+word is about 0.6 s after a turn ends on Haiku.
 
 Save the password from the desktop (**Settings › Passwords**) or the terminal; it is read
 without echo and never shown again:

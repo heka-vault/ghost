@@ -121,6 +121,23 @@ fn world_from(
     voice_tweak: impl FnOnce(&mut VoiceSettings),
     tweak: impl FnOnce(&mut Ports),
 ) -> World {
+    world_retrying(
+        tmp,
+        wake_mode,
+        voice_tweak,
+        tweak,
+        Duration::from_millis(200),
+    )
+}
+
+/// The same, with the models' load tried again only every `retry`.
+fn world_retrying(
+    tmp: &std::path::Path,
+    wake_mode: &str,
+    voice_tweak: impl FnOnce(&mut VoiceSettings),
+    tweak: impl FnOnce(&mut Ports),
+    retry: Duration,
+) -> World {
     let (cfg, mut voice) = settings(tmp, wake_mode);
     voice_tweak(&mut voice);
     std::fs::create_dir_all(tmp.join("rt")).unwrap();
@@ -167,7 +184,7 @@ fn world_from(
     let daemon = Arc::new(
         Daemon::new(cfg.clone(), voice, ports)
             .with_runtime_dir(tmp.join("rt"))
-            .with_models_retry(Duration::from_millis(200)),
+            .with_models_retry(retry),
     );
     let client = GhostClient::with_timeout(cfg.api_socket.clone().unwrap(), Duration::from_secs(5));
     World {
@@ -514,6 +531,118 @@ async fn a_model_that_wont_load_is_waited_for_not_a_crash() {
     }
     w.daemon.stop.cancel();
     run.await.unwrap().unwrap();
+}
+
+/// A load that fails, as the real one does, while a speech model file is not in place.
+fn needs_the_files(ports: &mut Ports) {
+    let inner = ports.load_models.clone();
+    ports.load_models = Arc::new(move |s: &VoiceSettings| {
+        let missing = ghostd::speech_models::missing(s);
+        if !missing.is_empty() {
+            anyhow::bail!("{} is not here", missing[0].dest.display());
+        }
+        inner(s)
+    });
+}
+
+/// #135: the terminal's `ghostd models fetch` finished the download (another process);
+/// the running daemon loads the files without a restart, well before its next retry,
+/// so the first run moves on and `models_ready` flips by itself.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn models_another_process_downloaded_are_loaded_without_a_restart() {
+    let tmp = tempfile::tempdir().unwrap();
+    let w = world_retrying(
+        tmp.path(),
+        "file",
+        |_| {},
+        needs_the_files,
+        Duration::from_secs(3600),
+    );
+    let run = {
+        let d = w.daemon.clone();
+        tokio::spawn(async move { d.run().await })
+    };
+    let client = &w.client;
+    until(client, "the API up with the models missing", |v| {
+        v["models_ready"] == false && v["waiting"].as_u64().unwrap_or(0) >= 1
+    })
+    .await;
+    // The other process's last rename: every file in place.
+    for f in ghostd::speech_models::missing(&w.daemon.voice()) {
+        std::fs::create_dir_all(f.dest.parent().unwrap()).unwrap();
+        std::fs::write(&f.dest, b"model").unwrap();
+    }
+    let started = Instant::now();
+    until(client, "ready once the files are here", |v| {
+        v["models_ready"] == true
+    })
+    .await;
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "noticed in {:?}, not at the next retry",
+        started.elapsed()
+    );
+    w.daemon.stop.cancel();
+    run.await.unwrap().unwrap();
+}
+
+/// #135: while the terminal's fetch holds a file's lock, the app's view of the download
+/// is that one, followed: the first run's bar moves and says it was already under way,
+/// and nothing is requested twice.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_download_another_process_is_making_is_shown_as_already_under_way() {
+    let tmp = tempfile::tempdir().unwrap();
+    let w = world_retrying(
+        tmp.path(),
+        "file",
+        |_| {},
+        needs_the_files,
+        Duration::from_secs(3600),
+    );
+    let run = {
+        let d = w.daemon.clone();
+        tokio::spawn(async move { d.run().await })
+    };
+    let client = &w.client;
+    until(client, "the API up with the models missing", |v| {
+        v["models_ready"] == false && v["waiting"].as_u64().unwrap_or(0) >= 1
+    })
+    .await;
+    // The other process: the first file's lock, held, and its `.part` growing.
+    let first = ghostd::speech_models::missing(&w.daemon.voice())
+        .remove(0)
+        .dest;
+    std::fs::create_dir_all(first.parent().unwrap()).unwrap();
+    let lock = std::fs::File::create(first.with_extension("onnx.lock")).unwrap();
+    lock.lock().unwrap();
+    let part = first.with_extension("onnx.part");
+    let view = || async {
+        client
+            .request(hyper::Method::GET, "/speech-models", None)
+            .await
+            .unwrap()
+            .body
+    };
+    let mut seen = Vec::new();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    for n in 1..=40u64 {
+        std::fs::write(&part, vec![0u8; (n * 1000) as usize]).unwrap();
+        let v = view().await;
+        if v["fetch"]["following"] == true {
+            seen.push(v["fetch"]["done_bytes"].as_u64().unwrap());
+        }
+        if seen.len() >= 3 && seen.first() < seen.last() {
+            break;
+        }
+        assert!(Instant::now() < deadline, "never followed: {v}");
+        tokio::time::sleep(Duration::from_millis(300)).await;
+    }
+    assert!(seen.first() < seen.last(), "the bar moves: {seen:?}");
+    let v = view().await;
+    assert_eq!(v["fetch"]["state"], "fetching", "{v}");
+    w.daemon.stop.cancel();
+    run.await.unwrap().unwrap();
+    drop(lock);
 }
 
 /// A stop while the models are still missing winds the daemon down cleanly.

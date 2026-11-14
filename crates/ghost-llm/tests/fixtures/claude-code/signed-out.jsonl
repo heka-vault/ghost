@@ -1,0 +1,4 @@
+{"type":"system","subtype":"init","tools":[],"mcp_servers":[],"model":"claude-haiku-5-5","claude_code_version":"2.1.325"}
+{"type":"system","subtype":"status","status":"requesting"}
+{"type":"assistant","message":{"model":"<synthetic>","id":"msg_fixture","role":"assistant","content":[{"type":"text","text":"Failed to authenticate: OAuth session expired and could not be refreshed"}]},"parent_tool_use_id":null,"error":"authentication_failed","is_api_error_message":true}
+{"type":"result","subtype":"success","is_error":true,"stop_reason":"stop_sequence","api_error_status":null,"num_turns":1,"usage":{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0},"duration_ms":59,"terminal_reason":"api_error"}

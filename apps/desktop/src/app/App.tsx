@@ -175,7 +175,7 @@ export function App() {
               {speechMissing && speech?.fetch.state === "fetching" ? (
                 <>
                   <span>
-                    <strong>Downloading Ghost’s ears and voice.</strong> {gb(speech.fetch.done_bytes)} of {gb(speech.fetch.total_bytes)}; it can’t hear or speak until they’re here.
+                    <strong>{speech.fetch.following ? "Already downloading Ghost’s ears and voice." : "Downloading Ghost’s ears and voice."}</strong> {gb(speech.fetch.done_bytes)} of {gb(speech.fetch.total_bytes)}; it can’t hear or speak until they’re here.
                   </span>
                   <Progress value={speech.fetch.total_bytes ? (speech.fetch.done_bytes / speech.fetch.total_bytes) * 100 : undefined} label="Downloading the speech models" className="shell-banner__progress" />
                 </>

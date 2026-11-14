@@ -30,6 +30,10 @@ import {
 import { environmentNote } from "./environment";
 import { Row } from "./parts";
 import { PasswordRow, passwordTitle } from "./Passwords";
+import { ClaudeCodeFix, ClaudeCodeLead } from "./ClaudeCodeCard";
+import { useOtherTools } from "../apps/OtherTools";
+import { CLAUDE_CODE, claudeCodeOffer } from "./claudeCode";
+import type { ClaudeCodeView } from "@ghost/client-ts";
 
 const CHOICES: { value: ProviderChoice; label: string; description: string }[] = [
   { value: "anthropic", label: "Anthropic", description: "Claude, with a password (API key) from the Anthropic Console." },
@@ -37,6 +41,8 @@ const CHOICES: { value: ProviderChoice; label: string; description: string }[] =
   { value: "openai-compatible", label: "OpenAI or a local model", description: "OpenAI with a password (API key), or Ollama or LM Studio on this computer." },
   { value: "custom", label: "Your own address", description: "Any address that speaks Anthropic’s or OpenAI’s API." },
 ];
+/** ADR 0069: shown only where Claude Code is installed, or already chosen. */
+const CLAUDE_CODE_CHOICE = { value: "claude-code" as ProviderChoice, label: "Claude Code", description: "The Claude Code on this computer, signed in. Ghost runs it; replies count against its plan’s limits or its key." };
 const OPENAI_COMPATIBLE_CHOICES = [
   { value: "openai", label: "OpenAI" },
   { value: "ollama", label: "Ollama" },
@@ -67,9 +73,25 @@ export interface ModelSectionProps {
   /** A password changed (saved here, or by OpenRouter's sign-in): read the settings and the
    *  connection again; `restart` names one Ghost reads only at its next start. */
   onPassword: (restart: string[]) => void;
+  /** The operator's Claude Code as the program says it is (ADR 0069); null when it isn't
+   *  installed, undefined while not yet asked. */
+  claudeCode?: ClaudeCodeView | null;
+  /** Ask the program again (Look again). */
+  lookAgain?: () => void;
+  looking?: boolean;
+  /** Say what to do about a Claude Code Ghost can't run yet even when it isn't the choice
+   *  (Settings); the first run says it above the section instead. */
+  showFix?: boolean;
 }
 
-export function ModelSection({ s, conn, values, online, mock, setValues, help, err, fieldId, waiting, onPassword }: ModelSectionProps) {
+/** Settings › Model: the section, with the operator's Claude Code asked when the page opens
+ *  (ADR 0069). The first run asks once for the whole step and passes it in. */
+export function ModelPageSection(props: Omit<ModelSectionProps, "claudeCode" | "lookAgain" | "looking">) {
+  const others = useOtherTools();
+  return <ModelSection {...props} claudeCode={others.view ? others.view.claude_code : undefined} lookAgain={() => void others.look()} looking={others.looking} />;
+}
+
+export function ModelSection({ s, conn, values, online, mock, setValues, help, err, fieldId, waiting, onPassword, claudeCode, lookAgain, looking = false, showFix = true }: ModelSectionProps) {
   const { client } = useGhost();
   const toast = useToast();
   const { confirm, dialog } = useConfirm();
@@ -82,6 +104,12 @@ export function ModelSection({ s, conn, values, online, mock, setValues, help, e
   const protocol = provider === "custom" ? eff.GHOST_LLM_PROTOCOL || "anthropic" : spec?.protocol ?? "anthropic";
   const password = (eff.GHOST_LLM_PASSWORD || (!explicit ? conn?.password : spec?.password) || "").trim();
   const keyNeeded = !!password && !(provider === "ollama" || provider === "lmstudio");
+  // ADR 0069: a program Ghost runs has no address, password or headers.
+  const program = !!spec?.program || provider === CLAUDE_CODE;
+  const ccOffer = claudeCodeOffer(claudeCode);
+  // Offered as a choice only where it can be used now (signed in, a version Ghost runs), or
+  // when it is the saved choice; a signed-out one says what to do instead.
+  const choices = ccOffer?.kind === "use" || provider === CLAUDE_CODE ? [...CHOICES, CLAUDE_CODE_CHOICE] : CHOICES;
 
   /* --------------------------------------------- its password, in Ghost's vault (ADR 0036) */
   const [vault, setVault] = useState<PasswordsView | null>(null);
@@ -281,7 +309,7 @@ export function ModelSection({ s, conn, values, online, mock, setValues, help, e
             From your older settings (<span className="set-detail">{conn.legacy}</span>). Any change here saves it as the provider below.
           </p>
         )}
-        <RadioGroup<ProviderChoice> variant="card" aria-label="Provider" value={choiceOf(provider)} onChange={pickChoice} options={CHOICES} disabled={!online} />
+        <RadioGroup<ProviderChoice> variant="card" aria-label="Provider" value={choiceOf(provider)} onChange={pickChoice} options={choices} disabled={!online} />
       </Section>
 
       <Section title={spec?.title ?? "Connection"} className="set-section">
@@ -302,6 +330,13 @@ export function ModelSection({ s, conn, values, online, mock, setValues, help, e
               </p>
             )}
             {fromEnv.keepPassword && <p>{fromEnv.keepPassword}</p>}
+          </Notice>
+        )}
+        {ccOffer?.kind === "fix" && lookAgain && (program || showFix) && <ClaudeCodeFix offer={ccOffer} look={lookAgain} looking={looking} />}
+        {program && ccOffer?.kind === "use" && <ClaudeCodeLead offer={ccOffer} chosen={(s.values.GHOST_LLM_PROVIDER ?? "").trim() === CLAUDE_CODE} />}
+        {program && claudeCode === null && (
+          <Notice tone="warn" title="Claude Code isn’t on this computer">
+            Ghost runs the Claude Code installed here, and can’t find it. Install it, or choose another way in.
           </Notice>
         )}
         <Card list>
@@ -418,7 +453,7 @@ export function ModelSection({ s, conn, values, online, mock, setValues, help, e
         </Card>
       </Section>
 
-      <Section className="set-section">
+      {!program && <Section className="set-section">
         <Disclosure summary="Advanced" defaultOpen={["GHOST_LLM_HEADERS", "GHOST_LLM_TIMEOUT_SECS", "GHOST_LLM_PASSWORD", ...(baseHere ? [] : ["GHOST_LLM_BASE_URL"])].some((k) => !!err(k) || !!(eff[k] ?? "").trim())}>
           <Card list>
             {!baseHere && <Row>{baseField}</Row>}
@@ -464,7 +499,7 @@ export function ModelSection({ s, conn, values, online, mock, setValues, help, e
             </Row>
           </Card>
         </Disclosure>
-      </Section>
+      </Section>}
     </>
   );
 }

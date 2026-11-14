@@ -177,6 +177,53 @@ pub enum LlmError {
     /// The HTTP client couldn't be built.
     #[error("the client couldn't be built: {0}")]
     Client(String),
+    /// The program Ghost runs as its model (ADR 0069: Claude Code) failed, by kind. Never
+    /// the program's own words.
+    #[error("Claude Code: {0}")]
+    Program(ProgramFailure),
+}
+
+/// How the program Ghost runs as its model failed (ADR 0069).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProgramFailure {
+    /// Not on the PATH any more.
+    Missing,
+    /// A version without a switch Ghost needs.
+    Unsupported,
+    /// Not signed in, or its sign-in expired.
+    SignedOut,
+    /// The Claude plan's usage limit is reached.
+    Limit,
+    /// The process ended partway.
+    Died,
+    /// It ended the turn with an error of its own.
+    Failed,
+}
+
+impl ProgramFailure {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ProgramFailure::Missing => "missing",
+            ProgramFailure::Unsupported => "unsupported",
+            ProgramFailure::SignedOut => "signed_out",
+            ProgramFailure::Limit => "limit",
+            ProgramFailure::Died => "died",
+            ProgramFailure::Failed => "failed",
+        }
+    }
+}
+
+impl fmt::Display for ProgramFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            ProgramFailure::Missing => "not found on this computer",
+            ProgramFailure::Unsupported => "a version Ghost can't run",
+            ProgramFailure::SignedOut => "not signed in",
+            ProgramFailure::Limit => "the plan's usage limit is reached",
+            ProgramFailure::Died => "the program stopped",
+            ProgramFailure::Failed => "the turn ended with an error",
+        })
+    }
 }
 
 /// One tiny request, timed the way `make perf-llm` times it: from just before the
@@ -353,6 +400,14 @@ pub fn spoken_failure(e: &LlmError) -> String {
         LlmError::Headers(_) | LlmError::Client(_) => {
             "Ghost can't send to the model with these settings. Check the model connection in Settings.".into()
         }
+        LlmError::Program(p) => match p {
+            ProgramFailure::Missing => "Ghost can't find Claude Code on this computer any more. Choose a model in Settings.".into(),
+            ProgramFailure::Unsupported => "Claude Code changed to a version Ghost can't run. Choose a model in Settings.".into(),
+            ProgramFailure::SignedOut => "Claude Code isn't signed in any more. Run claude auth login in a terminal, then ask me again.".into(),
+            ProgramFailure::Limit => "Your Claude plan's limit is reached for now. I can answer again when it resets, or with another model from Settings.".into(),
+            ProgramFailure::Died => "Claude Code stopped partway. Try again in a moment.".into(),
+            ProgramFailure::Failed => "Claude Code stopped with an error. Try again in a moment.".into(),
+        },
     }
 }
 

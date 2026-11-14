@@ -99,6 +99,7 @@ export type OtherToolsView = Schemas["OtherToolsView"];
 export type OtherToolView = Schemas["OtherToolView"];
 export type FoundAppView = Schemas["FoundAppView"];
 export type FoundModelView = Schemas["FoundModelView"];
+export type ClaudeCodeView = Schemas["ClaudeCodeView"];
 export type OtherImportResult = Schemas["OtherImportResult"];
 export type OtherLinkResult = Schemas["OtherLinkResult"];
 /** What connecting a tool answers, once: its token and what to paste into the tool. */

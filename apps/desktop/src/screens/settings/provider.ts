@@ -5,8 +5,9 @@
 
 type Values = Record<string, string>;
 
-/** The four ways in, as the page offers them. OpenAI, Ollama and LM Studio share one. */
-export type ProviderChoice = "anthropic" | "openrouter" | "openai-compatible" | "custom";
+/** The ways in, as the page offers them. OpenAI, Ollama and LM Studio share one; Claude Code
+ *  (ADR 0069) is offered only where it is installed. */
+export type ProviderChoice = "anthropic" | "openrouter" | "openai-compatible" | "custom" | "claude-code";
 
 /** Provider ids Ghost once offered and still reads from settings.env (ADR 0037, amended
  *  2026-11-14): the daemon reports each as the connection it resolves to, and the page never

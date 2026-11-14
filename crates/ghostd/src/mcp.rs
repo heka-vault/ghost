@@ -2,7 +2,7 @@
 //! command line, and the bridge for a tool that can only start a command.
 //!
 //! `add <name>` makes a client and prints its token and what to paste into the other tool,
-//! once. `list` and `remove <name>` are what they say; a removed client is refused by the
+//! once; `add <name> --command` keeps the token in a private file only and says where. `list` and `remove <name>` are what they say; a removed client is refused by the
 //! running daemon at its next request, since both read the same store. `serve --client
 //! <name>` speaks the protocol on stdin and stdout and forwards every message to the
 //! running daemon's listener with that client's token, read from the private file
@@ -41,6 +41,11 @@ pub const USAGE: &str =
     "usage: ghostd mcp add <name> [--command] | list | remove <name> | serve --client <name>";
 /// How long the bridge keeps trying a daemon that is not answering before it says so.
 pub const RETRY_FOR: Duration = Duration::from_secs(15);
+/// When the client's input ends, how long the bridge still waits for the answers to the
+/// requests it already read (#134): a one-shot script pipes its requests in and closes.
+/// Ten minutes, the most a run with nobody there takes (ADR 0047), so an `agent_ask`
+/// is answered; a call that is quicker ends the wait as soon as it is answered.
+pub const DRAIN_FOR: Duration = Duration::from_secs(600);
 /// JSON-RPC's range for a server's own errors.
 const NOT_REACHABLE: i32 = -32001;
 
@@ -75,7 +80,8 @@ pub fn connect_address(cfg: &GhostdSettings) -> Option<String> {
     })
 }
 
-/// `ghostd mcp add|list|remove`. The token is printed by `add` and nowhere else.
+/// `ghostd mcp add|list|remove`. The token is printed by `add` without `--command` and
+/// nowhere else.
 pub fn mcp_cli(
     args: &[String],
     cfg: &GhostdSettings,
@@ -119,12 +125,13 @@ pub fn mcp_cli_in(
                 Err(e) => return fail(err, e),
             };
             let name = &made.client.name;
-            let _ = writeln!(out, "Connected {name}. Its token, shown this once:\n");
-            let _ = writeln!(out, "  {}\n", *made.token);
             let snippets = if command {
+                // The token is in a file only the operator can read, and the bridge reads it
+                // there: printing it would only put it in a terminal's (or an agent's)
+                // transcript (#136).
                 let _ = writeln!(
                     out,
-                    "Ghost keeps it in {} (only you can read it), and the tool runs ghostd to reach Ghost.\n",
+                    "Connected {name}. Its token is saved in {} (only you can read it), and the tool runs ghostd to reach Ghost.\n",
                     made.token_file
                         .as_ref()
                         .map(|p| p.display().to_string())
@@ -132,6 +139,10 @@ pub fn mcp_cli_in(
                 );
                 stdio_snippets(name, ghostd.as_deref().unwrap_or("ghostd"))
             } else {
+                // A tool that connects by address needs the token itself, and this is the
+                // only time it exists outside Ghost's hash.
+                let _ = writeln!(out, "Connected {name}. Its token, shown this once:\n");
+                let _ = writeln!(out, "  {}\n", *made.token);
                 let address = connect_address(cfg).unwrap_or_else(|| DEFAULT_LISTEN.to_string());
                 if cfg.mcp_listen.trim().is_empty() {
                     let _ = writeln!(
@@ -258,6 +269,8 @@ struct Bridge {
     initialized: Option<ClientJsonRpcMessage>,
     /// The answers to an `initialize` said again: the client already has its own.
     swallow: HashSet<RequestId>,
+    /// The client's requests not answered yet, which it still gets after its input ends.
+    pending: HashSet<RequestId>,
 }
 
 /// A tool call gets a key of its own before its first send, so that sending it again
@@ -276,6 +289,27 @@ pub fn with_idempotency_key(mut msg: ClientJsonRpcMessage) -> ClientJsonRpcMessa
         }
     }
     msg
+}
+
+/// [`Bridge::swallowed`] over the two sets, for where the connection is borrowed too.
+fn swallowed_in(
+    swallow: &mut HashSet<RequestId>,
+    pending: &mut HashSet<RequestId>,
+    msg: &ServerJsonRpcMessage,
+) -> bool {
+    let id = match msg {
+        ServerJsonRpcMessage::Response(r) => Some(&r.id),
+        ServerJsonRpcMessage::Error(e) => e.id.as_ref(),
+        _ => None,
+    };
+    let Some(id) = id else {
+        return false;
+    };
+    if swallow.remove(id) {
+        return true;
+    }
+    pending.remove(id);
+    false
 }
 
 fn is_init(msg: &ClientJsonRpcMessage) -> bool {
@@ -306,14 +340,10 @@ impl Bridge {
         }
     }
 
+    /// Whether `msg` answers an `initialize` said again (the client never sees it); an
+    /// answer to the client's own request is crossed off `pending`.
     fn swallowed(&mut self, msg: &ServerJsonRpcMessage) -> bool {
-        match msg {
-            ServerJsonRpcMessage::Response(r) => self.swallow.remove(&r.id),
-            ServerJsonRpcMessage::Error(e) => {
-                e.id.as_ref().is_some_and(|id| self.swallow.remove(id))
-            }
-            _ => false,
-        }
+        swallowed_in(&mut self.swallow, &mut self.pending, msg)
     }
 
     /// The next message from the daemon; never, while nothing is connected.
@@ -341,14 +371,7 @@ impl Bridge {
             };
             match got {
                 Some(m) => {
-                    let mine = match &m {
-                        ServerJsonRpcMessage::Response(r) => self.swallow.remove(&r.id),
-                        ServerJsonRpcMessage::Error(e) => {
-                            e.id.as_ref().is_some_and(|id| self.swallow.remove(id))
-                        }
-                        _ => false,
-                    };
-                    if !mine {
+                    if !swallowed_in(&mut self.swallow, &mut self.pending, &m) {
                         down.send(m).await.map_err(|e| e.to_string())?;
                     }
                 }
@@ -427,7 +450,8 @@ impl Bridge {
 }
 
 /// The bridge: every message read from `reader` goes to the daemon at `target`, and
-/// every message from the daemon is written to `writer`. It ends when the reader does.
+/// every message from the daemon is written to `writer`. It ends when the reader does,
+/// once the requests it read are answered (within [`DRAIN_FOR`]).
 pub async fn bridge<R, W>(reader: R, writer: W, target: Target) -> std::io::Result<()>
 where
     R: AsyncRead + Send + Unpin + 'static,
@@ -440,6 +464,7 @@ where
         init: None,
         initialized: None,
         swallow: HashSet::new(),
+        pending: HashSet::new(),
     };
     loop {
         tokio::select! {
@@ -452,7 +477,18 @@ where
                 } else if is_initialized(&msg) {
                     b.initialized = Some(msg.clone());
                 }
+                // Before it goes up: its answer may come back while it is being sent.
+                let asked = match &msg {
+                    ClientJsonRpcMessage::Request(r) => Some(r.id.clone()),
+                    _ => None,
+                };
+                if let Some(id) = &asked {
+                    b.pending.insert(id.clone());
+                }
                 if let Some(error) = b.forward(msg, &mut down).await {
+                    if let Some(id) = &asked {
+                        b.pending.remove(id);
+                    }
                     down.send(error).await?;
                 }
             }
@@ -464,6 +500,17 @@ where
                 }
                 None => b.drop_up().await,
             },
+        }
+    }
+    // The input ended: what was asked is still answered, within DRAIN_FOR (#134).
+    let deadline = tokio::time::Instant::now() + DRAIN_FOR;
+    while !b.pending.is_empty() && b.up.is_some() {
+        let Ok(msg) = tokio::time::timeout_at(deadline, b.next()).await else {
+            break;
+        };
+        let Some(m) = msg else { break };
+        if !b.swallowed(&m) {
+            down.send(m).await?;
         }
     }
     b.drop_up().await;

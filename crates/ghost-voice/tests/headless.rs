@@ -1523,3 +1523,127 @@ async fn what_ghosts_own_app_costs_every_turn() {
     assert_eq!(all.len(), 35, "{all:?}");
     assert!(all_bytes > bytes * 2);
 }
+
+// --- the operator's own Claude Code (ADR 0069) ------------------------------------------
+
+/// A fake `claude` (ghost-llm's, speaking the recorded stream-json) in a temp home, its
+/// scenario `turns`.
+fn fake_claude(
+    tmp: &Path,
+    turns: Value,
+) -> (ghost_llm::claude_code::ClaudeCode, std::path::PathBuf) {
+    use std::os::unix::fs::PermissionsExt;
+    let fixtures = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../ghost-llm/tests/fixtures/claude-code"
+    );
+    let help = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../ghost-core/src/other_tools/fixtures/claude-help.txt"
+    );
+    let home = tmp.join("home");
+    let dir = home.join(".fake-claude");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("scenario.json"),
+        json!({"help": help, "turns": turns}).to_string(),
+    )
+    .unwrap();
+    let bin = tmp.join("claude");
+    std::fs::write(
+        &bin,
+        format!("#!/bin/sh\nexec python3 -I {fixtures}/fake_claude.py \"$@\"\n"),
+    )
+    .unwrap();
+    std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let started: HashMap<String, String> = [
+        ("HOME".to_string(), home.display().to_string()),
+        ("PATH".to_string(), std::env::var("PATH").unwrap()),
+    ]
+    .into_iter()
+    .collect();
+    let mut settings = ghost_llm::claude_code::Settings::new(bin, "haiku", started);
+    settings.runtime_dir = tmp.join("run");
+    let cc = ghost_llm::claude_code::ClaudeCode::new(settings);
+    (cc, dir)
+}
+
+#[tokio::test]
+async fn claude_codes_calls_go_through_the_gate_and_a_change_at_ask_is_never_made() {
+    let tmp = tempfile::tempdir().unwrap();
+    let w = world(tmp.path()).await;
+    let change = |op: &str, name: &str| json!({"tool": "change", "input": {"ability": "fake", "operation": op, "args": {"name": name}}});
+    let (cc, dir) = fake_claude(
+        tmp.path(),
+        json!([[
+            {"tool": "echo", "input": {"x": "main"}},
+            change("flag", "readme"),
+            change("nuke", "archive"),
+            {"text": "Flagged the readme. Clearing the archive is waiting for your yes."}
+        ]]),
+    );
+    let cc = Arc::new(cc);
+    let runner = HeadlessRunner::new(HeadlessParts {
+        conversations: w.convs.clone(),
+        gate: w.gate.clone(),
+        reach: w.reach.clone(),
+        model: {
+            let cc = cc.clone();
+            Arc::new(move || Ok(cc.clone() as Arc<dyn ModelPort>))
+        },
+        options: Options::default(),
+        skills: None,
+    });
+    let out = tokio::time::timeout(
+        Duration::from_secs(60),
+        runner.run(request("ledger", "nuke archive, then flag readme")),
+    )
+    .await
+    .expect("the run ended");
+    assert_eq!(out.ended, Ended::Done, "{out:?}");
+    assert_eq!(
+        out.answer,
+        "Flagged the readme. Clearing the archive is waiting for your yes."
+    );
+    // Each call reached Ghost's dispatcher and the gate, one at a time as the program made
+    // them: the read was read, the change made and audited, the one at `ask` set aside.
+    assert_eq!(w.reads.load(Ordering::SeqCst), 1);
+    assert!(w.flagged("readme"));
+    assert!(
+        !w.flagged("archive"),
+        "nothing the program sends is the operator's yes"
+    );
+    assert_eq!(out.set_aside.len(), 1);
+    let waiting = w.gate.waiting(None).unwrap();
+    assert_eq!(waiting.len(), 1);
+    assert_eq!(waiting[0].operation, "nuke");
+    assert_eq!(waiting[0].status, ProposalStatus::Pending);
+    let (audit, _) = w
+        .store
+        .list_proposals(&ProposalQuery {
+            limit: 10,
+            ability: Some("fake"),
+            ..Default::default()
+        })
+        .unwrap();
+    assert!(audit.iter().all(|p| p.session_id == "run-r1"));
+    // What the program was answered is what the gate said: the result of each call.
+    let results: Vec<Value> = std::fs::read_to_string(dir.join("results.jsonl"))
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(results.len(), 3);
+    assert!(
+        results
+            .iter()
+            .all(|r| r["answer"]["result"]["isError"] == false)
+    );
+    let nuke = results[2]["answer"]["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap();
+    assert!(
+        nuke.contains("set_aside") || nuke.contains("waiting"),
+        "{nuke}"
+    );
+}

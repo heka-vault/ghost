@@ -227,6 +227,29 @@ pub type Play = Arc<
 >;
 pub type DuckFactory = Arc<dyn Fn(&GhostdSettings, PathBuf) -> Arc<dyn Duck> + Send + Sync>;
 
+/// The operator's own Claude Code for `target`, when the connection is that provider (ADR
+/// 0069): the program found on `env`'s PATH (the environment Ghost runs in; only its
+/// `HOME`, `PATH`, `USER` and `LANG` reach the program). Not found, it is still made, and
+/// its first turn says so aloud rather than the session failing silently.
+pub fn claude_code_for(
+    target: &ghost_core::connection::Target,
+    env: &HashMap<String, String>,
+) -> Option<ghost_llm::claude_code::ClaudeCode> {
+    if target.provider != ghost_core::connection::CLAUDE_CODE {
+        return None;
+    }
+    let binary = ghost_core::other_tools::program::which(env.get("PATH").map(String::as_str))
+        .unwrap_or_default();
+    // Only what the clean environment is built from: none of the vault's values.
+    let started: HashMap<String, String> = ["HOME", "PATH", "USER", "LANG"]
+        .into_iter()
+        .filter_map(|k| env.get(k).map(|v| (k.to_string(), v.clone())))
+        .collect();
+    Some(ghost_llm::claude_code::ClaudeCode::new(
+        ghost_llm::claude_code::Settings::new(binary, target.model.clone(), started),
+    ))
+}
+
 /// The parts of the daemon a test stands in for. `live` is the workstation's.
 #[derive(Clone)]
 pub struct Ports {
@@ -273,6 +296,10 @@ impl Ports {
             load_models: Arc::new(Models::load),
             model: Arc::new(|voice, env| {
                 let target = voice.llm_target(Some(env));
+                if let Some(cc) = claude_code_for(&target, env) {
+                    // A process of its own per session and per run (ADR 0069).
+                    return Ok(Arc::new(cc) as Arc<dyn ModelPort>);
+                }
                 Ok(ghost_llm::model::shared(&target)? as Arc<dyn ModelPort>)
             }),
             fast_model: Arc::new(|voice, env| {
@@ -496,6 +523,9 @@ const PLAN_FOR: Duration = Duration::from_secs(10);
 /// supervisor a crash would be a restart loop with nothing to read; the waiting list
 /// says what is missing instead).
 pub const MODELS_RETRY: std::time::Duration = std::time::Duration::from_secs(15);
+/// While speech model files are missing, how often the daemon looks whether another
+/// process (the terminal's `ghostd models fetch`) finished or is downloading them (#135).
+pub const SPEECH_MODELS_LOOK: std::time::Duration = std::time::Duration::from_secs(1);
 /// The waiting list's key for it.
 pub const MODELS_PROBLEM_KEY: &str = "models:missing";
 /// The waiting list's key while the sound output plays nothing (#117).
@@ -1892,7 +1922,11 @@ impl Daemon {
                 if !voice.llm_problems(Some(&env)).is_empty() {
                     return None;
                 }
-                ghost_llm::model::shared(&voice.llm_target(Some(&env)))
+                let target = voice.llm_target(Some(&env));
+                if let Some(cc) = claude_code_for(&target, &env) {
+                    return Some(Arc::new(cc) as Arc<dyn Completer>);
+                }
+                ghost_llm::model::shared(&target)
                     .ok()
                     .map(|m| m as Arc<dyn Completer>)
             }
@@ -2305,9 +2339,11 @@ impl Daemon {
                         crate::speech_models::missing_note(&missing)
                     });
                     d.refresh_waiting_now();
+                    let files_missing = !missing.is_empty();
                     tokio::select! {
                         _ = tokio::time::sleep(d.models_retry) => {}
                         _ = d.models_kick.notified() => {}
+                        _ = d.watch_speech_models(), if files_missing => {}
                         _ = d.stop.cancelled() => break None,
                     }
                 }
@@ -2670,6 +2706,31 @@ impl Daemon {
                 *lock(&self.conversations) = Some(c);
             }
             Err(e) => warn!("conversations: the voices could not be bound: {e}"),
+        }
+    }
+
+    /// While speech model files are missing (#135), once a second: returns when every
+    /// file is here, whoever downloaded it, so the load is tried at once (the first run
+    /// moves on and `models_ready` flips with no restart); and when another process is
+    /// downloading one, the app's own download follows it, so the first run shows its
+    /// progress and picks it up if that process goes away. Seven `stat`s and at most
+    /// seven lock probes a second, only until the models load: never on a turn.
+    async fn watch_speech_models(self: &Arc<Self>) {
+        loop {
+            tokio::time::sleep(SPEECH_MODELS_LOOK).await;
+            let wanted = crate::speech_models::missing(&self.voice());
+            if wanted.is_empty() {
+                info!("speech models: every file is here; loading them");
+                return;
+            }
+            if wanted
+                .iter()
+                .any(|w| crate::speech_models::held_elsewhere(&w.dest))
+                && let Err(e) =
+                    ghost_api::speech_models::SpeechModelsPort::fetch(self.speech_models().as_ref())
+            {
+                warn!("speech models: {e}");
+            }
         }
     }
 

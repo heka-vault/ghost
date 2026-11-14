@@ -113,6 +113,22 @@ impl Decider for ModelDecider {
 
 /// The model client is the completer: the same connection as the voice (ADR 0037).
 #[async_trait]
+/// The operator's Claude Code (ADR 0069): the program run once, with no tools.
+#[async_trait]
+impl Completer for ghost_llm::claude_code::ClaudeCode {
+    async fn complete(
+        &self,
+        system: &str,
+        user: &str,
+        _max_tokens: u32,
+    ) -> Result<String, CompleteError> {
+        ghost_llm::claude_code::ClaudeCode::complete(self, system, user)
+            .await
+            .map_err(|e| CompleteError(e.to_string()))
+    }
+}
+
+#[async_trait]
 impl Completer for ghost_llm::model::Model {
     async fn complete(
         &self,

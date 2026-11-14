@@ -90,7 +90,7 @@ export interface Scenario {
    * The AI tools already on this computer (ADR 0068): none (today's first run), Claude Code and
    * Cursor with five apps and Ollama running (`found`), or Cursor with a file Ghost can't read.
    */
-  otherTools?: "none" | "found" | "malformed";
+  otherTools?: "none" | "found" | "malformed" | "claude-plan" | "claude-key" | "claude-signedout" | "claude-unsupported";
 }
 
 export const SCENARIOS: Scenario[] = [
@@ -104,6 +104,10 @@ export const SCENARIOS: Scenario[] = [
   { name: "disconnected", label: "Not running", description: "ghostd is not running.", daemon: false, phase: "passive", modelsReady: false, session: null, pending: false, configured: true, data: "normal" },
   { name: "firstrun", label: "First run", description: "Installed, no passwords or model set yet.", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: false, data: "empty" },
   { name: "firstrun-found", label: "First run, tools found", description: "Installed, nothing set; Claude Code and Cursor are on this computer with five apps between them, and Ollama is running.", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: false, data: "empty", otherTools: "found" },
+  { name: "firstrun-claude", label: "First run, Claude Code signed in", description: "Installed, nothing set; Claude Code is on this computer and signed in with a Claude plan.", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: false, data: "empty", otherTools: "claude-plan" },
+  { name: "firstrun-claude-key", label: "First run, Claude Code with a key", description: "Installed, nothing set; Claude Code is signed in with an API key.", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: false, data: "empty", otherTools: "claude-key" },
+  { name: "firstrun-claude-signedout", label: "First run, Claude Code signed out", description: "Installed, nothing set; Claude Code is on this computer and not signed in.", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: false, data: "empty", otherTools: "claude-signedout" },
+  { name: "firstrun-claude-old", label: "First run, an old Claude Code", description: "Installed, nothing set; Claude Code is a version without the switches Ghost needs.", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: false, data: "empty", otherTools: "claude-unsupported" },
   { name: "firstrun-malformed", label: "First run, a file Ghost can't read", description: "Installed, nothing set; Cursor is here, and its mcp.json isn't JSON.", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: false, data: "empty", otherTools: "malformed" },
   { name: "empty", label: "Empty", description: "Configured, but nothing has happened yet.", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: true, data: "empty" },
   { name: "expiring", label: "Okay running out", description: "A confirm-level change that expires 8 seconds after load.", daemon: true, phase: "listening", modelsReady: true, session: "ghost", pending: true, configured: true, data: "normal", pendingExpiresIn: 8 },

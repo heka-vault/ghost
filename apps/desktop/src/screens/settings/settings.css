@@ -253,3 +253,8 @@
   font-family: var(--font-mono); font-size: var(--text-xs); line-height: var(--leading-xs); white-space: pre;
   background: var(--bg-sunken); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
 }
+
+/* ADR 0069: the operator's own Claude Code, as the model step leads with it. */
+.claude-code-lead.is-selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-soft); }
+.claude-code-lead + .g-card, .claude-code-lead { margin-bottom: var(--space-4); }
+.claude-code-lead__else { display: flex; justify-content: flex-end; padding: 0 var(--space-3) var(--space-3); }
