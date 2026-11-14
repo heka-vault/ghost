@@ -6,7 +6,7 @@
 # (Kokoro's split for the windowed voice and its measurements, ADR 0053).
 [project]
 name = "ghost"
-version = "2026.10.0"
+version = "2026.11.0"
 description = "Ghost: a voice-first assistant that triages GitHub issues on one Linux workstation"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
