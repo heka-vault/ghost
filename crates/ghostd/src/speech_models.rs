@@ -12,6 +12,17 @@
 //! written is ever read as a model. A file cut off part way resumes where it stopped. The
 //! daemon's model load, which waits for missing files (ADR 0038), is woken when the
 //! download ends. Nothing here is sent anywhere but the GETs, which carry no identifier.
+//!
+//! One download per file, whoever starts it (#135): the terminal's `ghostd models fetch`,
+//! the app's first run, a second `fetch` and a restarted daemon all share the folder, not a
+//! process. Before a byte is asked for, the fetcher takes an advisory lock (`flock`) on
+//! `<file>.lock` beside the `.part`. The kernel lets it go when the holder closes it or
+//! dies, so a crashed download never blocks the next. A fetcher that cannot take it asks
+//! for nothing: it follows, reading the holder's progress from the size of the `.part`
+//! four times a second and trying the lock each time; when the file is in place it checks
+//! it against the pin, and when the holder went away without it, it takes the lock and
+//! carries on from the `.part`. Where the lock cannot be taken at all (a file system with
+//! no `flock`), each fetcher downloads as before, said at debug level.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -26,7 +37,7 @@ use ghost_api::speech_models::{
 use ghost_voice::config::VoiceSettings;
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 /// One file, as `scripts/models.sh` pins it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -192,6 +203,59 @@ fn part_path(dest: &Path) -> PathBuf {
     dest.with_file_name(name)
 }
 
+/// The advisory lock beside a file's `.part`; removed once the file is in place.
+fn lock_path(dest: &Path) -> PathBuf {
+    let mut name = dest.file_name().unwrap_or_default().to_os_string();
+    name.push(".lock");
+    dest.with_file_name(name)
+}
+
+/// How often a follower reads the holder's progress and tries the lock again: the app's
+/// bar lags the download by this at most, and nothing spins.
+const FOLLOW_TICK: Duration = Duration::from_millis(250);
+
+/// Whose turn it is to download a file.
+enum Turn {
+    /// This fetcher holds the lock until the `File` is dropped (or the process dies).
+    Mine(std::fs::File),
+    /// Another fetcher, in this process or another, holds it.
+    Busy,
+    /// The folder takes no locks; download as before.
+    NoLocks(String),
+}
+
+fn take_turn(dest: &Path) -> Turn {
+    let path = lock_path(dest);
+    let file = match std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&path)
+    {
+        Ok(f) => f,
+        Err(e) => return Turn::NoLocks(format!("{}: {e}", path.display())),
+    };
+    match file.try_lock() {
+        Ok(()) => Turn::Mine(file),
+        Err(std::fs::TryLockError::WouldBlock) => Turn::Busy,
+        Err(std::fs::TryLockError::Error(e)) => Turn::NoLocks(format!("{}: {e}", path.display())),
+    }
+}
+
+/// Whether another fetcher is downloading this file now. Makes no lock file: one that is
+/// not there is held by nobody. Taken and let go at once when free.
+pub fn held_elsewhere(dest: &Path) -> bool {
+    let Ok(file) = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(lock_path(dest))
+    else {
+        return false;
+    };
+    matches!(file.try_lock(), Err(std::fs::TryLockError::WouldBlock))
+}
+
 fn gb(bytes: u64) -> String {
     format!("{:.1} GB", bytes as f64 / 1e9)
 }
@@ -221,13 +285,14 @@ pub async fn fetch_all(
     let mut done = 0u64;
     for w in wanted {
         let before = done;
-        let report = |n: u64| {
+        let report = |n: u64, following: bool| {
             progress(&SpeechModelsFetch {
                 state: SpeechModelsFetchState::Fetching,
                 done_bytes: before + n,
                 total_bytes: total,
                 file: Some(w.pin.name.to_string()),
                 error: None,
+                following,
             })
         };
         fetch_one(client, w, &report).await?;
@@ -236,11 +301,13 @@ pub async fn fetch_all(
     Ok(())
 }
 
-/// One file into place, or Err in plain words with nothing of a bad file kept.
+/// One file into place, by this fetcher or by the one that holds its lock; Err in plain
+/// words with nothing of a bad file kept. `report` gets the bytes there so far and
+/// whether another fetcher is the one fetching them.
 async fn fetch_one(
     client: &reqwest::Client,
     w: &Wanted,
-    report: &(dyn Fn(u64) + Send + Sync),
+    report: &(dyn Fn(u64, bool) + Send + Sync),
 ) -> Result<(), String> {
     let dir = w
         .dest
@@ -249,6 +316,94 @@ async fn fetch_one(
     tokio::fs::create_dir_all(dir)
         .await
         .map_err(|e| format!("Ghost cannot make {}: {e}", dir.display()))?;
+    let mine = |n: u64| report(n, false);
+    let mut following = false;
+    loop {
+        if w.dest.is_file() {
+            // Put in place by the fetcher this one followed (or before the list was made).
+            report(w.pin.size, following);
+            return check_placed(w).await;
+        }
+        match take_turn(&w.dest) {
+            Turn::Mine(lock) => {
+                if w.dest.is_file() {
+                    continue;
+                }
+                if following {
+                    info!(
+                        "speech models: the other download of {} stopped; carrying on from it",
+                        w.pin.name
+                    );
+                }
+                let r = download(client, w, &mine).await;
+                if r.is_ok() {
+                    // In place first, so whoever opened the old lock finds the file.
+                    let _ = std::fs::remove_file(lock_path(&w.dest));
+                }
+                drop(lock);
+                return r;
+            }
+            Turn::Busy => {
+                if !following {
+                    info!(
+                        "speech models: {} is already downloading; following it",
+                        w.pin.name
+                    );
+                    following = true;
+                }
+                // The holder's `.part`, which only grows by what it wrote. Gone between
+                // the holder's rename and the next look: nothing new to say.
+                if let Ok(m) = tokio::fs::metadata(part_path(&w.dest)).await {
+                    report(m.len().min(w.pin.size), true);
+                }
+                tokio::time::sleep(FOLLOW_TICK).await;
+            }
+            Turn::NoLocks(e) => {
+                debug!("speech models: no lock here ({e}); downloading without one");
+                return download(client, w, &mine).await;
+            }
+        }
+    }
+}
+
+/// A file another fetcher put in place, checked against its pin like one fetched here.
+/// One that is not the pin is removed, so the next fetch gets it again.
+async fn check_placed(w: &Wanted) -> Result<(), String> {
+    let p = w.dest.clone();
+    let (size, hash) = tokio::task::spawn_blocking(move || -> std::io::Result<(u64, String)> {
+        let mut h = Sha256::new();
+        let mut f = std::fs::File::open(&p)?;
+        let mut buf = vec![0u8; 1 << 20];
+        let mut n_all = 0u64;
+        loop {
+            let n = f.read(&mut buf)?;
+            if n == 0 {
+                return Ok((n_all, hex::encode(h.finalize())));
+            }
+            n_all += n as u64;
+            h.update(&buf[..n]);
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| format!("Ghost cannot read {}: {e}", w.dest.display()))?;
+    if size == w.pin.size && hash == w.pin.sha256 {
+        return Ok(());
+    }
+    let _ = tokio::fs::remove_file(&w.dest).await;
+    Err(format!(
+        "{} on this computer is not the file Ghost expects (its SHA-256 does not match the \
+         pin), so it was removed. Try again",
+        w.pin.name
+    ))
+}
+
+/// The download itself, by the fetcher whose turn it is.
+async fn download(
+    client: &reqwest::Client,
+    w: &Wanted,
+    report: &(dyn Fn(u64) + Send + Sync),
+) -> Result<(), String> {
     let part = part_path(&w.dest);
     // What a stopped download left: hashed again, then asked for from where it ends.
     let mut have = tokio::fs::metadata(&part)
@@ -441,6 +596,7 @@ impl SpeechModelsPort for SpeechModelsDesk {
             total_bytes: total,
             file: wanted.first().map(|w| w.pin.name.to_string()),
             error: None,
+            following: false,
         };
         let state = self.state.clone();
         let running = self.running.clone();
@@ -465,6 +621,7 @@ impl SpeechModelsPort for SpeechModelsDesk {
                         s.done_bytes = s.total_bytes;
                         s.file = None;
                         s.error = None;
+                        s.following = false;
                     }
                     Err(e) => {
                         warn!("speech models: {e}");
@@ -476,6 +633,7 @@ impl SpeechModelsPort for SpeechModelsDesk {
                         }
                         s.state = SpeechModelsFetchState::Failed;
                         s.error = Some(e);
+                        s.following = false;
                     }
                 }
             }
@@ -487,10 +645,14 @@ impl SpeechModelsPort for SpeechModelsDesk {
 }
 
 /// `ghostd models` and `ghostd models fetch`: the same files and pins, from a terminal.
+/// Only progress and the outcome go to `out` (stdout); log lines go to stderr (#139).
+/// `tty` is whether `out` is a terminal: there one line is redrawn, elsewhere (a log file,
+/// a pipe) a line is written per percent at most.
 pub async fn cli(
     args: &[String],
     voice: &VoiceSettings,
     out: &mut (dyn std::io::Write + Send),
+    tty: bool,
 ) -> i32 {
     let wanted = missing(voice);
     match args.first().map(String::as_str) {
@@ -516,38 +678,110 @@ pub async fn cli(
             );
             1
         }
-        Some("fetch") => {
-            if wanted.is_empty() {
-                let _ = writeln!(out, "every speech model is here");
-                return 0;
-            }
-            let last = Mutex::new((String::new(), 0u64));
-            let progress = |p: &SpeechModelsFetch| {
-                let mut l = last.lock().unwrap_or_else(|e| e.into_inner());
-                let file = p.file.clone().unwrap_or_default();
-                let pct = (p.done_bytes * 100).checked_div(p.total_bytes).unwrap_or(0);
-                if file != l.0 || pct >= l.1 + 5 {
-                    eprintln!("{pct:>3}% {file}");
-                    *l = (file, pct);
-                }
-            };
-            match fetch_all(&client(), &wanted, &progress).await {
-                Ok(()) => {
-                    let _ = writeln!(out, "every speech model is here");
-                    0
-                }
-                Err(e) => {
-                    let _ = writeln!(out, "{e}");
-                    1
-                }
-            }
-        }
+        Some("fetch") => fetch_cli(&client(), &wanted, out, tty).await,
         Some(other) => {
             let _ = writeln!(
                 out,
                 "unknown: ghostd models {other}; ghostd models [list|fetch]"
             );
             2
+        }
+    }
+}
+
+/// `ghostd models fetch` over `wanted`: progress lines, then the outcome.
+async fn fetch_cli(
+    http: &reqwest::Client,
+    wanted: &[Wanted],
+    out: &mut (dyn std::io::Write + Send),
+    tty: bool,
+) -> i32 {
+    if wanted.is_empty() {
+        let _ = writeln!(out, "every speech model is here");
+        return 0;
+    }
+    let printer = Mutex::new((Printer::new(tty), out));
+    let progress = |p: &SpeechModelsFetch| {
+        let mut g = printer.lock().unwrap_or_else(|e| e.into_inner());
+        let (printer, out) = &mut *g;
+        if let Some(text) = printer.line(p) {
+            let _ = out.write_all(text.as_bytes());
+            let _ = out.flush();
+        }
+    };
+    let result = fetch_all(http, wanted, &progress).await;
+    let (printer, out) = printer.into_inner().unwrap_or_else(|e| e.into_inner());
+    let end = if printer.open_line { "\n" } else { "" };
+    match result {
+        Ok(()) => {
+            let _ = writeln!(out, "{end}every speech model is here");
+            0
+        }
+        Err(e) => {
+            let _ = writeln!(out, "{end}{e}");
+            1
+        }
+    }
+}
+
+/// What `ghostd models fetch` prints for each report: a line when the percent or the file
+/// changes, and once, in words, when the download was already under way elsewhere or
+/// when this process took it over.
+struct Printer {
+    tty: bool,
+    file: String,
+    pct: Option<u64>,
+    following: bool,
+    said_following: bool,
+    /// A terminal's line redrawn with `\r`, not yet ended.
+    open_line: bool,
+}
+
+impl Printer {
+    fn new(tty: bool) -> Self {
+        Self {
+            tty,
+            file: String::new(),
+            pct: None,
+            following: false,
+            said_following: false,
+            open_line: false,
+        }
+    }
+
+    fn line(&mut self, p: &SpeechModelsFetch) -> Option<String> {
+        let file = p.file.clone().unwrap_or_default();
+        let pct = (p.done_bytes * 100).checked_div(p.total_bytes).unwrap_or(0);
+        let was_following = self.following;
+        self.following = p.following;
+        let words = if p.following && !self.said_following {
+            self.said_following = true;
+            Some(format!(
+                "Already downloading: {pct}% {file} (another Ghost started it; this follows it)"
+            ))
+        } else if was_following && !p.following && p.done_bytes < p.total_bytes {
+            Some(format!(
+                "The other download stopped; carrying on from {pct}% {file}"
+            ))
+        } else {
+            None
+        };
+        let changed = file != self.file || self.pct.is_none_or(|last| pct > last);
+        self.file = file.clone();
+        self.pct = Some(pct);
+        let end = if self.open_line { "\n" } else { "" };
+        if let Some(words) = words {
+            self.open_line = false;
+            return Some(format!("{end}{words}\n"));
+        }
+        if !changed {
+            return None;
+        }
+        if self.tty {
+            self.open_line = true;
+            Some(format!("\r{pct:>3}% {file}\x1b[K"))
+        } else {
+            Some(format!("{pct:>3}% {file}\n"))
         }
     }
 }
@@ -686,6 +920,394 @@ mod tests {
         let w = wanted(url, b"x", dir.path().join("m"));
         let e = fetch_all(&client(), &[w], &|_| {}).await.unwrap_err();
         assert!(e.starts_with("Ghost could not reach 127.0.0.1"), "{e}");
+    }
+
+    /// A slow file server that counts its requests: `chunks` pieces of `body`, `pause`
+    /// apart, honouring one Range request.
+    struct Slow {
+        url: String,
+        requests: Arc<std::sync::atomic::AtomicUsize>,
+        /// The `Range` start each request asked for, in order.
+        ranges: Arc<Mutex<Vec<Option<usize>>>>,
+    }
+
+    async fn serve_slow(body: Vec<u8>, chunks: usize, pause: Duration) -> Slow {
+        #[derive(Clone)]
+        struct S {
+            body: Arc<Vec<u8>>,
+            chunks: usize,
+            pause: Duration,
+            requests: Arc<std::sync::atomic::AtomicUsize>,
+            ranges: Arc<Mutex<Vec<Option<usize>>>>,
+        }
+        async fn file(State(s): State<S>, headers: HeaderMap) -> axum::response::Response {
+            s.requests.fetch_add(1, Ordering::SeqCst);
+            let from = headers
+                .get("range")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.strip_prefix("bytes="))
+                .and_then(|v| v.strip_suffix('-'))
+                .and_then(|v| v.parse::<usize>().ok());
+            s.ranges.lock().unwrap().push(from);
+            let status = if from.is_some() {
+                StatusCode::PARTIAL_CONTENT
+            } else {
+                StatusCode::OK
+            };
+            let rest = s.body[from.unwrap_or(0)..].to_vec();
+            let size = rest.len().div_ceil(s.chunks).max(1);
+            let pieces: Vec<Vec<u8>> = rest.chunks(size).map(<[u8]>::to_vec).collect();
+            let pause = s.pause;
+            let stream = futures::stream::iter(pieces).then(move |p| async move {
+                tokio::time::sleep(pause).await;
+                Ok::<_, std::io::Error>(p)
+            });
+            (status, axum::body::Body::from_stream(stream)).into_response()
+        }
+        let requests = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let ranges = Arc::new(Mutex::new(Vec::new()));
+        let app = axum::Router::new()
+            .route("/f", axum::routing::get(file))
+            .with_state(S {
+                body: Arc::new(body),
+                chunks,
+                pause,
+                requests: requests.clone(),
+                ranges: ranges.clone(),
+            });
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = l.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(l, app).await.unwrap() });
+        Slow {
+            url: format!("http://{addr}/f"),
+            requests,
+            ranges,
+        }
+    }
+
+    /// #135: the terminal's fetch and the app's, on one folder at once, are one download.
+    /// Each fetcher here has its own state, as two processes would; only the folder is
+    /// shared.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn two_fetchers_on_one_folder_make_one_request_and_both_end_ready() {
+        let body: Vec<u8> = (0..400_000u32).map(|i| (i % 253) as u8).collect();
+        let stub = serve_slow(body.clone(), 40, Duration::from_millis(20)).await;
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("model.onnx");
+        let run = |w: Wanted| async move {
+            let seen = Arc::new(Mutex::new(Vec::<SpeechModelsFetch>::new()));
+            let s = seen.clone();
+            let r = fetch_all(&client(), &[w], &move |p| s.lock().unwrap().push(p.clone())).await;
+            (r, Arc::try_unwrap(seen).unwrap().into_inner().unwrap())
+        };
+        let a = tokio::spawn(run(wanted(stub.url.clone(), &body, dest.clone())));
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let b = tokio::spawn(run(wanted(stub.url.clone(), &body, dest.clone())));
+        let (ra, sa) = a.await.unwrap();
+        let (rb, sb) = b.await.unwrap();
+        ra.unwrap();
+        rb.unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), body, "the file is the pin");
+        assert_eq!(
+            stub.requests.load(Ordering::SeqCst),
+            1,
+            "one request for the file, whoever asked"
+        );
+        assert!(
+            sa.iter().any(|p| p.done_bytes > 0),
+            "the first reports progress"
+        );
+        assert!(
+            sb.iter()
+                .filter(|p| p.done_bytes > 0 && p.done_bytes < body.len() as u64)
+                .count()
+                >= 2,
+            "the second reports the first's progress as it goes"
+        );
+        assert!(!part_path(&dest).exists());
+    }
+
+    /// Fetch one file and keep every report, as the terminal or the app would.
+    async fn fetch_seen(w: Wanted) -> (Result<(), String>, Vec<SpeechModelsFetch>) {
+        let seen = Arc::new(Mutex::new(Vec::<SpeechModelsFetch>::new()));
+        let s = seen.clone();
+        let r = fetch_all(&client(), &[w], &move |p| s.lock().unwrap().push(p.clone())).await;
+        let seen = seen.lock().unwrap().clone();
+        (r, seen)
+    }
+
+    const CHILD: &str = "GHOST_TEST_SPEECH_FETCH_CHILD";
+
+    /// Not a test on its own: the other process of the two-process tests below, this test
+    /// binary run again for this one test. Does nothing unless the parent set `CHILD`.
+    #[tokio::test]
+    async fn child_fetcher() {
+        let Ok(spec) = std::env::var(CHILD) else {
+            return;
+        };
+        let f: Vec<&str> = spec.split('|').collect();
+        let w = Wanted {
+            pin: Pin {
+                model: "Test",
+                name: "model.onnx",
+                url: f[0].to_string(),
+                sha256: Box::leak(f[1].to_string().into_boxed_str()),
+                size: f[2].parse().unwrap(),
+            },
+            dest: PathBuf::from(f[3]),
+        };
+        fetch_all(&client(), &[w], &|_| {}).await.unwrap();
+    }
+
+    /// The test binary again, fetching `w` in a process of its own.
+    fn child(w: &Wanted) -> std::process::Child {
+        std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "speech_models::tests::child_fetcher",
+                "--test-threads=1",
+                "--quiet",
+            ])
+            .env(
+                CHILD,
+                format!(
+                    "{}|{}|{}|{}",
+                    w.pin.url,
+                    w.pin.sha256,
+                    w.pin.size,
+                    w.dest.display()
+                ),
+            )
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap()
+    }
+
+    /// Until `f` holds, looking every 10 ms for at most 10 s.
+    async fn until(what: &str, f: impl Fn() -> bool) {
+        for _ in 0..1000 {
+            if f() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("timed out waiting for {what}");
+    }
+
+    /// #135 across processes, as the terminal and the app are: one request, both ready.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn two_processes_on_one_folder_make_one_request_and_both_end_ready() {
+        let body: Vec<u8> = (0..400_000u32).map(|i| (i % 249) as u8).collect();
+        let stub = serve_slow(body.clone(), 50, Duration::from_millis(20)).await;
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("model.onnx");
+        let w = wanted(stub.url.clone(), &body, dest.clone());
+        let mut other = child(&w);
+        let part = part_path(&dest);
+        until("the other process to start writing", || {
+            std::fs::metadata(&part).is_ok_and(|m| m.len() > 0)
+        })
+        .await;
+        let (r, seen) = fetch_seen(w).await;
+        r.unwrap();
+        assert!(
+            other.wait().unwrap().success(),
+            "the other process ended ready"
+        );
+        assert_eq!(std::fs::read(&dest).unwrap(), body);
+        assert_eq!(stub.requests.load(Ordering::SeqCst), 1, "{:?}", stub.ranges);
+        let followed: Vec<u64> = seen
+            .iter()
+            .filter(|p| p.following)
+            .map(|p| p.done_bytes)
+            .collect();
+        assert!(followed.len() >= 2, "{seen:?}");
+        assert!(
+            followed.windows(2).any(|w| w[1] > w[0]),
+            "the bar moves: {followed:?}"
+        );
+        assert!(
+            !lock_path(&dest).exists(),
+            "the lock goes with the download"
+        );
+    }
+
+    /// The holder dies part way (SIGKILL: no clean-up of any kind); the follower takes the
+    /// lock the kernel let go and carries on from the `.part`, asking only for the rest.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn the_follower_finishes_when_the_holder_is_killed() {
+        let body: Vec<u8> = (0..400_000u32).map(|i| (i % 241) as u8).collect();
+        let stub = serve_slow(body.clone(), 100, Duration::from_millis(30)).await;
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("model.onnx");
+        let w = wanted(stub.url.clone(), &body, dest.clone());
+        let mut holder = child(&w);
+        let part = part_path(&dest);
+        until("the holder to start writing", || {
+            std::fs::metadata(&part).is_ok_and(|m| m.len() > 0)
+        })
+        .await;
+        let follower = tokio::spawn(fetch_seen(w));
+        tokio::time::sleep(Duration::from_millis(600)).await;
+        holder.kill().unwrap();
+        holder.wait().unwrap();
+        let cut = std::fs::metadata(&part).unwrap().len() as usize;
+        assert!(cut > 0 && cut < body.len(), "killed part way: {cut}");
+        let (r, seen) = follower.await.unwrap();
+        r.unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), body);
+        let ranges = stub.ranges.lock().unwrap().clone();
+        assert_eq!(ranges.len(), 2, "{ranges:?}");
+        assert_eq!(ranges[0], None);
+        assert!(ranges[1].is_some_and(|from| from > 0), "{ranges:?}");
+        assert!(seen.iter().any(|p| p.following), "it followed first");
+        assert!(
+            seen.last()
+                .is_some_and(|p| !p.following && p.done_bytes == body.len() as u64),
+            "then finished it itself: {:?}",
+            seen.last()
+        );
+    }
+
+    /// A follower that arrives at 99% follows to the end and checks the file against the
+    /// pin; nothing is asked for twice.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_follower_arriving_at_99_percent_ends_ready() {
+        let body: Vec<u8> = (0..100_000u32).map(|i| (i % 239) as u8).collect();
+        let stub = serve_slow(body.clone(), 10, Duration::from_millis(60)).await;
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("model.onnx");
+        std::fs::write(part_path(&dest), &body[..99_000]).unwrap();
+        let holder = tokio::spawn(fetch_seen(wanted(stub.url.clone(), &body, dest.clone())));
+        until("the holder's request", || {
+            stub.requests.load(Ordering::SeqCst) == 1
+        })
+        .await;
+        let (r, seen) = fetch_seen(wanted(stub.url.clone(), &body, dest.clone())).await;
+        r.unwrap();
+        holder.await.unwrap().0.unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), body);
+        assert_eq!(*stub.ranges.lock().unwrap(), vec![Some(99_000)]);
+        let first = seen.first().unwrap();
+        assert!(first.following && first.done_bytes >= 99_000, "{first:?}");
+        assert_eq!(seen.last().unwrap().done_bytes, body.len() as u64);
+    }
+
+    /// A lock file nobody holds (its process is gone) blocks nothing.
+    #[tokio::test]
+    async fn a_lock_file_left_behind_does_not_block() {
+        let body: Vec<u8> = (0..50_000u32).map(|i| (i % 7) as u8).collect();
+        let stub = serve_slow(body.clone(), 2, Duration::from_millis(1)).await;
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("model.onnx");
+        std::fs::write(lock_path(&dest), b"").unwrap();
+        let (r, seen) = fetch_seen(wanted(stub.url.clone(), &body, dest.clone())).await;
+        r.unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), body);
+        assert!(seen.iter().all(|p| !p.following));
+        assert!(!held_elsewhere(&dest));
+    }
+
+    /// Where the lock is held, `held_elsewhere` says so, and makes no lock file where
+    /// there is none.
+    #[test]
+    fn held_elsewhere_reads_the_lock_and_makes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("m");
+        assert!(!held_elsewhere(&dest));
+        assert!(!lock_path(&dest).exists());
+        let Turn::Mine(lock) = take_turn(&dest) else {
+            panic!("free")
+        };
+        assert!(held_elsewhere(&dest));
+        assert!(matches!(take_turn(&dest), Turn::Busy));
+        drop(lock);
+        assert!(!held_elsewhere(&dest));
+    }
+
+    fn report(done: u64, file: &str, following: bool) -> SpeechModelsFetch {
+        SpeechModelsFetch {
+            state: SpeechModelsFetchState::Fetching,
+            done_bytes: done,
+            total_bytes: 1000,
+            file: Some(file.into()),
+            error: None,
+            following,
+        }
+    }
+
+    /// #139, #135: a line per percent at most when the output is not a terminal, and
+    /// "already downloading" said once when another process holds the download.
+    #[test]
+    fn the_terminal_prints_a_line_per_percent_and_says_once_it_follows() {
+        let mut p = Printer::new(false);
+        let mut lines = Vec::new();
+        for (done, file, following) in [
+            (410, "a", true),
+            (412, "a", true),
+            (415, "a", true),
+            (421, "a", true),
+            (430, "a", false),
+            (431, "a", false),
+            (1000, "b", false),
+        ] {
+            if let Some(l) = p.line(&report(done, file, following)) {
+                lines.push(l);
+            }
+        }
+        assert_eq!(
+            lines,
+            [
+                "Already downloading: 41% a (another Ghost started it; this follows it)\n",
+                " 42% a\n",
+                "The other download stopped; carrying on from 43% a\n",
+                "100% b\n",
+            ]
+        );
+        assert!(lines.iter().all(|l| !l.contains('\r')));
+        let mut t = Printer::new(true);
+        assert_eq!(
+            t.line(&report(10, "a", false)).unwrap(),
+            "\r  1% a\x1b[K",
+            "a terminal's line is redrawn"
+        );
+    }
+
+    /// #139: what `ghostd models fetch` writes to stdout is progress and the outcome,
+    /// nothing else, also when it follows another fetcher.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn the_fetch_commands_stdout_is_progress_only() {
+        let body: Vec<u8> = (0..200_000u32).map(|i| (i % 233) as u8).collect();
+        let stub = serve_slow(body.clone(), 20, Duration::from_millis(20)).await;
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("model.onnx");
+        let first = tokio::spawn(fetch_seen(wanted(stub.url.clone(), &body, dest.clone())));
+        until("the first fetcher's request", || {
+            stub.requests.load(Ordering::SeqCst) == 1
+        })
+        .await;
+        let mut out = Vec::new();
+        let code = fetch_cli(
+            &client(),
+            &[wanted(stub.url.clone(), &body, dest.clone())],
+            &mut out,
+            false,
+        )
+        .await;
+        first.await.unwrap().0.unwrap();
+        let out = String::from_utf8(out).unwrap();
+        assert_eq!(code, 0, "{out}");
+        let lines: Vec<&str> = out.lines().collect();
+        assert!(lines[0].starts_with("Already downloading: "), "{out}");
+        assert_eq!(*lines.last().unwrap(), "every speech model is here");
+        for l in &lines[1..lines.len() - 1] {
+            assert!(
+                l.ends_with("% model.onnx") && !l.contains("INFO"),
+                "only progress: {l:?}"
+            );
+        }
+        assert_eq!(stub.requests.load(Ordering::SeqCst), 1);
     }
 
     #[test]

@@ -523,6 +523,9 @@ const PLAN_FOR: Duration = Duration::from_secs(10);
 /// supervisor a crash would be a restart loop with nothing to read; the waiting list
 /// says what is missing instead).
 pub const MODELS_RETRY: std::time::Duration = std::time::Duration::from_secs(15);
+/// While speech model files are missing, how often the daemon looks whether another
+/// process (the terminal's `ghostd models fetch`) finished or is downloading them (#135).
+pub const SPEECH_MODELS_LOOK: std::time::Duration = std::time::Duration::from_secs(1);
 /// The waiting list's key for it.
 pub const MODELS_PROBLEM_KEY: &str = "models:missing";
 /// The waiting list's key while the sound output plays nothing (#117).
@@ -2336,9 +2339,11 @@ impl Daemon {
                         crate::speech_models::missing_note(&missing)
                     });
                     d.refresh_waiting_now();
+                    let files_missing = !missing.is_empty();
                     tokio::select! {
                         _ = tokio::time::sleep(d.models_retry) => {}
                         _ = d.models_kick.notified() => {}
+                        _ = d.watch_speech_models(), if files_missing => {}
                         _ = d.stop.cancelled() => break None,
                     }
                 }
@@ -2701,6 +2706,31 @@ impl Daemon {
                 *lock(&self.conversations) = Some(c);
             }
             Err(e) => warn!("conversations: the voices could not be bound: {e}"),
+        }
+    }
+
+    /// While speech model files are missing (#135), once a second: returns when every
+    /// file is here, whoever downloaded it, so the load is tried at once (the first run
+    /// moves on and `models_ready` flips with no restart); and when another process is
+    /// downloading one, the app's own download follows it, so the first run shows its
+    /// progress and picks it up if that process goes away. Seven `stat`s and at most
+    /// seven lock probes a second, only until the models load: never on a turn.
+    async fn watch_speech_models(self: &Arc<Self>) {
+        loop {
+            tokio::time::sleep(SPEECH_MODELS_LOOK).await;
+            let wanted = crate::speech_models::missing(&self.voice());
+            if wanted.is_empty() {
+                info!("speech models: every file is here; loading them");
+                return;
+            }
+            if wanted
+                .iter()
+                .any(|w| crate::speech_models::held_elsewhere(&w.dest))
+                && let Err(e) =
+                    ghost_api::speech_models::SpeechModelsPort::fetch(self.speech_models().as_ref())
+            {
+                warn!("speech models: {e}");
+            }
         }
     }
 

@@ -54,7 +54,15 @@ fn main() -> anyhow::Result<()> {
     let level = std::env::var("GHOST_LOG")
         .or_else(|_| std::env::var("GHOST_LOG_LEVEL").map(|l| l.to_lowercase()))
         // The protocol library's own INFO lines dump each in-process handshake whole.
-        .unwrap_or_else(|_| "info,rmcp=warn".into());
+        // `ghostd models` prints its own progress on stdout; its INFO lines would only
+        // repeat it (#139).
+        .unwrap_or_else(|_| {
+            if std::env::args().nth(1).as_deref() == Some("models") {
+                "warn".into()
+            } else {
+                "info,rmcp=warn".into()
+            }
+        });
     let mirror = LogMirror::new();
     tracing_subscriber::registry()
         .with(EnvFilter::try_new(&level).unwrap_or_else(|_| EnvFilter::new("info")))
@@ -355,7 +363,11 @@ async fn llm(args: &[String]) -> i32 {
 async fn speech_models(args: &[String]) -> i32 {
     let env: HashMap<String, String> = std::env::vars().collect();
     match settings_from(&env) {
-        Ok((_, voice)) => ghostd::speech_models::cli(args, &voice, &mut std::io::stdout()).await,
+        Ok((_, voice)) => {
+            use std::io::IsTerminal;
+            let tty = std::io::stdout().is_terminal();
+            ghostd::speech_models::cli(args, &voice, &mut std::io::stdout(), tty).await
+        }
         Err(e) => {
             eprintln!("{e}");
             2
@@ -372,25 +384,14 @@ async fn echo_cancel(args: &[String], infra_dir: &std::path::Path) -> i32 {
         None | Some("status") => {
             let running = ghost_api::deps::unit_active(ghostd::microphone::CANCELLER_UNIT);
             let installer = ghost_api::echo_cancel::installer(infra_dir);
-            println!(
-                "echo canceller: {}",
-                if running {
-                    "running (ghost.mic)"
-                } else {
-                    "not running"
-                }
-            );
-            println!(
-                "installer: {}{}",
-                installer.display(),
-                if installer.is_file() {
-                    ""
-                } else {
-                    " (missing)"
-                }
-            );
-            if !running {
-                println!("ghostd echo-cancel on sets it up");
+            // The check `on` makes, so `status` never suggests `on` where it can't work (#138).
+            let server = if running {
+                ghost_api::echo_cancel::SoundServer::Unknown
+            } else {
+                ghost_api::echo_cancel::probe_sound_server()
+            };
+            for line in ghost_api::echo_cancel::status_lines(running, &installer, &server) {
+                println!("{line}");
             }
             0
         }

@@ -61,7 +61,8 @@ ghostd mcp add codex --command
 ```
 
 Ghost writes the token to `~/.local/share/ghost/clients/codex.token`, readable only by
-you, and the tool's config holds a command and no token:
+you, and prints where it went, not the token itself: nothing you paste or a script keeps
+holds it. The tool's config holds a command and no token:
 
 ```json
 {
@@ -78,7 +79,9 @@ seconds, and it carries on across a restart of Ghost. A call it has to send agai
 first send failed part way, and Ghost may have run it) is not run twice: the bridge puts a
 key of its own on every tool call (`_meta` `ghost/idempotency-key`), and Ghost answers a
 change sent again with the same key, from the same tool, within five minutes, with the
-first call's result. Any tool may set that key itself for the same effect.
+first call's result. Any tool may set that key itself for the same effect. When its input
+ends (a script that pipes its requests in and closes), the bridge still writes the answer
+to every request it read, waiting up to ten minutes for them, then exits.
 
 When Ghost runs from the AppImage, there is no such command: the AppImage is mounted at a
 new path each time it starts, and its launcher opens the desktop app rather than

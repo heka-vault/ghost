@@ -45,7 +45,10 @@ def test_the_guide_is_short_with_its_rules_at_both_ends() -> None:
     text = guide()
     assert len(text.splitlines()) <= 270
     assert text.count("## Never do these") == 2
-    assert "<!-- ghostd setup" in text  # where the first run's detection commands will go
+    # ADR 0068: the AI tools already on this computer, by the commands `ghostd setup` has.
+    assert "### Use what the person already has" in text
+    for verb in ("detect", "import", "link", "unlink"):
+        assert f"ghostd setup {verb}" in text, verb
 
 
 def test_the_guide_never_pipes_a_download_into_a_shell_or_adds_a_repository() -> None:
@@ -60,9 +63,29 @@ def test_every_ghostd_command_in_the_guide_is_one_the_daemon_has() -> None:
     listed = re.search(r"unknown command \{other:\?\}; commands: ([a-z, -]+)", main)
     assert listed, "main.rs no longer lists its commands"
     known = set(listed[1].split(", "))
-    # The comment marks where commands will be added later; `command -v` names binaries.
+    # An HTML comment is not an instruction; `command -v` names binaries.
     text = re.sub(r"<!--.*?-->", "", guide(), flags=re.S)
     text = "\n".join(line for line in text.splitlines() if "command -v" not in line)
     used = set(re.findall(r"\bghostd ([a-z][a-z-]*)", text))
     assert used, "the guide names no ghostd command"
     assert used <= known, used - known
+
+
+def test_every_ghostd_setup_verb_in_the_guide_is_one_the_command_has() -> None:
+    usage = (ROOT / "crates/ghostd/src/setup_cli.rs").read_text()
+    line = re.search(r'pub const USAGE: &str = "([^"]+)"', usage)
+    assert line, "setup_cli.rs no longer has its usage line"
+    known = set(re.findall(r"\b(detect|import|link|unlink)\b", line[1]))
+    used = set(re.findall(r"\bghostd setup ([a-z]+)", guide()))
+    assert used <= known, used - known
+    assert ("--yes" in line[1]) and ("--all" in line[1])
+
+
+def test_the_guide_does_not_ask_the_person_to_wait_before_opening_ghost() -> None:
+    """#135: the app follows a download the terminal started; only 2026.11.0 needs the wait."""
+    text = guide()
+    flat = " ".join(text.split())
+    assert "Don't open Ghost" not in flat
+    assert "open Ghost whenever they like" in flat
+    waits = [p for p in text.split("\n\n") if "not to open Ghost" in " ".join(p.split())]
+    assert len(waits) == 1 and "2026.11.0" in waits[0], waits
