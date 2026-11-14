@@ -165,10 +165,32 @@ pub fn cut(s: &str, max: usize) -> String {
     }
 }
 
-/// The part of a message before its first `": "`: what follows is usually a value the code
-/// formatted in (an error's text, a parser's input), which may be anyone's words.
-pub fn head(s: &str) -> &str {
-    s.split(": ").next().unwrap_or(s)
+static QUOTED: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"`[^`]*`|"[^"]*""#).unwrap());
+
+/// The part of a message that is the code's own words. What follows the first `": "` is
+/// usually a value the code formatted in (an error's text, a parser's input), and so is
+/// anything between backticks or double quotes (a slice panic names the string it was
+/// cutting): both may be anyone's words, so the first is dropped and the second emptied.
+/// A quote left open cuts the message there.
+pub fn head(s: &str) -> String {
+    let first = s.split(": ").next().unwrap_or(s);
+    let emptied = QUOTED.replace_all(first, |c: &regex::Captures| {
+        let q = &c[0][..1];
+        format!("{q}\u{2026}{q}")
+    });
+    // Every pair is whole now, so a quote that opens and never closes is the last one.
+    let mut open: Option<(usize, char)> = None;
+    for (i, ch) in emptied.char_indices() {
+        match open {
+            None if ch == '`' || ch == '"' => open = Some((i, ch)),
+            Some((_, q)) if ch == q => open = None,
+            _ => {}
+        }
+    }
+    match open {
+        Some((i, _)) => emptied[..i].trim_end().to_string(),
+        None => emptied.into_owned(),
+    }
 }
 
 #[cfg(test)]
@@ -243,7 +265,24 @@ mod tests {
     fn head_keeps_what_comes_before_a_value() {
         assert_eq!(
             head("called `Result::unwrap()` on an `Err` value: Api { message: \"secret\" }"),
-            "called `Result::unwrap()` on an `Err` value"
+            "called `\u{2026}` on an `\u{2026}` value"
         );
+    }
+
+    #[test]
+    fn head_empties_what_the_code_quoted() {
+        // A slice panic's location is Ghost's own code and its message names the string.
+        assert_eq!(
+            head(
+                "byte index 3 is not a char boundary; it is inside 'é' (bytes 2..4) of `héllo there, my words`"
+            ),
+            "byte index 3 is not a char boundary; it is inside 'é' (bytes 2..4) of `\u{2026}`"
+        );
+        assert_eq!(
+            head("no agent named \"Ledger\" here"),
+            "no agent named \"\u{2026}\" here"
+        );
+        // Left open (the runtime cut a long string): nothing after the quote is kept.
+        assert_eq!(head("can't read `what was said and never"), "can't read");
     }
 }

@@ -337,7 +337,7 @@ fn exception(what: &What, scrub: &Scrubber) -> Exception {
             // A panic outside Ghost's own code is reduced to its type: its message is a
             // dependency's, and may carry anything.
             let value = if own {
-                scrub.text(scrub::head(message), MESSAGE_CHARS)
+                scrub.text(&scrub::head(message), MESSAGE_CHARS)
             } else {
                 String::new()
             };
@@ -388,7 +388,7 @@ fn exception(what: &What, scrub: &Scrubber) -> Exception {
         }
         What::Page(p) => {
             let value = if JS_BUILTIN.contains(&p.error_type.as_str()) {
-                scrub.text(scrub::head(&p.message), MESSAGE_CHARS)
+                scrub.text(&scrub::head(&p.message), MESSAGE_CHARS)
             } else {
                 String::new()
             };

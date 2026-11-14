@@ -68,7 +68,9 @@ is reduced to its type: a panic whose location is not in Ghost's crates, a page 
 type is not one of the engine's (`TypeError`, `ReferenceError`, `RangeError`, `SyntaxError`,
 `EvalError`, `URIError`), and a rejected value that is not an Error. What remains is cut at its
 first `": "`, after which code usually formats a value in (`called Result::unwrap() on an Err
-value: …`, `JSON Parse error: …`). Deterministic code only, no model.
+value: …`, `JSON Parse error: …`), and whatever it put between backticks or double quotes is
+emptied (a slice panic's location is Ghost's own code and its message names the string it was
+cutting); a quote left open cuts the message there. Deterministic code only, no model.
 
 **Only a released build sends.** The project's key is compiled in from the build's
 environment (`option_env!("GHOST_POSTHOG_KEY")`); `.github/workflows/release.yml` sets it
