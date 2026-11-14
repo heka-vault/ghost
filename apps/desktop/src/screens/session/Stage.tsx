@@ -1,6 +1,6 @@
 /**
- * Owner: session. The stage: what is happening right now in a live session, on the composer,
- * and the same moment at room size. Its sign is Ghost's presence (`Presence.tsx`): Wisp in the
+ * Owner: session. The stage: what is happening right now in a live session, on the composer.
+ * Its sign is Ghost's presence (`Presence.tsx`): Wisp in the
  * agent's color on a halo. While someone speaks the strip opens into a band, so the voice is
  * the thing on screen; at rest it is one quiet line.
  *
@@ -15,19 +15,13 @@
  *   listening          a quiet line saying what to do
  *   on hold, hanging up, on the phone: each says so
  *
- * Room view (`RoomView`) is the same moment for someone across the room: the reply being said
- * at display size, said words bright and the rest dim, the waveform wide. It comes on by itself
- * after a while with nobody at the keyboard in a spoken session and goes as soon as anyone
- * touches the computer; the header's button turns it on and off by hand. It draws on top of
- * the record, which stays in place for screen readers.
+ * Ghost big and present over the desktop is the floating room's (ADR 0059); the window keeps
+ * this strip and the timeline (the room view was removed on 2026-11-14).
  */
-import type { PendingProposal } from "@ghost/client-ts";
 import type { Call } from "@ghost/ui";
-import { Mic, Minimize2 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Mic } from "lucide-react";
 
-import { Button, IconButton, VoiceWave, cx } from "../../ui";
-import type { Saying } from "./live";
+import { Button, VoiceWave, cx } from "../../ui";
 import { Presence } from "./Presence";
 import { appTitle } from "./Transcript";
 
@@ -84,12 +78,12 @@ export function stageWords(state: StageState, name: string, calls: Call[], micOf
 const OPEN: StageState[] = ["speaking", "you"];
 
 /** The strip on the composer. */
-export function Stage({ state, slug, name, calls, room, onRoom, micOff, typed = false }: { state: StageState; slug: string; name: string; calls: Call[]; room: boolean; onRoom?: () => void; micOff?: MicOff | null; typed?: boolean }) {
+export function Stage({ state, slug, name, calls, micOff, typed = false }: { state: StageState; slug: string; name: string; calls: Call[]; micOff?: MicOff | null; typed?: boolean }) {
   const w = stageWords(state, name, calls, micOff, typed);
   const open = OPEN.includes(state);
   const off = state === "listening" && !!micOff;
   return (
-    <div className={cx("stage", `stage--${state}`, open && "is-open", off && "is-mic-off", room && "is-room")}>
+    <div className={cx("stage", `stage--${state}`, open && "is-open", off && "is-mic-off")}>
       <span className="stage__sign">
         <Presence state={state} slug={slug} size={open ? 64 : 32} className={off ? "is-mic-off" : undefined} />
       </span>
@@ -108,117 +102,6 @@ export function Stage({ state, slug, name, calls, room, onRoom, micOff, typed = 
           <VoiceWave active={state === "speaking"} variant="ribbon" height={open ? 40 : 28} />
         </span>
       )}
-      {onRoom && <IconButton size="sm" variant="ghost" label={room ? "Leave room view" : "Room view"} icon={room ? <Minimize2 /> : <RoomIcon />} onClick={onRoom} className="stage__room" />}
     </div>
   );
 }
-
-function RoomIcon() {
-  // A screen seen from across the room: a frame with large type in it.
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-      <rect x="3" y="4" width="18" height="14" rx="2" />
-      <path d="M7 9h10M7 13h6M9 21h6" />
-    </svg>
-  );
-}
-
-// ---------------------------------------------------------------- room view
-
-export interface RoomViewProps {
-  state: StageState;
-  slug: string;
-  name: string;
-  /** The reply being said, or the last one. */
-  reply: { text: string; saying?: Saying } | null;
-  /** The operator's last words, once their turn closed. */
-  heard: string | null;
-  calls: Call[];
-  pending: PendingProposal | null;
-  startedAt: string | null;
-  onLeave: () => void;
-  /** A typed session (2026-11-13): it says typing, not listening. */
-  typed?: boolean;
-}
-
-export function RoomView({ state, slug, name, reply, heard, calls, pending, startedAt, onLeave, typed = false }: RoomViewProps) {
-  const w = stageWords(state, name, calls, null, typed);
-  const elapsed = useElapsed(startedAt);
-  const leave = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onLeave();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onLeave]);
-  const chars = reply?.saying?.chars ?? reply?.text.length ?? 0;
-  const nowEnd = Math.max(chars, reply?.saying?.now?.end ?? chars);
-  return (
-    // Visual only: the record under it carries the same words for screen readers.
-    <div className={cx("room page-fill", `room--${state}`)} aria-hidden>
-      {/* The page's header already names the agent: the room adds how long the session has run. */}
-      <div className="room__top">
-        {elapsed && <span className="room__time">{elapsed}</span>}
-        <button ref={leave} type="button" className="room__leave" tabIndex={-1} onClick={onLeave}>
-          Leave room view
-        </button>
-      </div>
-      <div className="room__middle">
-        {pending ? (
-          <>
-            <p className="room__label">Waiting for your okay</p>
-            <p className="room__words" data-user-content>
-              {pending.summary}
-            </p>
-            <p className="room__hint">Say yes to go ahead, or no to leave it.</p>
-          </>
-        ) : state === "you" ? (
-          <>
-            <Presence state="you" slug={slug} size={168} />
-            <p className="room__label">Listening to you</p>
-          </>
-        ) : state === "working" ? (
-          <>
-            <Presence state="working" slug={slug} size={120} />
-            {heard && (
-              <p className="room__heard" data-user-content>
-                {heard}
-              </p>
-            )}
-            <p className="room__label">{w.title}…</p>
-          </>
-        ) : reply ? (
-          <>
-            {state === "speaking" && <Presence state="speaking" slug={slug} size={120} />}
-            <p className={cx("room__words", reply.saying?.cut && "is-cut")} data-user-content>
-              <span className="room__said">{reply.text.slice(0, chars)}</span>
-              <span className="room__now">{reply.text.slice(chars, nowEnd)}</span>
-              <span className="room__unsaid">{reply.text.slice(nowEnd)}</span>
-            </p>
-          </>
-        ) : (
-          <p className="room__label">{w.title}</p>
-        )}
-      </div>
-      <div className="room__bottom">
-        <VoiceWave active={state === "speaking"} variant="ribbon" height={72} />
-        <p className="room__state">
-          {w.title}
-          {w.hint && <span> · {w.hint}</span>}
-        </p>
-      </div>
-    </div>
-  );
-}
-
-function useElapsed(since: string | null): string | null {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!since) return;
-    const t = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(t);
-  }, [since]);
-  if (!since) return null;
-  const s = Math.max(0, Math.floor((now - new Date(since).getTime()) / 1000));
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-}
-

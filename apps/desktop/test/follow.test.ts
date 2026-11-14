@@ -27,10 +27,10 @@ describe("the thread follows the newest turn", () => {
     expect(f.onNew()).toBe("follow");
   });
 
-  it("the room view scrolling the panel to its top doesn't let go, so leaving it returns to the end", () => {
+  it("a scroll to the top that nobody asked for doesn't let go", () => {
     const f = new Follow();
     f.scrolled(at(1400), 0);
-    f.scrolled(at(0), 20_000); // scrollPanelToTop() as room view comes on, nobody touching
+    f.scrolled(at(0), 20_000); // a programmatic scroll to the top, nobody touching
     expect(f.pinned).toBe(true);
     expect(f.onNew()).toBe("follow");
   });

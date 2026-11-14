@@ -1,79 +1,22 @@
 /**
- * Settings › General, The room: when the app goes to the room by itself (posture.ts), and the
- * floating room (ADR 0059). Kept beside this window, not in Ghost's settings: it is how this
- * desk shows Ghost, and it takes effect at once, so these are switches, not part of the page's
- * draft. The room's choices are this window's storage; the floating room's are the shell's
- * (`floating.json`), since the shell starts the surface before any window opens. Ghost on
- * stage opens the stage window, the floating room on its own backdrop for showing Ghost.
+ * Settings › General, The floating room (ADR 0059): Ghost big and present over the desktop,
+ * and Ghost on stage. Since 2026-11-14 the only way Ghost fills more than its strip: the
+ * in-window room is gone, and its section here is this one. Kept beside this window, not in
+ * Ghost's settings: the floating room's choices are the shell's (`floating.json`), since the
+ * shell starts the surface before any window opens, and take effect at once, so these are
+ * switches, not part of the page's draft. Ghost on stage opens the stage window, the floating
+ * room on its own backdrop for showing Ghost.
  */
-import { useState } from "react";
-
-import { Button, Card, Kbd, ListRow, Notice, SegmentedControl, Select, Switch } from "../ui";
+import { Button, Card, ListRow, Notice, Select, Switch } from "../ui";
 import { inTauri } from "../transport";
 import { type FloatingCaptions, type FloatingPlacement, prefOf, prefValue, useFloating, type WhileShared } from "./floating";
-import { AWAY_CHOICES, readAway, readSessionRoom, writeAway, writeSessionRoom } from "./posture";
-import { usePosture } from "./PostureContext";
 
-const AWAY_OPTIONS = [...AWAY_CHOICES.map((m) => ({ value: String(m), label: `${m} min` })), { value: "never", label: "Never" }];
-
-export function RoomSettings() {
-  const { refresh, hold } = usePosture();
-  const [away, setAway] = useState<string>(() => {
-    const v = readAway();
-    return v == null ? "never" : String(v);
-  });
-  const [session, setSession] = useState(readSessionRoom);
+/** The section's body: the floating room's switch and choices, then Ghost on stage. */
+export function FloatingRoomSettings() {
   return (
     <>
-    <Card list>
-      <ListRow
-        title="When you step away"
-        description="With nothing touched for this long, Ghost fills the window: what needs you in large type, and what it is doing. A key or the mouse brings the desk back."
-        trailing={
-          <SegmentedControl
-            size="sm"
-            aria-label="Go to the room after"
-            options={AWAY_OPTIONS}
-            value={away}
-            onChange={(v) => {
-              setAway(v);
-              writeAway(v === "never" ? null : Number(v));
-              refresh();
-            }}
-          />
-        }
-      />
-      <ListRow
-        title="In a spoken session"
-        description="Twenty seconds after you last touched the computer in a conversation, the conversation goes to room view."
-        trailing={
-          <Switch
-            aria-label="Room view in a spoken session"
-            checked={session}
-            onChange={(on: boolean) => {
-              setSession(on);
-              writeSessionRoom(on);
-              refresh();
-            }}
-          />
-        }
-      />
-      <ListRow
-        title="Go to the room now"
-        description={
-          <>
-            <Kbd shortcut="mod+." /> from anywhere; Escape or the same keys come back.
-          </>
-        }
-        trailing={
-          <Button size="sm" variant="secondary" onClick={() => hold("room")}>
-            Show the room
-          </Button>
-        }
-      />
-    </Card>
-    <FloatingSettings />
-    <StageSettings />
+      <FloatingSettings />
+      <StageSettings />
     </>
   );
 }
@@ -139,7 +82,7 @@ function FloatingSettings() {
                   ? "Without Ghost’s GNOME helper, Ghost can’t see which monitor you’re working on, so “the other monitor” is the one that isn’t primary. docs/floating-room.md says how to add the helper."
                   : "With one monitor, Ghost comes forward on the side away from your work when it can tell where that is."
             }
-            trailing={<Select size="sm" className="room-select" aria-label="Ghost appears on" value={value} options={options} onChange={(e) => void set({ ...status.settings, monitor: prefOf(e.target.value) })} />}
+            trailing={<Select size="sm" className="float-select" aria-label="Ghost appears on" value={value} options={options} onChange={(e) => void set({ ...status.settings, monitor: prefOf(e.target.value) })} />}
           />
         )}
         {on && (
@@ -149,7 +92,7 @@ function FloatingSettings() {
             trailing={
               <Select
                 size="sm"
-                className="room-select"
+                className="float-select"
                 aria-label="Where on the screen"
                 value={status.settings.placement ?? "beside"}
                 options={[
@@ -169,7 +112,7 @@ function FloatingSettings() {
             trailing={
               <Select
                 size="sm"
-                className="room-select"
+                className="float-select"
                 aria-label="Captions"
                 value={status.settings.captions ?? "off"}
                 options={[
@@ -189,7 +132,7 @@ function FloatingSettings() {
             trailing={
               <Select
                 size="sm"
-                className="room-select"
+                className="float-select"
                 aria-label="While my screen is shared"
                 value={status.settings.while_shared ?? "hide"}
                 options={[

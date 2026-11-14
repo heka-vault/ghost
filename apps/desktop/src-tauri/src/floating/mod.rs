@@ -1,4 +1,4 @@
-//! The floating room (ADR 0059): the room posture without a window. Ghost is a thin line of
+//! The floating room (ADR 0059): Ghost big and present without a window. Ghost is a thin line of
 //! light at a screen's bottom edge until its name is called, then comes forward over the
 //! desktop with no application chrome, and goes back to the line when the session ends.
 //!

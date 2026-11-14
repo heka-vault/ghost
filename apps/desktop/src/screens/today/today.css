@@ -228,6 +228,23 @@ a.today-figure:hover .today-figure__value { color: var(--accent-text); }
 .talk__input { flex: 1 1 auto; min-width: 0; height: var(--control-lg); padding: 0 var(--space-3); border: 0; border-left: 1px solid var(--border-subtle); background: transparent; color: var(--text-1); font: inherit; font-size: var(--text-lg); outline: none; }
 .talk__input::placeholder { color: var(--text-3); }
 .talk:focus-within { box-shadow: var(--shadow-md), var(--focus-field); }
+.talk__title { color: var(--text-1); }
+.talk__hint { margin-left: var(--space-2); font-weight: var(--weight-regular); color: var(--text-3); }
+/* A live session (the room view removed, 2026-11-14): the state in the phase's colour, readable at a glance. */
+.talk.is-you .talk__title, .talk.is-listening .talk__title { color: var(--phase-listening); }
+.talk.is-working .talk__title { color: var(--phase-thinking); }
+.talk.is-speaking .talk__title { color: var(--phase-speaking); }
+.talk.is-hold .talk__title, .talk.is-phone .talk__title { color: var(--text-2); }
+
+/* The dock: a yes or a question waiting in the session sits right above the bar, its buttons in reach. */
+.talk-dock { display: flex; flex-direction: column; gap: var(--space-2); width: min(100%, var(--page-default)); margin: 0 auto; }
+.talk-dock > .talk { width: 100%; }
+.talk-live__card { box-shadow: var(--shadow-md); }
+.talk-ask { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-4); padding: var(--space-3) var(--space-4); border-radius: var(--radius-xl); background: var(--bg-raised); border: 1px solid var(--accent-border); }
+.talk-ask__line { display: flex; align-items: center; gap: var(--space-2); min-width: 0; margin: 0; font-size: var(--text-md); line-height: var(--leading-md); }
+.talk-ask__who { flex: none; font-weight: var(--weight-semibold); color: var(--accent-text); }
+.talk-ask__q { min-width: 0; color: var(--text-1); overflow-wrap: anywhere; }
+.talk-ask__actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 
 /* ---------------------------------------------------------------- narrow */
 @media (max-width: 1180px) {
@@ -240,7 +257,7 @@ a.today-figure:hover .today-figure__value { color: var(--accent-text); }
 @media (max-width: 720px) {
   .today .tl-now, .today .tl-tools, .today .tl-empty, .today .tl-row, .today .tl-gap, .today .tl-end, .today .tl-hour__label { --timeline-gutter: 52px; }
   .tl-row__meta { display: none; }
-  .talk__state { display: none; }
+  .talk:not(.is-live) .talk__state, .talk__hint { display: none; }
   .now-card__meta { margin-left: 0; }
   .today-figures { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-4) var(--space-4); }
   .today-figure__value { font-size: var(--text-2xl); }

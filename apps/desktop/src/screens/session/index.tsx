@@ -24,16 +24,15 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 import { notListening, notListeningSub, typedSession } from "../../app/listening";
 import { useListening } from "../../app/ListeningSwitch";
-import { usePosture } from "../../app/PostureContext";
 import { Link, navigate } from "../../app/router";
 import type { RouteProps } from "../../app/routes";
 import { useDesign } from "../../design/context";
-import { Button, IconButton, LineGlyph, Menu, Notice, Page, SpeakingWave, PendingChange, VoicePresence, cx, errorText, lineName, quoted, relativeTime, scrollIntoPanel, scrollPanelToTop, useLive, useSetupPromptHere, type GhostPhase } from "../../ui";
+import { Button, IconButton, LineGlyph, Menu, Notice, Page, SpeakingWave, PendingChange, VoicePresence, cx, errorText, lineName, quoted, relativeTime, scrollIntoPanel, useLive, useSetupPromptHere, type GhostPhase } from "../../ui";
 import { Composer, type VoiceControl } from "./Composer";
 import { writeParam } from "../conversations/url";
 import { type OwnSettle, useDecisions, useGhostHistory, useLastSession, useLines, useObservedSwitches } from "./hooks";
 import { useAnnounced, useHeld, useSaying, useSessionActivity, useSessionQuestions } from "./live";
-import { RoomView, Stage, stageState } from "./Stage";
+import { Stage, stageState } from "./Stage";
 import { activityItems, type ExtraItem, weave, withGaps } from "./timeline";
 import { Transcript } from "./Transcript";
 import { buildHistory, buildTranscript } from "./transcript";
@@ -116,18 +115,6 @@ export default function SessionScreen(_: RouteProps) {
   const typed = typedSession(status);
   const listenAgain = () => void listening.set(true);
   const state = stageState({ online, phase, youTalking, ending: !!status?.ending, onPhone });
-  // Room view is the room posture on this screen (app/posture.ts): one rule, one switch.
-  const posture = usePosture();
-  const room = posture.posture === "room" && inSession && !onPhone;
-  const toggleRoom = () => posture.hold(room ? "auto" : "room");
-  const leaveRoom = () => posture.hold("auto");
-  // Room view fills the panel from its top; leaving it goes back to the end of the record.
-  useEffect(() => {
-    if (room) scrollPanelToTop();
-    else if (follow.pinned) scrollIntoPanel(end.current, { block: "panel-end", smooth: false });
-  }, [room]);
-  const lastReply = [...turns].reverse().find((t) => t.role === "assistant") ?? null;
-  const lastHeard = [...turns].reverse().find((t) => t.role === "user") ?? null;
   const answer = async (q: QuestionView, choice: string) => {
     await client.answerQuestion(q.key, choice);
   };
@@ -149,7 +136,7 @@ export default function SessionScreen(_: RouteProps) {
   // ---------------------------------------------------------------- following the transcript
   // New turns keep the transcript at its end while the operator is there, and during a spoken
   // session by default. Only their own scroll up lets go (`follow.ts`): then a “New reply”
-  // pill offers the way back. The room view's scroll to the top, the browser clamping as
+  // pill offers the way back. The browser clamping as
   // content above shrinks and a smooth scroll cut short never do.
   const sentNow = useRef(false);
   const [unseen, setUnseen] = useState(false);
@@ -197,13 +184,13 @@ export default function SessionScreen(_: RouteProps) {
     const content = end.current?.parentElement;
     if (!panel || !content || typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver(() => {
-      if (!follow.pinned || room) return;
+      if (!follow.pinned) return;
       const gap = panel.scrollHeight - panel.scrollTop - panel.clientHeight;
       if (gap > 1 && panel.scrollHeight - panel.clientHeight >= MIN_SCROLL_PX) scrollIntoPanel(end.current, { block: "panel-end", smooth: false });
     });
     ro.observe(content);
     return () => ro.disconnect();
-  }, [follow, room]);
+  }, [follow]);
 
   useEffect(() => {
     const was = seen.current;
@@ -226,7 +213,6 @@ export default function SessionScreen(_: RouteProps) {
     // is the one line the operator must read before pressing Confirm.
     const panel = document.getElementById("main");
     if (panel && panel.scrollHeight - panel.clientHeight < MIN_SCROLL_PX && !underFade(end.current, dock.current)) return;
-    if (room) return; // the room view holds the top; leaving it comes back to the end
     scrollIntoPanel(end.current, { block: "panel-end" });
   }, [hasTranscript, shownTurns, thinking, pending, decisions.length]);
 
@@ -436,15 +422,13 @@ export default function SessionScreen(_: RouteProps) {
                 slug={line}
                 name={lineLabel}
                 calls={calls}
-                room={room}
-                onRoom={toggleRoom}
                 micOff={micOff && !onPhone ? { text: micOffText ?? "Mic off", onListen: listenAgain, busy: listening.busy } : null}
                 typed={typed}
               />
             )}
             {/* Out of a session with the mic closed (ADR 0057): the strip says so, with the way back. */}
             {!inSession && micOff && online && (
-              <Stage state="listening" slug="ghost" name="Ghost" calls={[]} room={false} micOff={{ text: micOffText ?? "Mic off", onListen: listenAgain, busy: listening.busy }} />
+              <Stage state="listening" slug="ghost" name="Ghost" calls={[]} micOff={{ text: micOffText ?? "Mic off", onListen: listenAgain, busy: listening.busy }} />
             )}
             {composerEl}
             {pending && errorEl}
@@ -454,24 +438,10 @@ export default function SessionScreen(_: RouteProps) {
     >
       {hasTranscript ? (
         <>
-          <div className={cx("session-record", room && "is-behind-room")}>
+          <div className="session-record">
             <Transcript items={items} nameOf={nameOf} thinkingAs={thinking ? line : null} saying={saying} lines={lines} canReplay={!inSession && online} onAnswer={answer} changes={announced} />
           </div>
           <div ref={end} />
-          {room && inSession && (
-            <RoomView
-              typed={typed}
-              state={state}
-              slug={line}
-              name={lineLabel}
-              reply={lastReply ? { text: lastReply.text, saying: saying[lastReply.at] } : null}
-              heard={lastHeard?.text ?? null}
-              calls={calls}
-              pending={pending}
-              startedAt={turns[0]?.at ?? null}
-              onLeave={leaveRoom}
-            />
-          )}
         </>
       ) : (
         <div className={cx("session-start page-fill", !startOnly && "session-start--live")}>
