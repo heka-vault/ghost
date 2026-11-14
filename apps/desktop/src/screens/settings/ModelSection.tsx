@@ -19,6 +19,8 @@ import { SLOW_FIRST_WORD_MS, verdictOf } from "./check";
 import {
   CONNECTION_KEYS,
   choiceOf,
+  draftConnection,
+  namedProvider,
   msWords,
   OPENAI_COMPATIBLE,
   type ProviderChoice,
@@ -32,7 +34,6 @@ import { PasswordRow, passwordTitle } from "./Passwords";
 const CHOICES: { value: ProviderChoice; label: string; description: string }[] = [
   { value: "anthropic", label: "Anthropic", description: "Claude, with a password (API key) from the Anthropic Console." },
   { value: "openrouter", label: "OpenRouter", description: "Sign in, then Claude or any other model OpenRouter offers." },
-  { value: "cliproxy", label: "Claude subscription", description: "Your Claude plan, through CLIProxy running on your network." },
   { value: "openai-compatible", label: "OpenAI or a local model", description: "OpenAI with a password (API key), or Ollama or LM Studio on this computer." },
   { value: "custom", label: "Your own address", description: "Any address that speaks Anthropic’s or OpenAI’s API." },
 ];
@@ -75,8 +76,7 @@ export function ModelSection({ s, conn, values, online, mock, setValues, help, e
 
   // The draft as a connection: explicit once it names a provider, else the older settings it
   // resolves to (what GET /model reports), with any edits on top.
-  const explicit = !!(values.GHOST_LLM_PROVIDER ?? "").trim();
-  const eff: Values = explicit ? values : { ...(conn?.values ?? {}), ...nonEmpty(values) };
+  const { explicit, values: eff } = draftConnection(values, conn?.values);
   const provider = (eff.GHOST_LLM_PROVIDER || conn?.provider || "anthropic").trim();
   const spec = conn?.providers.find((p) => p.id === provider);
   const protocol = provider === "custom" ? eff.GHOST_LLM_PROTOCOL || "anthropic" : spec?.protocol ?? "anthropic";
@@ -128,7 +128,7 @@ export function ModelSection({ s, conn, values, online, mock, setValues, help, e
     if (!explicit) for (const k of CONNECTION_KEYS) base[k] = conn?.values[k] ?? "";
     setValues({ ...base, ...patch });
   };
-  const savedProvider = (s.values.GHOST_LLM_PROVIDER || conn?.provider || "").trim();
+  const savedProvider = (namedProvider(s.values) || conn?.provider || "").trim();
   const pick = (id: string) => {
     if (id === provider) return;
     if (id === savedProvider) {
@@ -250,14 +250,14 @@ export function ModelSection({ s, conn, values, online, mock, setValues, help, e
   // A fresh check of what is on screen, else the last kept check of the saved connection.
   const shownTest = test?.key === testKey ? test : !editing && kept ? { key: testKey, r: kept } : null;
   const field = (k: string) => fieldId(k);
-  const baseHere = provider === "cliproxy" || provider === "custom";
+  const baseHere = provider === "custom";
   const baseField = (
     <Field
       layout="inline"
       id={field("GHOST_LLM_BASE_URL")}
       label="Address"
       detail="GHOST_LLM_BASE_URL"
-      optional={!baseHere || provider === "cliproxy"}
+      optional={!baseHere}
       help={help("GHOST_LLM_BASE_URL", baseHere && provider === "custom" ? (protocol === "openai" ? "Up to /v1, as OpenAI’s clients take it." : "Where /v1/messages answers.") : `Empty means ${spec?.base_url || "the provider’s own"}.`)}
       error={err("GHOST_LLM_BASE_URL")}
     >
@@ -573,8 +573,4 @@ function sentence(t: string): string {
   const s = t.trim();
   if (!s) return s;
   return s.charAt(0).toUpperCase() + s.slice(1) + (/[.!?]$/.test(s) ? "" : ".");
-}
-
-function nonEmpty(v: Values): Values {
-  return Object.fromEntries(Object.entries(v).filter(([, x]) => (x ?? "").trim() !== ""));
 }
