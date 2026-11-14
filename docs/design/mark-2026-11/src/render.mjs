@@ -11,8 +11,10 @@ import { fileURLToPath } from "node:url";
 import { launch, magick, open } from "./chrome.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const OUT = join(ROOT, "sheet");
-const WORK = join(ROOT, "src", ".work");
+// Round 2 renders its own sheet the same way: pass its folder.
+const BASE = process.argv[2] ? join(process.cwd(), process.argv[2]) : ROOT;
+const OUT = join(BASE, "sheet");
+const WORK = join(BASE, "src", ".work");
 mkdirSync(WORK, { recursive: true });
 
 const cdp = await launch();

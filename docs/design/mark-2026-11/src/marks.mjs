@@ -17,8 +17,8 @@ export const STATES = {
   off: { name: "Not listening", tint: "#7d8796" },
 };
 
-const NIGHT = "#05060a";
-const INK = "#eafcff";
+export const NIGHT = "#05060a";
+export const INK = "#eafcff";
 
 const n = (v) => (Math.abs(v) < 1e-4 ? 0 : Math.round(v * 1000) / 1000);
 
@@ -91,7 +91,7 @@ const svg = (px, inner, defs = "", view = "0 0 100 100") =>
   `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="${view}">${defs ? `<defs>${defs}</defs>` : ""}${inner}</svg>`;
 
 /** Film grain over a gradient: breaks the 8-bit bands in a dark glow without being seen. */
-function grain(px) {
+export function grain(px) {
   if (px < 96) return { defs: "", use: "" };
   const f = id("grain");
   return {
@@ -101,7 +101,7 @@ function grain(px) {
 }
 
 /** The night tile: near-black, the state's light rising from behind Wisp, a rim the light catches. */
-function tile(px, tint, { lift = 0.2, cy = 50 } = {}) {
+export function tile(px, tint, { lift = 0.2, cy = 50 } = {}) {
   const g = id("tg");
   const r = id("tr");
   const hair = 100 / px; // one device pixel in tile units
@@ -174,7 +174,7 @@ function litWisp(px, tint, p, at, { bloom = 1, blink = 0 } = {}) {
 }
 
 /** The anamorphic streak through Wisp's eyes: the floating room's lens that isn't there. */
-function streak(px, tint, y, strength = 1) {
+export function streak(px, tint, y, strength = 1) {
   if (px < 128) return { defs: "", inner: "" };
   const g = id("sk");
   const defs = `<linearGradient id="${g}" x1="0" x2="100" y1="0" y2="0" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="${tint}" stop-opacity="0"/><stop offset="0.5" stop-color="#ffffff" stop-opacity="${n(0.55 * strength)}"/><stop offset="1" stop-color="${tint}" stop-opacity="0"/></linearGradient>`;
@@ -194,7 +194,7 @@ const jitter = (i) => {
  * count and the drawing depend on the size: 120 ticks at 512 and up, 72 at 128, 36 at 48, a
  * hairline and four ticks at 32, nothing under that.
  */
-function ring(px, tint, { cx = 50, cy = 50, R = 37, arc = [-162, -102], level = 1, turn = 0, full = 0, reveal = 1 } = {}) {
+export function ring(px, tint, { cx = 50, cy = 50, R = 37, arc = [-162, -102], level = 1, turn = 0, full = 0, reveal = 1 } = {}) {
   if (px < 32) return "";
   const hair = 100 / px;
   if (px < 48) {
@@ -329,7 +329,7 @@ export function eyes(px, state = "idle") {
 }
 
 /** Not listening: the tray's existing language (ADR 0057), a red stroke corner to corner, crisp at every size. */
-function offStrike(px) {
+export function offStrike(px) {
   const w = Math.max(100 / px * 1.6, 3.2);
   return `<line x1="20" y1="80" x2="80" y2="20" stroke="${NIGHT}" stroke-width="${n(w * 2.2)}" stroke-linecap="round"/><line x1="20" y1="80" x2="80" y2="20" stroke="#ff4d5e" stroke-width="${n(w)}" stroke-linecap="round"/>`;
 }
