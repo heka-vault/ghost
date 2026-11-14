@@ -14,7 +14,7 @@
  * speaks, so nothing re-renders twenty times a second. Reduced motion: Wisp holds the mood's one
  * pose, the halo stands at a middle size, the rings and the arc stand still.
  */
-import { lineHue, MARK_STATES, type MarkState, useGhost } from "@ghost/ui";
+import { lineHue, MARK_STATES, type MarkState, NIGHT, useGhost } from "@ghost/ui";
 import { type CSSProperties, useEffect, useRef } from "react";
 
 import { Mascot, cx } from "../../ui";
@@ -50,6 +50,9 @@ export function Presence({ state, slug, size, className }: { state: StageState; 
   const { voice } = useGhost();
   const ref = useRef<HTMLSpanElement>(null);
   const hue = lineHue(slug);
+  const ghost = slug === "ghost";
+  // Ghost is lit in the mark's colour for the state on the night; an agent keeps its own hue.
+  const tint = state === "offline" ? "#9aa3b2" : MARK_STATES[LIGHT[state]].tint;
 
   useEffect(() => {
     const el = ref.current;
@@ -83,8 +86,12 @@ export function Presence({ state, slug, size, className }: { state: StageState; 
   return (
     <span
       ref={ref}
-      className={cx("presence", `presence--${state}`, className)}
-      style={{ "--presence": `${size}px`, "--presence-fg": `var(--hue-${hue}-fg)`, "--presence-bg": `var(--hue-${hue}-bg)` } as CSSProperties}
+      className={cx("presence", `presence--${state}`, ghost && "presence--ghost", className)}
+      style={
+        (ghost
+          ? { "--presence": `${size}px`, "--presence-fg": tint, "--mark-night": NIGHT }
+          : { "--presence": `${size}px`, "--presence-fg": `var(--hue-${hue}-fg)`, "--presence-bg": `var(--hue-${hue}-bg)` }) as Record<string, string> as CSSProperties
+      }
       aria-hidden
     >
       <span className="presence__halo" />
@@ -98,7 +105,7 @@ export function Presence({ state, slug, size, className }: { state: StageState; 
       )}
       {state === "working" && <span className="presence__arc" />}
       <span className="presence__wisp">
-        <Mascot size={Math.round(size * 0.6)} mood={MOOD[state]} idle={state === "listening" || state === "phone"} level={state === "speaking" ? voice : undefined} lit={slug === "ghost" ? (state === "offline" ? "#9aa3b2" : MARK_STATES[LIGHT[state]].tint) : undefined} />
+        <Mascot size={Math.round(size * 0.6)} mood={MOOD[state]} idle={state === "listening" || state === "phone"} level={state === "speaking" ? voice : undefined} lit={ghost ? tint : undefined} />
       </span>
     </span>
   );

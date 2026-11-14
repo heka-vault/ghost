@@ -343,8 +343,9 @@ if ! adb get-state >/dev/null 2>&1; then \
   echo "accept the prompt on the phone, then check with: adb devices"; exit 1; fi;
 endef
 
-# The native project is generated from app.json and package.json (Expo prebuild) and not committed.
-$(MOBILE)/android/.prebuilt: $(MOBILE)/app.json $(MOBILE)/package.json
+# The native project is generated from app.json, package.json and the icons in assets/ (Expo prebuild)
+# and not committed: a new icon from `make marks` alone regenerates it, so the APK never keeps the old one.
+$(MOBILE)/android/.prebuilt: $(MOBILE)/app.json $(MOBILE)/package.json $(wildcard $(MOBILE)/assets/*.png)
 	@$(android_env) cd $(MOBILE) && CI=1 npx expo prebuild --platform android --clean --no-install
 	@touch $@
 

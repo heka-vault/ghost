@@ -2,6 +2,10 @@
  * The mark (November 2026, "hem with hands"; docs/design-system.md, The mark): one drawing for
  * the live mascot and every still mark, no tail, and the size ladder.
  */
+import { execSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -31,6 +35,8 @@ import {
 import { markStateOf } from "../src/app/mood";
 
 type P = [number, number];
+
+const REPO = join(__dirname, "..", "..", "..");
 
 /** Points along the body below the head (the cubics), and the head's half circle. */
 function outline(s = 0): P[] {
@@ -90,6 +96,32 @@ describe("the silhouette", () => {
   it("keeps the old tail's drawing out of the body", () => {
     expect(hemPath(0)).not.toContain("18.6 22.9");
     expect(GHOST_PATH).not.toContain("16.2 19.8");
+  });
+
+  it("draws nothing below the hem in the path every icon is made from, not only in the curves", () => {
+    // The tests above sample hemCurves; the icons, the glyph and the tray are drawn from
+    // hemPath's string. Every point and control point in it stays inside the hem's reach.
+    for (const d of [hemPath(0), GHOST_PATH, GHOST_PATH_SMALL]) {
+      const body = d.slice(0, d.indexOf("Z") + 1);
+      const nums = [...body.replace(/^M5 10A7 7 0 0 1 19 10/, "").matchAll(/-?[\d.]+/g)].map((m) => Number(m[0]));
+      const ys = nums.filter((_, i) => i % 2 === 1);
+      expect(Math.max(...ys)).toBeLessThanOrEqual(HEM.base + 1.33 * HEM.depth + 0.01);
+      const xs = nums.filter((_, i) => i % 2 === 0);
+      expect(Math.min(...xs)).toBeGreaterThan(4.4);
+      expect(Math.max(...xs)).toBeLessThan(19.6);
+    }
+  });
+
+  it("has no copy of the old tail anywhere in the repository's sources", () => {
+    // The old body's own numbers (its tail ran to (18.6, 22.9) from (16.2, 19.8)), with spaces
+    // as in SVG and with commas as in an Android vector. The concept rounds are records.
+    const files = execSync("git ls-files", { cwd: REPO, encoding: "utf8" })
+      .split("\n")
+      .filter((f) => /\.(ts|tsx|js|mjs|astro|svg|xml|kt|java|json|css|html|md)$/.test(f))
+      .filter((f) => !f.startsWith("docs/design/") && !f.startsWith("docs/adr/") && f !== "apps/desktop/test/mark.test.ts");
+    const old = /16\.2[ ,]19\.8|18\.6[ ,]22\.9|23\.6 12\.6 22\.6/;
+    const hits = files.filter((f) => old.test(readFileSync(join(REPO, f), "utf8")));
+    expect(hits).toEqual([]);
   });
 
   it("ripples the hem when it swings, inside the same bounds, and is still at rest at 0", () => {

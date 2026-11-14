@@ -309,6 +309,12 @@ button.thread-call[aria-expanded="true"] .thread-call__app { color: var(--text-1
 /* The mic is closed: Wisp greys and a struck ring sits round it. */
 .presence.is-mic-off { color: var(--text-3); }
 .presence.is-mic-off .presence__halo { background: color-mix(in srgb, var(--danger) 12%, transparent); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--danger) 55%, transparent); }
+/* Ghost's own presence is the mark (docs/design-system.md, The mark): its lit Wisp on the night
+   in every state and both themes, the state's colour in the swell. Never the accent's indigo
+   behind it, never a white Wisp on a light halo. */
+.presence.presence--ghost .presence__halo { background: var(--mark-night); }
+.presence.presence--ghost.presence--you .presence__halo { background: color-mix(in srgb, var(--phase-listening) 16%, var(--mark-night)); }
+.presence.presence--ghost.is-mic-off .presence__halo { background: color-mix(in srgb, var(--danger) 12%, var(--mark-night)); }
 
 /* The operator is heard: a ring breathing slowly, the same whatever the volume. */
 .stage-breath {
