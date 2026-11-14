@@ -2606,7 +2606,7 @@ export interface components {
             /** Format: date-time */
             last_active_at: string | null;
             /**
-             * @description How it is drawn, `"<shape>:<colour>"` (shapes: wisp, drop, bell, hood, cloud,
+             * @description How it is drawn, `"<shape>:<colour>"` (shapes: wisp, drop, bell, cloud,
              *     lantern, star, moth; colours 0 to 7). Null: the one the desktop picks from its slug.
              */
             look: string | null;

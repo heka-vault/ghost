@@ -89,7 +89,7 @@ pub enum ConversationError {
     #[error("keep the job to a line")]
     JobTooLong,
     #[error(
-        "{0:?} is not a look: a shape (wisp, drop, bell, hood, cloud, lantern, star, moth), a colon and a colour 0 to 7"
+        "{0:?} is not a look: a shape (wisp, drop, bell, cloud, lantern, star, moth), a colon and a colour 0 to 7"
     )]
     BadLook(String),
     #[error("that memory is too long")]
