@@ -141,6 +141,9 @@ export type HearView = Schemas["HearView"];
 export type WakeTakesView = Schemas["WakeTakesView"];
 export type ReportsView = Schemas["ReportsView"];
 export type KeptReportView = Schemas["KeptReportView"];
+export type UninstallView = Schemas["UninstallView"];
+export type LeftoverCategoryView = Schemas["LeftoverCategoryView"];
+export type LeftoverItemView = Schemas["LeftoverItemView"];
 export type WakeTakeView = Schemas["WakeTakeView"];
 export type WakeTakesChoice = Schemas["WakeTakesChoice"];
 export type WakeTakeLabel = Schemas["WakeTakeLabel"];
@@ -815,6 +818,11 @@ export class GhostClient {
   /** Off sends nothing, keeps nothing waiting, and deletes the install's id. */
   setReportsChoice(send: boolean) {
     return unwrap(this.api.PUT("/reports/choice", { body: { send } }));
+  }
+  // ------------------------------------------------------------------ removing Ghost (#147)
+  /** What Ghost left on this computer, by kind, with sizes. The removal is the app's (`remove_ghost`). */
+  uninstallView() {
+    return unwrap(this.api.GET("/uninstall"));
   }
   hearRuns() {
     return unwrap(this.api.GET("/hear/runs"));

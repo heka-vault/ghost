@@ -2828,6 +2828,94 @@
         ],
         "type": "object"
       },
+      "LeftoverCategoryView": {
+        "description": "One kind the person chooses.",
+        "properties": {
+          "id": {
+            "description": "`running`, `other-tools`, `speech-models`, `app-storage`, `data` or `vault`.",
+            "type": "string"
+          },
+          "items": {
+            "description": "What is there now (empty: nothing of this kind is left).",
+            "items": {
+              "$ref": "#/components/schemas/LeftoverItemView"
+            },
+            "type": "array"
+          },
+          "persons": {
+            "description": "The person's own words and keys: not chosen unless they say so.",
+            "type": "boolean"
+          },
+          "sentence": {
+            "type": "string"
+          },
+          "size": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          },
+          "warning": {
+            "description": "For what cannot be had back.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "sentence",
+          "warning",
+          "persons",
+          "size",
+          "items"
+        ],
+        "type": "object"
+      },
+      "LeftoverItemView": {
+        "description": "One thing Ghost left.",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "note": {
+            "description": "Something the person does themselves, or a fact.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "paths": {
+            "description": "The files and folders it is, home shown as `~`; only those there now.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "size": {
+            "description": "Bytes on disk.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "what": {
+            "description": "What it is, in the person's words.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "what",
+          "paths",
+          "size",
+          "note"
+        ],
+        "type": "object"
+      },
       "LinkView": {
         "description": "What letting the tool use Ghost would do, shown before it is done.",
         "properties": {
@@ -6948,6 +7036,30 @@
           "text",
           "at",
           "compacted"
+        ],
+        "type": "object"
+      },
+      "UninstallView": {
+        "properties": {
+          "categories": {
+            "items": {
+              "$ref": "#/components/schemas/LeftoverCategoryView"
+            },
+            "type": "array"
+          },
+          "finish": {
+            "description": "The one line that finishes it: `sudo apt remove heka-ghost-desktop`, or the AppImage\nto delete.",
+            "type": "string"
+          },
+          "install": {
+            "description": "`deb`, `appimage` or `checkout`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "categories",
+          "install",
+          "finish"
         ],
         "type": "object"
       },
@@ -12015,6 +12127,27 @@
         "summary": "Get Status",
         "tags": [
           "session"
+        ]
+      }
+    },
+    "/uninstall": {
+      "get": {
+        "operationId": "uninstall_view_uninstall_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UninstallView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "What Ghost left on this computer",
+        "tags": [
+          "uninstall"
         ]
       }
     },

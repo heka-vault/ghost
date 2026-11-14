@@ -816,6 +816,32 @@ async fn no_tool_reads_or_writes_the_other_tools_on_this_computer() {
 }
 
 #[tokio::test]
+async fn no_tool_lists_or_removes_what_ghost_left_on_this_computer() {
+    // #147: removing Ghost from this computer is the person's, at their terminal or in
+    // Settings › General. No agent, run or outside client (served a part of these same tools,
+    // ADR 0048) can list it, start it or choose what goes.
+    let w = world().await;
+    for t in w.server.tools() {
+        let n = t.name.to_lowercase();
+        for word in [
+            "uninstall",
+            "leftover",
+            "remove_ghost",
+            "keyring",
+            "autostart",
+            "vault",
+        ] {
+            assert!(!n.contains(word), "{n}");
+        }
+        let about = t.description.as_deref().unwrap_or_default().to_lowercase();
+        assert!(
+            !about.contains("uninstall") && !about.contains("remove ghost from"),
+            "{n}: {about}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn no_tool_chooses_the_model_or_reaches_claude_codes_relay() {
     // ADR 0069: which model Ghost runs on is the operator's choice in Settings › Model, and
     // the relay a Claude Code process is given is that process's alone. No agent, and no

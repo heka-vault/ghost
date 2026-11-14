@@ -1812,6 +1812,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/uninstall": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** What Ghost left on this computer */
+        get: operations["uninstall_view_uninstall_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/voice/realtime": {
         parameters: {
             query?: never;
@@ -3050,6 +3067,36 @@ export interface components {
             sent_at: string;
             /** @description The exception's type and message, as sent. */
             title: string;
+        };
+        /** @description One kind the person chooses. */
+        LeftoverCategoryView: {
+            /** @description `running`, `other-tools`, `speech-models`, `app-storage`, `data` or `vault`. */
+            id: string;
+            /** @description What is there now (empty: nothing of this kind is left). */
+            items: components["schemas"]["LeftoverItemView"][];
+            /** @description The person's own words and keys: not chosen unless they say so. */
+            persons: boolean;
+            sentence: string;
+            /** Format: int64 */
+            size: number;
+            title: string;
+            /** @description For what cannot be had back. */
+            warning: string | null;
+        };
+        /** @description One thing Ghost left. */
+        LeftoverItemView: {
+            key: string;
+            /** @description Something the person does themselves, or a fact. */
+            note: string | null;
+            /** @description The files and folders it is, home shown as `~`; only those there now. */
+            paths: string[];
+            /**
+             * Format: int64
+             * @description Bytes on disk.
+             */
+            size: number;
+            /** @description What it is, in the person's words. */
+            what: string;
         };
         /** @description What letting the tool use Ghost would do, shown before it is done. */
         LinkView: {
@@ -4372,6 +4419,16 @@ export interface components {
             session_id: string;
             text: string;
         };
+        UninstallView: {
+            categories: components["schemas"]["LeftoverCategoryView"][];
+            /**
+             * @description The one line that finishes it: `sudo apt remove heka-ghost-desktop`, or the AppImage
+             *     to delete.
+             */
+            finish: string;
+            /** @description `deb`, `appimage` or `checkout`. */
+            install: string;
+        };
         /** @description Ghost already in the tool. */
         UsesGhostView: {
             /** @description The client it names, when it names one. */
@@ -4686,6 +4743,8 @@ export type SchemaHttpValidationError = components['schemas']['HTTPValidationErr
 export type SchemaImportSourceView = components['schemas']['ImportSourceView'];
 export type SchemaItemKey = components['schemas']['ItemKey'];
 export type SchemaKeptReportView = components['schemas']['KeptReportView'];
+export type SchemaLeftoverCategoryView = components['schemas']['LeftoverCategoryView'];
+export type SchemaLeftoverItemView = components['schemas']['LeftoverItemView'];
 export type SchemaLinkView = components['schemas']['LinkView'];
 export type SchemaListeningRequest = components['schemas']['ListeningRequest'];
 export type SchemaListeningView = components['schemas']['ListeningView'];
@@ -4795,6 +4854,7 @@ export type SchemaTakeEnding = components['schemas']['TakeEnding'];
 export type SchemaTurn = components['schemas']['Turn'];
 export type SchemaTurnEvent = components['schemas']['TurnEvent'];
 export type SchemaTurnView = components['schemas']['TurnView'];
+export type SchemaUninstallView = components['schemas']['UninstallView'];
 export type SchemaUsesGhostView = components['schemas']['UsesGhostView'];
 export type SchemaValidationError = components['schemas']['ValidationError'];
 export type SchemaVaultView = components['schemas']['VaultView'];
@@ -8300,6 +8360,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Status"];
+                };
+            };
+        };
+    };
+    uninstall_view_uninstall_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UninstallView"];
                 };
             };
         };

@@ -59,6 +59,7 @@ import { DESKTOP_BUILD, DESKTOP_VERSION } from "../../app/version";
 import { HttpError } from "./errors";
 import { type HearDesign, MockHear } from "./hear";
 import { MockReports } from "./reports";
+import { uninstallView } from "./uninstall";
 import { MockWakeTakes } from "./wakeTakes";
 import { isConnectionKey, isModelOnly, MockModel } from "./model";
 import { MockOtherTools } from "./otherTools";
@@ -1828,6 +1829,7 @@ export class MockDaemon {
       const answer = await this.hear.handle(method, path, query, b);
       if (answer !== undefined) return answer;
     }
+    if (method === "GET" && path === "/uninstall") return uninstallView();
     if (path.startsWith("/reports")) {
       const answer = this.reports.handle(method, path, b);
       if (answer !== undefined) return answer;

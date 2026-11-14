@@ -52,6 +52,10 @@ SOURCE_NAME="ghost.mic"
 LEGACY="$HOME/.config/pipewire/pipewire.conf.d/90-ghost-echo-cancel.conf"
 DRIVER_CONF="$HOME/.config/wireplumber/wireplumber.conf.d/51-ghost-sink-driver.conf"
 RATES_CONF="$HOME/.config/pipewire/pipewire.conf.d/50-ghost-allowed-rates.conf"
+# The unit starts only while this link resolves (its ConditionPathExists, #147): Ghost points
+# it at its installed ghostd or its AppImage (GHOST_INSTALLED); run by hand from a checkout or
+# the bundle, at this installer, which goes when the checkout or the package does.
+INSTALLED="${XDG_STATE_HOME:-$HOME/.local/state}/ghost/installed"
 
 MODE="" SINK_DRIVES=false FORCE=false
 for arg in "$@"; do
@@ -112,7 +116,7 @@ RULE
 
 if [[ "$MODE" == "--uninstall" ]]; then
   systemctl --user disable --now "$UNIT" 2>/dev/null || true
-  rm -f "$UNIT_DIR/$UNIT" "$CONF" "$LEGACY"
+  rm -f "$UNIT_DIR/$UNIT" "$CONF" "$LEGACY" "$INSTALLED"
   systemctl --user daemon-reload
   echo "removed $UNIT and $CONF"
   if [[ -e "$RATES_CONF" ]]; then
@@ -249,8 +253,9 @@ if [[ "$RATE" != 48000 ]]; then
   echo "allowed $RATE Hz on the graph (live, and $RATES_CONF for the next start)"
 fi
 
-mkdir -p "$CONF_DIR" "$UNIT_DIR"
+mkdir -p "$CONF_DIR" "$UNIT_DIR" "$(dirname "$INSTALLED")"
 printf '%s\n' "$RENDERED" > "$CONF"
+ln -sfn "${GHOST_INSTALLED:-$HERE/install.sh}" "$INSTALLED"
 install -m 644 "$UNIT_SRC" "$UNIT_DIR/$UNIT"
 systemctl --user daemon-reload
 systemctl --user enable --now "$UNIT" >/dev/null 2>&1

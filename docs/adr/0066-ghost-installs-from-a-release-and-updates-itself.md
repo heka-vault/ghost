@@ -49,6 +49,12 @@ on and `models_ready` flips with no restart, and whether one is downloading them
 app's download then follows; that look stops when the models load, so a turn never pays for
 it. The person who installed Ghost may open it while `ghostd models fetch` runs.
 
+*Amended 2026-11-14 (#147, [ADR 0070](0070-the-person-removes-what-ghost-left-the-package-deletes-nothing.md)):*
+the .deb carries a `prerm` that deletes nothing in a home folder and, on `remove` only, says
+what stays and that `ghostd uninstall` removes it; the echo canceller's unit below is
+conditioned on a link to the installed Ghost (`%S/ghost/installed`), so it stops starting once
+Ghost is gone, and the daemon rewrites a unit Ghost wrote to that form at its start.
+
 **The release carries Ghost's echo canceller** (issue #116, ADR 0064). The installer and its
 two templates (`infra/pipewire/`) are bundle resources, found beside the daemon's binary
 (`/usr/lib/heka-ghost-desktop/pipewire/`, the AppImage's the same under its mount). The

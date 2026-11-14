@@ -1050,6 +1050,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_phone_cannot_list_or_remove_what_ghost_left() {
+        // #147: removing Ghost from this computer is the desk's only.
+        let p = phone();
+        let creds = pair(&p).await;
+        for (method, path) in [
+            ("GET", "/uninstall"),
+            ("POST", "/uninstall"),
+            ("DELETE", "/uninstall"),
+        ] {
+            let (r, _) = signed(&p.app, &creds, method, path, None).await;
+            assert_eq!(r.status, StatusCode::NOT_FOUND, "{method} {path}");
+        }
+    }
+
+    #[tokio::test]
     async fn offer_refused_while_busy_or_not_ready() {
         let p = phone();
         let creds = pair(&p).await;

@@ -249,16 +249,13 @@ log, under your name.
 
 ## Undo
 
-```bash
-ghostd echo-cancel off   # only if step 6 turned it on
-ghostd mcp remove claude-code
-sudo apt remove heka-ghost-desktop
-```
-
-Then, only if the person asks to delete everything Ghost kept (their transcripts, agents and
-settings), with Ghost quit: `rm -rf ~/.config/ghost ~/.local/share/ghost ~/.cache/ghost` (the
-last is the speech models). Remove `ghost` from your own configuration (`claude mcp remove
---scope user ghost`, `codex mcp remove ghost`, or the entry in `mcp.json`).
+Run `ghostd uninstall --dry-run` and show the person its list: every kind of thing Ghost left,
+with sizes, including `~/.config/autostart/heka-ghost-desktop.desktop` and the window's own
+storage, `~/.local/share/dev.heka.ghost`. Remove only what they choose. `ghostd uninstall
+--keep-data --yes` stops Ghost and takes all but their data and passwords; those go only on
+their explicit yes, each warned about (`ghostd uninstall --all`, or answering per kind). It
+ends with the one line the person runs (`sudo apt remove heka-ghost-desktop`). If it says
+Claude Code is left, run the command it shows (`claude mcp remove --scope user ghost`).
 
 ## Never do these (again)
 
