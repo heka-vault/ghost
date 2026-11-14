@@ -157,7 +157,15 @@ OpenAI API key, or a local model in Ollama or LM Studio (no key). Their key is t
 into Ghost's own window (the first run's Connect a model, or Settings › Passwords), or in their
 own terminal with `ghostd passwords set ANTHROPIC_API_KEY` (or `OPENROUTER_API_KEY`,
 `OPENAI_API_KEY`), which reads it without echo. Not through you, not into this chat, and never
-your own credentials. You may check for a local model, which needs no key (no output: none):
+your own credentials.
+
+If the person has Claude Code signed in on this computer, there is nothing to type: the first
+run's model step offers **Use Claude Code**, and Ghost then runs their own Claude Code to
+answer. Tell them replies count against their Claude plan's limits, the same ones their
+coding uses. It is their click in Ghost, not yours: never copy a sign-in, and if Claude Code
+is not signed in, ask them to run `claude auth login` in their own terminal.
+
+You may check for a local model, which needs no key (no output: none):
 
 ```bash
 curl -s -m 2 http://127.0.0.1:11434/api/tags >/dev/null && echo "Ollama is running"
