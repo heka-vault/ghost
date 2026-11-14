@@ -54,7 +54,15 @@ fn main() -> anyhow::Result<()> {
     let level = std::env::var("GHOST_LOG")
         .or_else(|_| std::env::var("GHOST_LOG_LEVEL").map(|l| l.to_lowercase()))
         // The protocol library's own INFO lines dump each in-process handshake whole.
-        .unwrap_or_else(|_| "info,rmcp=warn".into());
+        // `ghostd models` prints its own progress on stdout; its INFO lines would only
+        // repeat it (#139).
+        .unwrap_or_else(|_| {
+            if std::env::args().nth(1).as_deref() == Some("models") {
+                "warn".into()
+            } else {
+                "info,rmcp=warn".into()
+            }
+        });
     let mirror = LogMirror::new();
     tracing_subscriber::registry()
         .with(EnvFilter::try_new(&level).unwrap_or_else(|_| EnvFilter::new("info")))
@@ -355,7 +363,11 @@ async fn llm(args: &[String]) -> i32 {
 async fn speech_models(args: &[String]) -> i32 {
     let env: HashMap<String, String> = std::env::vars().collect();
     match settings_from(&env) {
-        Ok((_, voice)) => ghostd::speech_models::cli(args, &voice, &mut std::io::stdout()).await,
+        Ok((_, voice)) => {
+            use std::io::IsTerminal;
+            let tty = std::io::stdout().is_terminal();
+            ghostd::speech_models::cli(args, &voice, &mut std::io::stdout(), tty).await
+        }
         Err(e) => {
             eprintln!("{e}");
             2

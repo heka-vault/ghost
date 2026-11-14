@@ -51,6 +51,11 @@ pub struct SpeechModelsFetch {
     /// In plain words, when it failed.
     #[schema(required)]
     pub error: Option<String>,
+    /// Another Ghost process started this file's download first (the terminal's `ghostd
+    /// models fetch`, or the app): this one follows its progress and asks for nothing
+    /// itself, and carries on from where it stopped if it goes away (#135).
+    #[serde(default)]
+    pub following: bool,
 }
 
 impl SpeechModelsFetch {
@@ -61,6 +66,7 @@ impl SpeechModelsFetch {
             total_bytes: 0,
             file: None,
             error: None,
+            following: false,
         }
     }
 }
@@ -85,7 +91,8 @@ pub struct SpeechModelsView {
 pub trait SpeechModelsPort: Send + Sync {
     fn view(&self) -> SpeechModelsView;
     /// Start the download of what is missing, in the background; a download already
-    /// running is left to run. Err in plain words when it cannot start.
+    /// running is left to run, and one another process is making is followed, not
+    /// started again. Err in plain words when it cannot start.
     fn fetch(&self) -> Result<SpeechModelsView, String>;
 }
 
