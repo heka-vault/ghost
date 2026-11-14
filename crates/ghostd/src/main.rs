@@ -384,25 +384,14 @@ async fn echo_cancel(args: &[String], infra_dir: &std::path::Path) -> i32 {
         None | Some("status") => {
             let running = ghost_api::deps::unit_active(ghostd::microphone::CANCELLER_UNIT);
             let installer = ghost_api::echo_cancel::installer(infra_dir);
-            println!(
-                "echo canceller: {}",
-                if running {
-                    "running (ghost.mic)"
-                } else {
-                    "not running"
-                }
-            );
-            println!(
-                "installer: {}{}",
-                installer.display(),
-                if installer.is_file() {
-                    ""
-                } else {
-                    " (missing)"
-                }
-            );
-            if !running {
-                println!("ghostd echo-cancel on sets it up");
+            // The check `on` makes, so `status` never suggests `on` where it can't work (#138).
+            let server = if running {
+                ghost_api::echo_cancel::SoundServer::Unknown
+            } else {
+                ghost_api::echo_cancel::probe_sound_server()
+            };
+            for line in ghost_api::echo_cancel::status_lines(running, &installer, &server) {
+                println!("{line}");
             }
             0
         }

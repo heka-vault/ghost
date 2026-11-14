@@ -1137,6 +1137,47 @@ async fn the_bridge_round_trips_a_tool_call_as_its_client() {
     task.abort();
 }
 
+/// #134: requests piped in, then the end of input, as a one-shot script sends them: the
+/// bridge writes the replies to every request it read before it exits.
+#[tokio::test]
+async fn the_bridge_answers_what_it_read_before_its_input_closed() {
+    use tokio::io::AsyncReadExt;
+    let w = world("").await;
+    let token = w.clients.create("codex", true).unwrap().token.to_string();
+    let input = [
+        json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"setup","version":"1"}}}),
+        json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+        json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"status","arguments":{}}}),
+        json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"notify","arguments":{"title":"piped"}}}),
+        // Still waiting when the input ends: nothing happens for a second.
+        json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"events_wait","arguments":{"timeout_s":1.0}}}),
+    ]
+    .iter()
+    .map(|m| format!("{m}\n"))
+    .collect::<String>();
+    let (mut ours, theirs) = tokio::io::duplex(1 << 20);
+    let target = Target {
+        url: w.url.clone(),
+        token: zeroize::Zeroizing::new(token),
+        retry_for: Duration::from_secs(5),
+    };
+    tokio::time::timeout(
+        Duration::from_secs(20),
+        bridge(std::io::Cursor::new(input.into_bytes()), theirs, target),
+    )
+    .await
+    .expect("the bridge exits once it has answered")
+    .unwrap();
+    let mut out = String::new();
+    ours.read_to_string(&mut out).await.unwrap();
+    let ids: Vec<Value> = out
+        .lines()
+        .map(|l| serde_json::from_str::<Value>(l).unwrap()["id"].clone())
+        .collect();
+    assert_eq!(ids, [json!(1), json!(2), json!(3), json!(4)], "{out}");
+    assert_eq!(w.items().len(), 1, "the change was made once");
+}
+
 #[tokio::test]
 async fn the_bridge_waits_for_a_daemon_that_starts_later_and_says_so_when_none_does() {
     // Nothing is listening yet: the client's hello waits, and is answered once Ghost is up.
@@ -1437,13 +1478,20 @@ fn the_command_line_adds_lists_and_removes_and_shows_a_token_once() {
     );
     assert!(!tmp.path().join("data/clients/claude-code.token").exists());
 
-    // For a tool that only starts commands: the token in a private file, none in the config.
+    // For a tool that only starts commands: the token in a private file and nowhere in
+    // what is printed (#136), which says where it went.
     let (code, out, _) = cli(&["add", "codex", "--command"], &cfg);
     assert_eq!(code, 0);
     assert!(out.contains("mcp serve --client codex"));
-    assert!(tmp.path().join("data/clients/codex.token").exists());
-    let config = out.split("mcp.json:").nth(1).unwrap();
-    assert!(!config.contains("ghost.codex."), "{config}");
+    let file = tmp.path().join("data/clients/codex.token");
+    let saved = std::fs::read_to_string(&file).unwrap();
+    assert!(saved.trim().starts_with("ghost.codex."));
+    assert!(
+        !out.contains("ghost.codex."),
+        "the token is not printed: {out}"
+    );
+    assert!(!out.contains("shown this once"), "{out}");
+    assert!(out.contains(&file.display().to_string()), "{out}");
 
     let (code, out, _) = cli(&["list"], &cfg);
     assert_eq!(code, 0);

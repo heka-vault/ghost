@@ -27,6 +27,11 @@ describe("Ghost's ears and voice (ADR 0066)", () => {
   it("shows the download as it goes, and the failure in the daemon's words", () => {
     const going = speechLine(view({ fetch: { state: "fetching", done_bytes: 1.2e9, total_bytes: 2.9e9, file: "encoder-model.onnx.data", error: null } }));
     expect(going).toEqual({ state: "fetching", text: "Downloading 1.2 GB of 2.9 GB · encoder-model.onnx.data" });
+    // #135: a terminal's `ghostd models fetch` started it; the app follows the same download.
+    const followed = speechLine(view({ fetch: { state: "fetching", done_bytes: 1.2e9, total_bytes: 2.9e9, file: "encoder-model.onnx.data", error: null, following: true } }));
+    expect(followed.state).toBe("fetching");
+    expect(followed.text).toBe("Already downloading 1.2 GB of 2.9 GB · encoder-model.onnx.data");
+    expect(going.text.startsWith("Downloading ")).toBe(true);
     const failed = speechLine(view({ fetch: { ...idle, state: "failed", error: "Ghost could not reach huggingface.co" } }));
     expect(failed).toEqual({ state: "failed", text: "Ghost could not reach huggingface.co" });
   });
@@ -64,5 +69,26 @@ describe("a fresh install lands in the first run (ADR 0066)", () => {
     expect(opensFirstRun({ ...base, path: "/settings/general" })).toBe(false);
     expect(opensFirstRun({ ...base, locked: true })).toBe(false);
     expect(opensFirstRun({ ...base, design: true })).toBe(false);
+  });
+});
+
+describe("a download a terminal started, in the mock (#135)", () => {
+  it("is already under way and followed, with no Download pressed", async () => {
+    const { vi } = await import("vitest");
+    const { MockDaemon } = await import("../src/design/mock/daemon");
+    const { composeFixtures } = await import("../src/design/mock/fixtures");
+    const { scenarioByName } = await import("../src/design/mock/scenarios");
+    vi.stubGlobal("window", { location: { search: "?speech=following" } });
+    try {
+      const s = scenarioByName("starting");
+      const d = new MockDaemon(s, composeFixtures(s), {});
+      const v = (await d.handle("GET", "/speech-models", new URLSearchParams(), null)) as SpeechModelsView;
+      expect(v.fetch.state).toBe("fetching");
+      expect(v.fetch.following).toBe(true);
+      expect(v.fetch.done_bytes / v.fetch.total_bytes).toBeGreaterThan(0.4);
+      expect(speechLine(v).text.startsWith("Already downloading ")).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
