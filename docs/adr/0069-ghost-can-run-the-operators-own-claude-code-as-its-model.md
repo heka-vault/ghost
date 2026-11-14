@@ -27,13 +27,23 @@ session opens (during the greeting) and stopped when it ends:
 
 ```
 claude --print --input-format stream-json --output-format stream-json --verbose
-       --include-partial-messages --system-prompt <Ghost's whole prompt>
+       --include-partial-messages --system-prompt-file <0600 file>
        --tools "" --setting-sources "" --strict-mcp-config --mcp-config <0600 file>
        --allowedTools=mcp__ghost__* --disable-slash-commands --no-session-persistence
        --permission-mode dontAsk --settings {"alwaysThinkingEnabled":false}
        --effort low --model <alias>
 ```
 
+- `--system-prompt-file`: Ghost's whole prompt (the agent's persona, its memory, the operator's
+  rules) is in a 0600 file, never on the command line, which every user of the computer can
+  read (`/proc/<pid>/cmdline`). The relay's config and bearer are a 0600 file too. Both are in a
+  0700 folder per process under `$XDG_RUNTIME_DIR/ghost/claude-code/`, removed when the process
+  ends; the folders a stopped Ghost left (a crash, a kill) are swept at the next start. The
+  program's `--help` lists this switch only inside `--bare`'s text, so detection asks the
+  program's parser (`<switch> /dev/null --ghost-probe-unknown` names the probe as the unknown
+  option only when the switch is known); a version without it is refused, never given the
+  prompt on argv. Nothing else of the operator's is on argv: the model's alias and the fixed
+  `--settings` JSON.
 - `--tools ""`: the program's built-in tools (files, shell, web) are off.
 - `--setting-sources ""`: the operator's user, project and local settings, and with them
   their hooks and plugins, are not loaded. `--disable-slash-commands`: no skills or commands.
@@ -52,8 +62,8 @@ claude --print --input-format stream-json --output-format stream-json --verbose
   became the program's credential.
 - `--bare` is not used: it never reads the operator's sign-in.
 
-Every switch Ghost passes is one the detection requires the program to list in its own `--help`
-(`program::REQUIRED_SWITCHES`); a version without one is refused with a sentence and never run
+Every switch Ghost passes is one the detection requires of the program, from its own `--help`
+or its parser (`program::REQUIRED_SWITCHES`); a version without one is refused with a sentence and never run
 with its own tools on. Another major or minor than the 2.1 Ghost was measured with runs when it
 has every switch, with a one-line note; refusing a newer version that works would block the
 operator for nothing, and running one without a switch is never allowed.
