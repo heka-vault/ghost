@@ -1,4 +1,9 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "bundle": { "createUpdaterArtifacts": true }
+  "bundle": {
+    "createUpdaterArtifacts": true
+  },
+  "build": {
+    "beforeBuildCommand": "pnpm -w sidecars && pnpm --filter @ghost/desktop build:release"
+  }
 }

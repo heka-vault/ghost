@@ -239,10 +239,44 @@ comes from is the project's to drop).
 `GHOST_POSTHOG_KEY=dev GHOST_REPORTS_URL=http://127.0.0.1:<port>`. Never set the real key in
 `settings.env` or a unit file.
 
-**Readable page frames** need the release's source maps uploaded to PostHog (`posthog-cli
-sourcemap inject --directory apps/desktop/dist` and `upload`) with a personal API key that has
-the error tracking write scope, as a second secret; until then a page's frames are minified,
-named by the bundle's hashed file and the version.
+**Two PostHog secrets, one variable, and what each may do:**
+
+| Name | What it is | Who reads it |
+| --- | --- | --- |
+| secret `POSTHOG_PROJECT_KEY` | the project key (`phc_…`), which can only send events | the build step, as `GHOST_POSTHOG_KEY`, compiled into `ghostd` and the shell; refused unless it starts `phc_` |
+| secret `POSTHOG_API_KEY` | a **personal** API key with error tracking write and organization read | the upload step only, for a tag, as `POSTHOG_CLI_API_KEY`; never the build, never compiled in, never printed; refused if it starts `phc_` |
+| variable `POSTHOG_PROJECT_ID` | the project's number | the upload step, as `POSTHOG_CLI_PROJECT_ID` |
+
+**Readable page frames** (ADR 0067). `tauri.release.conf.json` builds the pages with
+`build:release`: `vite build` with hidden source maps, then `tools/report_chunks.py` gives each
+script its chunk id (the two marks `posthog-cli sourcemap inject` writes), writes
+`report-chunks.json` into `dist` for the shell, and moves the maps to
+`$GHOST_REPORT_MAPS_DIR` (`$RUNNER_TEMP/ghost-maps`), so the shell never embeds one. The step
+*no source map ships* fails the run if a `.map` is in `dist`, the .deb, the AppImage or the
+shell's embedded assets, or if a kept map's id is not the manifest's. *The source map uploader,
+pinned* fetches `posthog-cli` 0.20.0 and checks its SHA-256 on every run; for a tag, *the page
+source maps, uploaded* runs `posthog-cli sourcemap upload` on the kept maps as the release
+`ghost-desktop` at Ghost's version. A dry run does all of it but the upload. `make dev` and
+`make bundle` build the pages as before: no maps, no ids, no manifest, and no key is read.
+
+Bumping the CLI: change `VERSION` and `SHA256` in `scripts/posthog-cli.sh` together (the
+digest GitHub shows for `posthog-cli-x86_64-unknown-linux-gnu.tar.gz` on the
+`posthog-cli/v<version>` release, which PostHog's installer also carries), and read what its
+`sourcemap upload` expects of a chunk id before trusting the build's marks
+(`cli/src/sourcemaps/` in PostHog's repository). The CLI sends PostHog its own usage
+telemetry from the runner (its command name and an invocation id); it has no switch for it.
+
+**After a release, check that a page error resolves:**
+
+1. In PostHog, Error tracking › Settings › Symbol sets: one per page script, under the release
+   `ghost-desktop` at the new version (the run's upload step lists how many pairs it sent).
+2. Each symbol set's chunk id is one the run printed in *no source map ships* (one line per
+   script: the id, then `assets/<name>.js`, the same as `report-chunks.json` in the bundle).
+3. A release has no way to make a page fail on purpose. The first page error that arrives
+   (`ghost_kind: page`) shows whether it worked: its frames name `src/…/*.tsx` files and lines,
+   and its raw event's frames carry `platform: web:javascript` and a `chunk_id`. A frame PostHog
+   could not resolve says so and shows `assets/<name>.js:1:<col>`; if every frame does, the
+   symbol sets are missing or their ids are not the build's.
 
 ## What each build says it is
 
