@@ -158,6 +158,8 @@ pub fn run() {
                 let _ = w.hide();
             }
             autostart::apply(app.handle());
+            // ADR 0067: which uploaded source map each page script belongs to.
+            reports::load_page_chunks(app.handle());
             app.manage(updater::Updater::new(app.handle()));
             updater::start(app.handle());
             let handle = start_supervisor(app.handle());

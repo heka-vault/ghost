@@ -41,11 +41,16 @@ jobs:
       # the shell (`option_env!`); a build without it, CI's and a checkout's, has no sender.
       # A dry run builds with it too, so the wiring is proven before a tag; its install test
       # below sends nothing.
+      # GHOST_REPORT_MAPS_DIR: where the release config's frontend build (`build:release`)
+      # leaves the page source maps after giving each script its chunk id
+      # (tools/report_chunks.py); dist keeps none, so none is embedded or shipped. Uploaded
+      # below, for a tag only. No PostHog key reaches this step but the project key.
       - name: the bundle, signed
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
           GHOST_POSTHOG_KEY: ${{ secrets.POSTHOG_PROJECT_KEY }}
+          GHOST_REPORT_MAPS_DIR: ${{ runner.temp }}/ghost-maps
         run: |
           if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
             echo "::error::the repository secret TAURI_SIGNING_PRIVATE_KEY is not set (docs/releasing.md, The update key)"
@@ -113,6 +118,35 @@ jobs:
         run: |
           cd "$RUNNER_TEMP" && "$GITHUB_WORKSPACE"/dist/bundle/*.AppImage --appimage-extract >/dev/null
           squashfs-root/usr/bin/ghostd version | tee /dev/stderr | grep -qF "release $(git -C "$GITHUB_WORKSPACE" rev-parse --short=7 HEAD)"
+      # ADR 0067: the page source maps never ship. The build moved them out of dist before the
+      # shell embedded it (tools/report_chunks.py refuses to finish otherwise); this checks the
+      # files themselves: neither package carries a .map, the shell's embedded assets name
+      # none, and the manifest the shell reads is there with an id for every map kept aside.
+      - name: no source map ships
+        run: |
+          set -euo pipefail
+          if find apps/desktop/dist -name '*.map' | grep .; then echo "::error::a source map is in dist"; exit 1; fi
+          if dpkg-deb -c dist/bundle/*.deb | awk '{print $NF}' | grep -E '\.map$'; then echo "::error::a source map is in the .deb"; exit 1; fi
+          if find "$RUNNER_TEMP/squashfs-root" -name '*.map' | grep .; then echo "::error::a source map is in the AppImage"; exit 1; fi
+          shell="$RUNNER_TEMP/squashfs-root/usr/bin/heka-ghost-desktop"
+          if grep -a -o -E 'assets/[A-Za-z0-9_.-]+\.js\.map' "$shell" | head -3 | grep .; then echo "::error::the shell embeds a source map"; exit 1; fi
+          grep -a -q 'report-chunks.json' "$shell" || { echo "::error::the shell does not embed report-chunks.json"; exit 1; }
+          python3 -I - "$RUNNER_TEMP/ghost-maps" apps/desktop/dist/report-chunks.json <<'PY'
+          import json, sys
+          from pathlib import Path
+          maps, manifest = Path(sys.argv[1]), json.load(open(sys.argv[2]))
+          assert manifest, "the manifest is empty"
+          for file, cid in manifest.items():
+              script = (maps / file).read_text(encoding="utf-8")
+              assert script.endswith("\n//# chunkId=" + cid), f"{file}: the chunk id is not the manifest's"
+              assert json.load(open(maps / (file + ".map")))["chunk_id"] == cid, f"{file}.map: not the manifest's id"
+              print(f"{cid}  {file}")
+          print(f"{len(manifest)} page scripts with chunk ids; their maps are kept aside, not shipped")
+          PY
+      # posthog-cli, pinned and checked by SHA-256 on every run (a dry run too), so a tag never
+      # meets a download that changed. It reads no key here.
+      - name: the source map uploader, pinned
+        run: scripts/posthog-cli.sh "$RUNNER_TEMP/posthog-cli"
       # The notes: GitHub's own from the merged pull requests for a tag; a dry run says it is one.
       - name: release notes
         env: { GH_TOKEN: "${{ github.token }}" }
@@ -131,6 +165,30 @@ jobs:
             "https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION" "$RUNNER_TEMP/notes.md" \
             > dist/bundle/latest.json
           cat dist/bundle/latest.json
+      # A tag only: the page source maps to PostHog's error tracking, so a page's frames resolve
+      # to TypeScript (ADR 0067). The PERSONAL key (error tracking write, organization read) is
+      # this step's alone: never the build's, never compiled in, never printed. A dry run
+      # uploads nothing. The release in PostHog is named ghost-desktop and versioned as Ghost.
+      - name: the page source maps, uploaded
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          POSTHOG_CLI_API_KEY: ${{ secrets.POSTHOG_API_KEY }}
+          POSTHOG_CLI_PROJECT_ID: ${{ vars.POSTHOG_PROJECT_ID }}
+          POSTHOG_CLI_HOST: https://us.posthog.com
+        run: |
+          set -euo pipefail
+          if [ -z "$POSTHOG_CLI_API_KEY" ]; then
+            echo "::error::the repository secret POSTHOG_API_KEY is not set (docs/releasing.md, Error reports)"; exit 1
+          fi
+          case "$POSTHOG_CLI_API_KEY" in
+            phc_*) echo "::error::POSTHOG_API_KEY is a project key (phc_…); the upload takes the personal API key"; exit 1 ;;
+          esac
+          case "$POSTHOG_CLI_PROJECT_ID" in
+            '' | *[!0-9]*) echo "::error::the Actions variable POSTHOG_PROJECT_ID is not the project's number"; exit 1 ;;
+          esac
+          "$RUNNER_TEMP/posthog-cli/posthog-cli" sourcemap upload \
+            --directory "$RUNNER_TEMP/ghost-maps" \
+            --release-name ghost-desktop --release-version "$VERSION"
       - uses: actions/upload-artifact@v4
         with:
           name: ghost-${{ env.VERSION }}-${{ github.sha }}

@@ -23,5 +23,8 @@ reqwest.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+# The chunk id the release build derives (tools/report_chunks.py) checked against the same
+# call posthog-cli makes: Uuid::new_v5 in its namespace.
+uuid = { workspace = true, features = ["v5"] }
 wiremock.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
