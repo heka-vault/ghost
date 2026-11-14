@@ -147,7 +147,9 @@ ghostd uninstall             # asks about each kind; your data and passwords def
 `--keep-data` removes everything but your data and passwords; `--all` removes those too
 (it asks once; `--yes` doesn't ask). It quits Ghost first, and ends with the one line that
 finishes: `sudo apt remove heka-ghost-desktop`, or which AppImage file to delete. The same
-list is in Settings › General, **Remove Ghost from this computer**. The kinds:
+list is in Settings › General, **Remove Ghost from this computer**, which quits the app and
+removes what you chose (from the AppImage, which puts no `ghostd` on your PATH, use that).
+The kinds:
 
 1. **What keeps running or starts by itself**: the echo canceller's service (stopped; your
    microphone and speakers go back to what the system chooses), Start at login, and the
