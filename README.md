@@ -2,16 +2,49 @@
 
 [![ci](https://github.com/heka-vault/ghost/actions/workflows/ci.yml/badge.svg)](https://github.com/heka-vault/ghost/actions/workflows/ci.yml)
 
-Ghost is a voice-first personal assistant that runs on your own Linux machine. Say "Hey Ghost"
-and talk: it answers out loud, uses the apps you connect (GitHub, Linear, your calendar, any
-app that speaks the Model Context Protocol), and tells you what it changed. It keeps a team of
-agents, each with its own job, voice, memory and look; they can work on a schedule with nobody
-there and leave what they found on a list for you. A desktop app shows the day, the live
-conversation, what Ghost is watching and every change it made.
+**Ghost floats over your work when you call it.** With the floating room on, say "Ghost" and it comes forward beside
+whatever you are doing, with no window: you see it listen, a beam to each app and agent it
+reaches for, and its voice moving as it answers. When you are done it falls back to a thin line
+at the bottom of the screen.
 
 <p align="center">
-  <img src="docs/screenshots/home.webp" alt="Ghost's desktop app: today's summary, a change waiting for your okay, and the agents on the rail" width="100%">
+  <img src="docs/screenshots/floating-hero.webp" alt="Ghost floating beside an editor, a terminal and a browser, with beams lit to six places it is looking in: Linear, Docs, Agents, Memory, Calendar and GitHub" width="100%">
 </p>
+
+Ghost is a voice-first personal assistant that runs on your own Linux machine. Talk to it and
+it answers out loud, uses the apps you connect (GitHub, Linear, your calendar, any app that
+speaks the Model Context Protocol), and tells you what it changed. It keeps a team of agents,
+each with its own job, voice, memory and look; they can work on a schedule with nobody there
+and leave what they found on a list for you. A desktop app shows the day, the live
+conversation, what Ghost is watching and every change it made.
+
+### Over your desktop
+
+The floating room shows what a voice can't: the state, where Ghost is looking, and a change or
+a question that needs your answer, in a card with buttons. It shows no transcript, never takes
+the keyboard, and lets every click through except its own buttons. It is off until you turn it
+on in Settings › General, and it needs an X11 session or XWayland (GNOME on Wayland has it by
+default). More in [docs/floating-room.md](docs/floating-room.md).
+
+<p align="center">
+  <img src="docs/screenshots/floating-loop.webp" alt="One whole turn: Ghost comes forward from a line of light, listens, sends beams to six places, speaks, says goodbye and falls back to the line" width="100%">
+</p>
+
+<table>
+  <tr>
+    <td width="33%"><img src="docs/screenshots/floating-speaking.webp" alt="Ghost speaking, the light around it following its voice"></td>
+    <td width="33%"><img src="docs/screenshots/floating-yes.webp" alt="In the corner, a change waiting for a yes: Close app#151 as a duplicate of #148? Yes, No, or say it"></td>
+    <td width="33%"><img src="docs/screenshots/floating-question.webp" alt="An agent's question: Accounting asks whether to send the Q3 summary now or wait, with its two answers as buttons"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Speaking</sub></td>
+    <td align="center"><sub>A change waiting for your yes, in the corner</sub></td>
+    <td align="center"><sub>An agent's question</sub></td>
+  </tr>
+</table>
+
+<sub>Taken from the desktop app's mock (`make screenshots`) over a made-up desktop: the
+floating page is the real one; the windows behind it and every word on screen are invented.</sub>
 
 **You decide how much it does on its own.** By default Ghost does what you ask and says what it
 did; your permissions name what it must ask about first or never do. Every change is in an
@@ -20,6 +53,11 @@ audit log. There is no undo: to reverse something, ask for the opposite change.
 **Status.** Ghost is young and built for one person's desk. It works end to end on a stock
 machine (this README was checked on a clean Ubuntu 24.04 install), but expect rough edges:
 see [What's rough](#whats-rough). Linux only today.
+
+<p align="center">
+  <img src="docs/screenshots/home.webp" alt="Ghost's desktop app: today's summary, a change waiting for your okay, and the agents on the rail" width="100%">
+  <br><sub>The desktop app's Today: the day, a change waiting for your okay, and the agents on the rail.</sub>
+</p>
 
 ## Before you install: what to know
 

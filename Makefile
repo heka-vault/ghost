@@ -142,7 +142,7 @@ desktop: ## the desktop app only (Tauri window, hot reload), against whichever d
 desktop-web: ## the same UI in a browser at http://localhost:1420; ?mock=busy and other scenarios need no daemon
 	@pnpm dev:desktop
 
-screenshots: ## the README's screenshots from the mock UI (make desktop-web running; Chrome and ImageMagick): make screenshots [SHOTS="home apps"]
+screenshots: ## the README's screenshots and the floating room's from the mock UI (make desktop-web running; Chrome, ImageMagick, Node 22+): make screenshots [SHOTS="home apps"]
 	@scripts/screenshots.sh $(SHOTS)
 
 reload: ## rebuild and restart the daemon that make dev or make daemon runs, after a Rust change

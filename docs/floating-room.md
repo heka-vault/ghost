@@ -5,6 +5,11 @@ of a monitor until its name is called, then comes forward over the desktop with 
 application chrome, and goes back to the line when the session ends. The windowed app (Today,
 the briefing) stays the place you open on purpose.
 
+![Ghost beside the work, beams lit to the six places a turn reached](screenshots/floating-hero.webp)
+
+*From the mock over a made-up desktop (`make screenshots`); the loop and the other pictures are
+in the [README](../README.md#over-your-desktop).*
+
 ## Turning it on
 
 Settings › General › The room › **Float over the desktop**, or the tray's **Float over the
@@ -348,6 +353,10 @@ from the frame loop.
   choice for the share). `stage.html?mock=floating` plays it on the stage. The main window's
   mock takes `&floating=on|off|refused`, `&capture=yes`, `&sharing=…` and
   `&while_shared=hide|show|ask`.
+- `?mock=floating-tour` plays one short tour once on a fixed clock (a whole turn in 12 s, then a
+  yes, then a question) for the README's pictures: `make screenshots` lays the page over a
+  made-up desktop (`apps/desktop/shots/desktop.html`, `/shots/desktop.html` on the dev server)
+  and takes them with `scripts/floating-shots.mjs`.
 - The real surface on this desktop, with the mock page (debug builds only):
   `GDK_BACKEND=x11 GHOST_FLOATING_URL='http://localhost:1420/floating.html?mock=floating' target/debug/heka-ghost-desktop --floating`
   (the page must come from the app's dev address, 1420; close it with Ctrl+C or by closing

@@ -8,6 +8,11 @@
 #   scripts/screenshots.sh home apps  only those
 #
 # Each is 1440x900 in the dark theme, as WebP at quality 80 (about 100 KB each).
+#
+# Then the floating room's (scripts/floating-shots.mjs, Node 22 or later): the real floating
+# page with `?mock=floating-tour` laid over a made-up desktop (apps/desktop/shots/desktop.html),
+# four stills at 2x and floating-loop.webp, one whole turn as an animated WebP (about 2 MB; the
+# loop takes a minute to encode). `scripts/screenshots.sh floating-hero` takes only that one.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -30,6 +35,8 @@ SHOTS=(
   "welcome|firstrun|/welcome|4000"
 )
 
+FLOATING=(floating-hero floating-speaking floating-yes floating-question floating-loop)
+
 want=("$@")
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
@@ -43,3 +50,12 @@ for row in "${SHOTS[@]}"; do
   else convert "$tmp/$name.png" -quality 80 "$OUT/$name.webp"; fi
   echo "screenshots: $OUT/$name.webp ($(du -h "$OUT/$name.webp" | cut -f1))"
 done
+
+floating=()
+for name in "${FLOATING[@]}"; do
+  if ((${#want[@]})) && [[ " ${want[*]} " != *" $name "* ]]; then continue; fi
+  floating+=("$name")
+done
+if ((${#floating[@]})); then
+  CHROME="$CHROME" node "$ROOT/scripts/floating-shots.mjs" "$URL" "$OUT" "$tmp" "${floating[@]}"
+fi
