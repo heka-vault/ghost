@@ -83,6 +83,28 @@ new path each time it starts, and its launcher opens the desktop app rather than
 can only start one), Ghost says so and gives the address and the token instead, as for any
 other tool. A tool that can only start a command needs Ghost installed from the .deb.
 
+## Let a tool on this computer use Ghost in one click
+
+When Claude Code, Cursor or Codex is set up here, the first run's app step and Settings ›
+Outside tools offer **Let Cursor use Ghost** (ADR 0068). **Show what changes…** shows exactly
+what Ghost will do before it does it:
+
+- Claude Code and Codex: their own command, when it is installed
+  (`claude mcp add --scope user ghost -- …/ghostd mcp serve --client claude-code`,
+  `codex mcp add ghost -- …/ghostd mcp serve --client codex`).
+- Otherwise the tool's own file (`~/.cursor/mcp.json`, `~/.claude.json`, Codex's
+  `config.toml`): Ghost copies it to `<file>.ghost-backup-<time>` beside it, adds its one entry,
+  and keeps every other entry, the order and the file's permissions. A file with comments is not
+  written; Ghost shows the entry to add by hand.
+
+The tool is connected as `ghostd mcp add --command` would connect it, so its file holds no
+token. From the AppImage it connects by address instead, and its token is written into its
+config, never shown. Restart the tool if it is open.
+
+From a terminal: `ghostd setup link cursor` (and `ghostd setup unlink cursor` to take Ghost back
+out), each asking first unless `--yes`. Removing the tool in Settings › Outside tools offers to
+take Ghost's line back out of its settings too.
+
 ## See and remove them
 
 ```

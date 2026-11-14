@@ -252,7 +252,10 @@ With `make dev` running and the window open:
 3. **Connect a real app.** **Apps › Add an app** searches the public registry of apps; sign in
    or paste a key and every agent can use it. Make an app ask first: **Settings › Permissions**,
    or `~/.config/ghost/policy.toml`. Then ask Ghost to do something there and answer the yes out
-   loud or with the Confirm card. [docs/apps.md](docs/apps.md) has the rest.
+   loud or with the Confirm card. [docs/apps.md](docs/apps.md) has the rest. If Claude Code,
+   Cursor or Codex is set up on this computer, the first run and **Apps** list the apps it already
+   uses, each one click to connect, and offer to let it use Ghost (`ghostd setup detect` from a
+   terminal).
 4. **Hire an agent.** "Hey Ghost, hire an agent called Ledger to keep an eye on my invoices", or
    **Settings › Agents › New agent**, where you also pick its shape, colour and voice. It
    appears on the left rail; "transfer me to Ledger" hands the conversation over.
