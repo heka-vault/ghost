@@ -149,6 +149,25 @@ impl Daemon {
         }
         let mut models = Vec::new();
         for (target, opts) in jobs {
+            if let Some(cc) = crate::daemon::claude_code_for(&target, &env) {
+                // The operator's Claude Code (ADR 0069): timed through one process of its
+                // own, as a session runs it.
+                let found =
+                    ghost_llm::claude_code::check::check(&cc, &opts.role, opts.samples).await;
+                info!(
+                    "llm check: {} ({}): {}",
+                    target.describe(),
+                    found.role,
+                    match (&found.error, found.first_word.median) {
+                        (Some(e), _) if !found.reachable => e.clone(),
+                        (_, Some(m)) => format!("first word {m:.2}s"),
+                        _ => "answered".into(),
+                    }
+                );
+                self.keep_check(&target, &found);
+                models.push(found);
+                continue;
+            }
             let found = match self.check_client(&target) {
                 Ok(client) => check::check(&client, &opts).await,
                 Err(e) => ModelCheck::failed(&opts.role, &target.model, e),

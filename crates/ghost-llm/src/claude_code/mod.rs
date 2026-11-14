@@ -455,7 +455,8 @@ pub fn history(messages: &[Message]) -> String {
 }
 
 /// Ghost's model, as the operator's Claude Code. One per session or run: dropped, its
-/// process is stopped and its relay stops listening.
+/// process is stopped and its relay stops listening. A clone shares the process.
+#[derive(Clone)]
 pub struct ClaudeCode {
     settings: Arc<Settings>,
     state: Arc<Mutex<State>>,
@@ -1007,6 +1008,29 @@ mod tests {
             env.keys()
                 .all(|k| !k.starts_with("ANTHROPIC") && !k.starts_with("CLAUDE"))
         );
+    }
+
+    #[test]
+    fn nothing_here_opens_a_file_of_the_programs() {
+        // ADR 0069: Ghost runs the program and never reads its sign-in or settings. What it
+        // opens is its own: the binary's metadata, and the app file it writes for the relay.
+        for (name, src) in [
+            ("mod.rs", include_str!("mod.rs")),
+            ("relay.rs", include_str!("relay.rs")),
+            ("wire.rs", include_str!("wire.rs")),
+            ("check.rs", include_str!("check.rs")),
+        ] {
+            let code = src.split("#[cfg(test)]").next().unwrap();
+            for reads in [
+                "fs::read",
+                "File::open",
+                "read_to_string",
+                ".credentials",
+                "\".claude",
+            ] {
+                assert!(!code.contains(reads), "{name}: {reads}");
+            }
+        }
     }
 
     #[test]

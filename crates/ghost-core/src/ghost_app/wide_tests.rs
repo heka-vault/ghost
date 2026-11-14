@@ -816,6 +816,36 @@ async fn no_tool_reads_or_writes_the_other_tools_on_this_computer() {
 }
 
 #[tokio::test]
+async fn no_tool_chooses_the_model_or_reaches_claude_codes_relay() {
+    // ADR 0069: which model Ghost runs on is the operator's choice in Settings › Model, and
+    // the relay a Claude Code process is given is that process's alone. No agent, and no
+    // outside client (served a part of these same tools, ADR 0048), changes the one or
+    // reaches the other.
+    let w = world().await;
+    for t in w.server.tools() {
+        let n = t.name.to_lowercase();
+        for word in [
+            "provider",
+            "model",
+            "relay",
+            "claude",
+            "settings_write",
+            "connection",
+        ] {
+            assert!(!n.contains(word), "{n}");
+        }
+        let read_only = t.annotations.and_then(|a| a.read_only_hint) == Some(true);
+        let about = t.description.as_deref().unwrap_or_default().to_lowercase();
+        if !read_only {
+            assert!(
+                !about.contains("ghost_llm") && !about.contains("model connection"),
+                "{n}: {about}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
 async fn no_tool_reaches_error_reports() {
     // ADR 0067: sending error reports is the operator's switch, and what was sent is theirs
     // to read. No agent turns it on or off, reads the reports, or makes one: a model told by

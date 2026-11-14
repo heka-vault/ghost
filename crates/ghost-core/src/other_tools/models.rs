@@ -1,7 +1,7 @@
 //! A model connection that is already there (ADR 0068): a local server answering on its
 //! default port, or a provider's key in the environment Ghost was started in, which Ghost
-//! reads already (ADR 0037). Never another tool's sign-in: Claude Code's and Codex's
-//! subscriptions are licensed to those tools, and nothing here opens their files.
+//! reads already (ADR 0037). Never another tool's sign-in: nothing here opens a tool's
+//! files for one. The operator's Claude Code is asked, not read (`program`, ADR 0069).
 
 use std::collections::HashMap;
 

@@ -131,7 +131,61 @@ async fn what_is_found_is_names_and_kinds_never_a_secret() {
         models[1]["how"],
         "OPENROUTER_API_KEY is set in the environment Ghost was started in."
     );
-    assert_eq!(r["own_sign_in"], json!(["Claude Code", "Codex"]));
+    // Claude Code's sign-in is not one Ghost may not use: Ghost runs the program (ADR 0069).
+    assert_eq!(r["own_sign_in"], json!(["Codex"]));
+    assert_eq!(
+        r["claude_code"],
+        Value::Null,
+        "not asked to be found: not shown"
+    );
+}
+
+#[tokio::test]
+async fn claude_code_is_offered_by_how_it_says_it_is_signed_in() {
+    use ghost_core::other_tools::program::{Found, SIGNED_OUT, SignIn};
+    let s = setup(false);
+    let found = |sign_in: SignIn, missing: Vec<&'static str>, version: &str| Found {
+        binary: "/usr/bin/claude".into(),
+        version: Some(version.into()),
+        missing,
+        sign_in,
+    };
+    let cases = [
+        (
+            found(SignIn::Plan(Some("Max".into())), vec![], "2.1.325"),
+            "plan",
+            "Signed in with a Claude Max plan. Replies count against its limits.",
+        ),
+        (
+            found(SignIn::ApiKey, vec![], "2.1.325"),
+            "api_key",
+            "Signed in with an API key. Replies are billed to that key, not to a plan.",
+        ),
+        (
+            found(SignIn::SignedOut, vec![], "2.1.325"),
+            "signed_out",
+            SIGNED_OUT,
+        ),
+    ];
+    for (f, state, line) in cases {
+        *s.tools.claude.lock().unwrap() = Some(f);
+        let r = s.w.client().get("/other-tools").await;
+        assert_eq!(r.status, 200, "{}", r.text);
+        assert_eq!(r["claude_code"]["state"], state);
+        assert_eq!(r["claude_code"]["line"], line);
+        assert_eq!(r["claude_code"]["note"], Value::Null);
+        assert!(!r.text.to_lowercase().contains("sign in with claude"));
+    }
+    *s.tools.claude.lock().unwrap() = Some(found(SignIn::Plan(None), vec!["--tools"], "1.0.0"));
+    let r = s.w.client().get("/other-tools").await;
+    assert_eq!(r["claude_code"]["state"], "unsupported");
+    assert!(
+        r["claude_code"]["line"]
+            .as_str()
+            .unwrap()
+            .contains("won't use it")
+    );
+    assert_eq!(r["claude_code"]["note"], Value::Null, "the problem says it");
 }
 
 #[tokio::test]

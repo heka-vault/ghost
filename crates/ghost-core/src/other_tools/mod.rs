@@ -86,8 +86,10 @@ impl Tool {
     }
 
     /// Whether the tool's sign-in is a subscription of its own that Ghost may not use.
+    /// Claude Code's is not one: Ghost runs the program itself, signed in as it is, and
+    /// never reads the sign-in (ADR 0069).
     pub fn has_own_sign_in(self) -> bool {
-        matches!(self, Tool::ClaudeCode | Tool::Codex)
+        matches!(self, Tool::Codex)
     }
 }
 

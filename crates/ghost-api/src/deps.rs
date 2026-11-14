@@ -127,6 +127,11 @@ pub trait OtherToolsPort: Send + Sync {
     /// Run argv directly (never through a shell), with none of Ghost's passwords in its
     /// environment. Err is a sentence.
     async fn run(&self, argv: &[String]) -> Result<(), String>;
+    /// The operator's Claude Code, asked (never its files) whether it can be Ghost's model
+    /// (ADR 0069); None when it isn't installed.
+    async fn claude_code(&self) -> Option<ghost_core::other_tools::program::Found> {
+        None
+    }
     /// A timestamp for a backup's name.
     fn stamp(&self) -> String {
         chrono::Utc::now().format("%Y%m%dT%H%M%S").to_string()
@@ -175,6 +180,11 @@ impl OtherToolsPort for LiveOtherTools {
 
     async fn get_local(&self, url: &str) -> Option<String> {
         ghost_core::other_tools::models::get_local(url).await
+    }
+
+    async fn claude_code(&self) -> Option<ghost_core::other_tools::program::Found> {
+        let binary = self.which(ghost_core::other_tools::program::BINARY)?;
+        Some(ghost_core::other_tools::program::look(&binary, &self.started_env).await)
     }
 
     async fn run(&self, argv: &[String]) -> Result<(), String> {
@@ -309,6 +319,38 @@ impl ModelNet for LiveModelNet {
         conn: &ModelConnection,
         env: &HashMap<String, String>,
     ) -> Result<Vec<ModelOption>, ConnectionError> {
+        if conn.spec().program {
+            // The operator's Claude Code (ADR 0069): the models it says it takes, from its
+            // `initialize` answer. No model is asked.
+            let binary =
+                ghost_core::other_tools::program::which(env.get("PATH").map(String::as_str))
+                    .ok_or_else(|| ConnectionError::Unreachable {
+                        host: "Claude Code".into(),
+                        kind: "not on this computer".into(),
+                    })?;
+            let started: HashMap<String, String> = ["HOME", "PATH", "USER", "LANG"]
+                .into_iter()
+                .filter_map(|k| env.get(k).map(|v| (k.to_string(), v.clone())))
+                .collect();
+            let cc = ghost_llm::claude_code::ClaudeCode::new(
+                ghost_llm::claude_code::Settings::new(binary, conn.wire_model(), started),
+            );
+            return cc
+                .models()
+                .await
+                .map(|ms| {
+                    ms.into_iter()
+                        .map(|(id, name)| ModelOption { id, name })
+                        .collect()
+                })
+                .map_err(|e| ConnectionError::Unreachable {
+                    host: "Claude Code".into(),
+                    kind: match e {
+                        ghost_llm::LlmError::Program(p) => p.to_string(),
+                        _ => "no answer".into(),
+                    },
+                });
+        }
         ghost_core::connection::list_models(conn, env, None).await
     }
 

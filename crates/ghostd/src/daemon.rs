@@ -227,6 +227,29 @@ pub type Play = Arc<
 >;
 pub type DuckFactory = Arc<dyn Fn(&GhostdSettings, PathBuf) -> Arc<dyn Duck> + Send + Sync>;
 
+/// The operator's own Claude Code for `target`, when the connection is that provider (ADR
+/// 0069): the program found on `env`'s PATH (the environment Ghost runs in; only its
+/// `HOME`, `PATH`, `USER` and `LANG` reach the program). Not found, it is still made, and
+/// its first turn says so aloud rather than the session failing silently.
+pub fn claude_code_for(
+    target: &ghost_core::connection::Target,
+    env: &HashMap<String, String>,
+) -> Option<ghost_llm::claude_code::ClaudeCode> {
+    if target.provider != ghost_core::connection::CLAUDE_CODE {
+        return None;
+    }
+    let binary = ghost_core::other_tools::program::which(env.get("PATH").map(String::as_str))
+        .unwrap_or_default();
+    // Only what the clean environment is built from: none of the vault's values.
+    let started: HashMap<String, String> = ["HOME", "PATH", "USER", "LANG"]
+        .into_iter()
+        .filter_map(|k| env.get(k).map(|v| (k.to_string(), v.clone())))
+        .collect();
+    Some(ghost_llm::claude_code::ClaudeCode::new(
+        ghost_llm::claude_code::Settings::new(binary, target.model.clone(), started),
+    ))
+}
+
 /// The parts of the daemon a test stands in for. `live` is the workstation's.
 #[derive(Clone)]
 pub struct Ports {
@@ -273,6 +296,10 @@ impl Ports {
             load_models: Arc::new(Models::load),
             model: Arc::new(|voice, env| {
                 let target = voice.llm_target(Some(env));
+                if let Some(cc) = claude_code_for(&target, env) {
+                    // A process of its own per session and per run (ADR 0069).
+                    return Ok(Arc::new(cc) as Arc<dyn ModelPort>);
+                }
                 Ok(ghost_llm::model::shared(&target)? as Arc<dyn ModelPort>)
             }),
             fast_model: Arc::new(|voice, env| {
@@ -1892,7 +1919,11 @@ impl Daemon {
                 if !voice.llm_problems(Some(&env)).is_empty() {
                     return None;
                 }
-                ghost_llm::model::shared(&voice.llm_target(Some(&env)))
+                let target = voice.llm_target(Some(&env));
+                if let Some(cc) = claude_code_for(&target, &env) {
+                    return Some(Arc::new(cc) as Arc<dyn Completer>);
+                }
+                ghost_llm::model::shared(&target)
                     .ok()
                     .map(|m| m as Arc<dyn Completer>)
             }

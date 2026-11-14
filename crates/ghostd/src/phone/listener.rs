@@ -1126,6 +1126,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_phone_cannot_choose_the_model_or_reach_claude_code() {
+        // ADR 0069: choosing Claude Code as the model, listing its models and testing it
+        // are the operator's at the desk only, and its relay is no route of the phone's.
+        let p = phone();
+        let (creds, _) = pair(&p, "Pixel 9").await;
+        for (method, path) in [
+            ("GET", "/model"),
+            ("POST", "/model/models"),
+            ("POST", "/model/check"),
+            ("PUT", "/settings"),
+            ("POST", "/mcp"),
+        ] {
+            let body = json!({"values": {"GHOST_LLM_PROVIDER": "claude-code"}});
+            let (r, _) = signed(&p.app, &creds, method, path, Some(body)).await;
+            assert_eq!(r.status, StatusCode::NOT_FOUND, "{method} {path}");
+        }
+    }
+
+    #[tokio::test]
     async fn error_responses_are_signed() {
         let p = phone();
         let (creds, _) = pair(&p, "Pixel 9").await;

@@ -2164,6 +2164,11 @@ pub struct ModelProviderView {
     #[serde(default)]
     #[schema(required)]
     pub local: bool,
+    /// A program on this computer Ghost runs (ADR 0069: Claude Code): no address, no
+    /// password.
+    #[serde(default)]
+    #[schema(required)]
+    pub program: bool,
     /// None: the first the provider lists.
     #[serde(default)]
     pub default_model: Option<String>,

@@ -204,6 +204,9 @@ impl Found {
 
     /// A version Ghost was not measured with, said once beside it; None for 2.1.
     pub fn version_note(&self) -> Option<String> {
+        if !self.missing.is_empty() {
+            return None; // `problem` says what is wrong with it
+        }
         let v = self.version.as_deref()?;
         let (major, minor, _) = parse_version(v)?;
         ((major, minor) != TESTED_MAJOR_MINOR).then(|| {

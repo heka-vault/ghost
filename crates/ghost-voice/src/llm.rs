@@ -169,6 +169,60 @@ pub trait ModelPort: Send + Sync {
     ) -> BoxFuture<'static, Result<Option<ghost_llm::Usage>, LlmError>> {
         Box::pin(async { Ok(None) })
     }
+    /// Whether a turn may be answered before it has ended (ADR 0049, 0054): the answer
+    /// is thrown away when the operator goes on. A model that keeps the conversation
+    /// itself (ADR 0069) can't throw one away, so it says no.
+    fn speculates(&self) -> bool {
+        true
+    }
+}
+
+/// The operator's own Claude Code (ADR 0069): one process per session, its history its
+/// own, every tool call through the relay to this stage's dispatcher and the gate.
+impl ModelPort for ghost_llm::claude_code::ClaudeCode {
+    fn stream(
+        &self,
+        context: Context,
+        tools: &Tools,
+        _options: &Options,
+    ) -> BoxStream<'static, Result<Event, LlmError>> {
+        ghost_llm::claude_code::ClaudeCode::stream(self, context, tools)
+    }
+
+    fn complete(
+        &self,
+        system: String,
+        user: String,
+        _max_tokens: u32,
+    ) -> BoxFuture<'_, Result<String, LlmError>> {
+        Box::pin(
+            async move { ghost_llm::claude_code::ClaudeCode::complete(self, &system, &user).await },
+        )
+    }
+
+    fn model_name(&self) -> String {
+        self.model().to_string()
+    }
+
+    /// The process started and its relay connected while the greeting plays, so the
+    /// first turn pays neither (a cold process with an app took 3.5 s to its first call).
+    fn warm_cache(
+        &self,
+        context: Context,
+        tools: &Tools,
+        _options: &Options,
+    ) -> BoxFuture<'static, Result<Option<ghost_llm::Usage>, LlmError>> {
+        let me = self.clone();
+        let tools = tools.clone();
+        Box::pin(async move {
+            me.warm(&context.system, &tools).await?;
+            Ok(None)
+        })
+    }
+
+    fn speculates(&self) -> bool {
+        false
+    }
 }
 
 /// How long a prefix the model was sent counts as cached: under the five minutes a
