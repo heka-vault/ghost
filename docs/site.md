@@ -10,9 +10,10 @@ page links to them.
   that desktop edge to edge, with the words over its quiet left side; on a phone (or any screen
   taller than wide) the float takes the top of the screen, centred, with the words under it.
   `site/src/pages/float.astro` mounts `FloatingRoom` from `apps/desktop/src/floating` with the
-  desktop's in-memory mock daemon on the `floating-site` scenario (a cut of the README's tour
-  that repeats every 18.5 s: the wake at 0.6 s, six places from 2.6 s, the reply from 5.6 s, a
-  yes from 9.2 s) over `apps/desktop/shots/world.{ts,css}`, the same made-up desktop
+  desktop's in-memory mock daemon on the `floating-site` scenario (one turn on the clock of the
+  hero's sound, below, repeating every 24.6 s: the wake at 1.2 s, six places while Ghost thinks,
+  the reply from 6.1 s, a yes waiting from 11.7 s, the goodbye at 21 s) over
+  `apps/desktop/shots/world.{ts,css}`, the same made-up desktop
   `shots/desktop.html` puts under the README's pictures, its windows moved right of the middle
   (`?arrange=site`). The front page shows a still first, loads that page behind it once the
   page has loaded and the hero is on screen, and shows it the moment Ghost first comes forward
@@ -20,6 +21,42 @@ page links to them.
   a still under reduced motion (with a Play button) or with JavaScript off. When the floating
   room, the mock or the world changes, the site changes with it: a pull request touching
   `apps/desktop/src/**` or `apps/desktop/shots/**` builds the site too.
+- **The hero's sound, on request.** The page loads silent and stays so until the visitor presses
+  **Hear it** (a small cyan wave that moves with Ghost's voice, at the hero's foot; the same
+  button turns it off; the choice is not remembered). The press plays the clip inside the
+  gesture, as Chrome's, Firefox's and Safari's autoplay rules ask, and the float starts its turn
+  again from the wake; from then on the clip goes back to its start each time the float says its
+  turn starts (`ghost:loop`, 60 ms in, the time a clip takes to sound again after the jump), so
+  the beams, the light and the words stay within about 35 ms of each other. The words show as
+  captions at the hero's foot, with the chimes and the thinking sound named. With reduced motion
+  the sound plays over the still; off screen it pauses. Nothing of it loads before the press:
+  the clip (`site/public/audio/`, WebM/Opus where the browser takes it, else AAC in MP4) is one
+  request on the first press. The timeline is a 2 KB script the float loads anyway, since it is
+  the float's clock.
+- **The sound is rendered, not recorded.** `site/audio/turn.json` holds the lines and their
+  gaps; `pnpm --dir site site:audio` (tools/oracle's environment through `uv`, Kokoro from
+  `scripts/models.sh kokoro`, Rust for the cues, ffmpeg; nothing fetched) renders each line in
+  Kokoro, the person in `am_michael` and Ghost in the daemon's own default (`af_heart`, speed
+  1.0), and lays the lines out from their real lengths. It mixes in Ghost's own cue sounds as
+  the daemon plays them: the chimes and the thinking loop come from `ghost_audio::sounds`
+  (`cargo run -p ghost-audio --example site-sounds`, byte for byte the daemon's), the loop at
+  the mixer's 0.12 from half a second after the request. The person's voice is matched to
+  Ghost's loudness, and the whole is set to -16 LUFS under a -2.5 dBFS limiter. It writes the
+  two files and `apps/desktop/src/design/mock/fixtures/floating-site-turn.json`: each line's
+  start and length, and Ghost's level per 50 ms window, computed as `ghost_voice::level` does.
+  The mock plays the turn on that clock, with that level as its `voice` event, so the light
+  moves with the words with the sound off too. The render is byte-for-byte repeatable. `--check`
+  reads every line back from both encoded files with Parakeet (word error rate at most 0.2 per
+  line) and measures the loudness, the true peak, clipping, the two voices' balance and the
+  size. Change a line, render, commit the four files.
+- **Every voice is synthetic** (Kokoro-82M, Apache-2.0, credited in the footer); no recording of
+  anyone is used. `pnpm --dir site site:sound-check` (after `site:build`) checks it in browsers,
+  with nothing played aloud. Stock Chrome and Firefox (fresh profiles, headless) must refuse to
+  play with no gesture; Playwright-driven browsers always allow it, so that part is checked
+  apart. Then, in Chrome and Playwright's Firefox: no clip before the press, one clip after it,
+  the float's scenes within 150 ms of the clip's clock, the captions, the button turning it off,
+  and reduced motion playing over the still. `--video out.mp4` writes Chrome's capture of one
+  turn with the clip muxed in, for review.
 - **The pictures below the hero** are the README's stills of Wisp's states
   (`docs/screenshots/floating-{hero,speaking,yes}.webp`) and one of the site's own
   (`site/src/assets/float-listening.webp`, the README's desk and crop), and the desktop app's
@@ -39,17 +76,40 @@ page links to them.
   changes one, change the page in the same pull request.
 
 `site` is a member of the pnpm workspace so it can import the desktop's sources with one
-install. It has no `build`, `test` or `typecheck` script, so the root `pnpm build`,
-`pnpm test` and `pnpm typecheck` (and the `ci` workflow) don't run it; its own scripts are
-`site:build`, `site:check`, `site:stills` and `dev`. It adds about 250 packages to the lock and
-about a second to a cold `pnpm install` (measured 2026-11-13: 3.4 s to 4.4 s with an empty
-store, 690 to 844 MB of store).
+install. It has no `build`, `test` or `typecheck` script, so the root `pnpm build`, `pnpm test`
+and `pnpm typecheck` (and the `ci` workflow) don't run it; its own scripts are `site:build`,
+`site:check`, `site:stills`, `site:audio`, `site:sound-check` and `dev`. It adds about 250
+packages to the lock and about a second to a cold `pnpm install` (measured 2026-11-13: 3.4 s to
+4.4 s with an empty store, 690 to 844 MB of store).
 
 ```bash
 pnpm --dir site dev          # http://localhost:4321
 pnpm --dir site site:check   # tsc over the site's TypeScript and what it imports
 pnpm --dir site site:build   # site/dist, about 1.5 s
+pnpm --dir site site:audio --check   # render the hero's sound, read it back, measure it
+pnpm --dir site site:sound-check     # the sound in Chrome and Firefox, headless (after site:build)
 ```
+
+### What the sound measured (2026-11-13)
+
+| | WebM/Opus 32 kb/s | AAC 48 kb/s |
+|---|---|---|
+| Size | 93 KiB | 139 KiB (a visitor loads one) |
+| Loudness, true peak | -16.8 LUFS, -1.3 dBTP, nothing clipped | -16.6 LUFS, -1.2 dBTP |
+| The person / Ghost | -17.7 / -16.6 LUFS | -17.3 / -16.4 LUFS |
+| Parakeet, every line | as written (it writes "4" for "four") | the same |
+
+Played through the desk's speakers from Chrome and recorded across the room on a webcam's
+microphone: every line read back as written except once "Hey Ghost" as "Hey goals" (at about
+7 dB over the room's floor; alone it read right). The voices are within 0.9 LU of each other
+in the room. The chimes stand 17 to 25 dB over the speech band at their own notes. The
+thinking loop is faint, as the daemon's mix makes it: its notes are 3 to 5 dB over the room's
+floor. The person's voice sits at a median pitch of 121 Hz and Ghost's at 200 Hz. The float's
+scenes landed within 26 ms of the sound heard in the room. Lighthouse (mobile / desktop):
+performance 95 / 100 against main's 96 / 100 (the same LCP, 2.70 s / 0.56 s), CLS 0.000 / 0
+(main 0.007 / 0), nothing of the sound requested. Not tested: Safari and iOS (no Apple device
+here). Both carry Opus in WebM on current versions as far as we know, and the AAC file is
+there for any that don't.
 
 ## Deploying
 

@@ -1,0 +1,22 @@
+{
+  "about": "The hero's turn with sound (docs/site.md). `pnpm --dir site site:audio` renders it: each line in Kokoro (the person in a voice of its own, Ghost in the daemon's default af_heart at 1.0), laid out on the floating-site loop's clock, Ghost's own chimes and thinking loop mixed in as the daemon plays them, and writes site/public/audio/hero-turn.{webm,m4a} and the timeline the mock and the captions read (apps/desktop/src/design/mock/fixtures/floating-site-turn.json). Each line starts `gap_ms` after the previous one ends (the first at `at_ms`). Synthetic words only.",
+  "voices": {
+    "you": { "voice": "am_michael", "speed": 1.0 },
+    "ghost": { "voice": "af_heart", "speed": 1.0 }
+  },
+  "lines": [
+    { "id": "wake", "who": "you", "text": "Hey Ghost,", "at_ms": 300 },
+    { "id": "request", "who": "you", "text": "get me ready for the launch review.", "gap_ms": 350 },
+    { "id": "reply", "who": "ghost", "text": "The review is at four. Two pull requests still wait on review, and three issues are open.", "gap_ms": 2900 },
+    { "id": "ask", "who": "ghost", "text": "One more: app 151 duplicates 148. Close it?", "gap_ms": 450 },
+    { "id": "yes", "who": "you", "text": "Yes.", "gap_ms": 700 },
+    { "id": "done", "who": "ghost", "text": "Done. App 151 is closed.", "gap_ms": 450 },
+    { "id": "bye", "who": "ghost", "text": "Talk soon.", "gap_ms": 350 }
+  ],
+  "wake_after_ms": 120,
+  "think_delay_ms": 500,
+  "think_volume": 0.12,
+  "chime_down_after_ms": 120,
+  "rest_ms": 2600,
+  "target_lufs": -16
+}
