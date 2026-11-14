@@ -26,6 +26,7 @@
 //! spool holds 50 reports or 512 KB. The last 20 sent are kept, exactly as sent but for the
 //! project's key, for the operator to read.
 
+pub mod chunks;
 pub mod frames;
 pub mod panic;
 pub mod report;
@@ -130,6 +131,8 @@ pub struct Reporter {
     scrub: Scrubber,
     wake: tokio::sync::Notify,
     http: OnceLock<reqwest::Client>,
+    /// The page scripts' chunk ids (`report-chunks.json`), set once by the shell.
+    page_chunks: OnceLock<chunks::PageChunks>,
 }
 
 impl std::fmt::Debug for Reporter {
@@ -159,6 +162,7 @@ impl Reporter {
             scrub,
             wake: tokio::sync::Notify::new(),
             http: OnceLock::new(),
+            page_chunks: OnceLock::new(),
         }
     }
 
@@ -180,6 +184,25 @@ impl Reporter {
 
     pub fn context(&self) -> &Context {
         &self.ctx
+    }
+
+    /// The bundle's manifest of page scripts and their chunk ids (ADR 0067): a page frame in
+    /// one of them is sent so PostHog resolves it against the uploaded source map. Set once;
+    /// a second call is ignored.
+    pub fn set_page_chunks(&self, chunks: chunks::PageChunks) {
+        let _ = self.page_chunks.set(chunks);
+    }
+
+    /// This process's facts, with the page chunks when the shell has read them.
+    fn ctx(&self) -> std::borrow::Cow<'_, Context> {
+        match self.page_chunks.get() {
+            Some(c) => {
+                let mut ctx = self.ctx.clone();
+                ctx.page_chunks = Some(c.clone());
+                std::borrow::Cow::Owned(ctx)
+            }
+            None => std::borrow::Cow::Borrowed(&self.ctx),
+        }
     }
 
     /// This build can send at all.
@@ -247,7 +270,7 @@ impl Reporter {
         let Ok(id) = self.install_id() else {
             return false;
         };
-        let built = report::build(what, &self.ctx, &id, Utc::now(), &self.scrub);
+        let built = report::build(what, &self.ctx(), &id, Utc::now(), &self.scrub);
         let spooled = self.spool(built).unwrap_or_else(|e| {
             debug!("error reports: not spooled: {e}");
             false
@@ -261,7 +284,7 @@ impl Reporter {
     /// The report, built as it would be sent now, for `ghostd reports test` to print.
     pub fn preview(&self, what: &What) -> Option<Value> {
         let id = self.install_id().ok()?;
-        let built = report::build(what, &self.ctx, &id, Utc::now(), &self.scrub);
+        let built = report::build(what, &self.ctx(), &id, Utc::now(), &self.scrub);
         Some(self.body(&built.event, true))
     }
 

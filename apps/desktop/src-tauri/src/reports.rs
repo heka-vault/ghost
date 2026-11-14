@@ -35,6 +35,30 @@ pub fn start(component: Component) -> Arc<Reporter> {
     r
 }
 
+/// The bundle's manifest of page scripts and their chunk ids (`report-chunks.json`, written by
+/// the release build: `tools/report_chunks.py`), so a page's frames resolve to TypeScript in
+/// PostHog. Read from the app's own embedded assets, never from a page; a build without one
+/// (`make dev`, `make bundle`) sends minified frames, as before. A manifest that is not the
+/// shape is refused whole and said once in the log.
+pub fn load_page_chunks<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let Some(r) = ghost_reports::global() else {
+        return;
+    };
+    if !r.available() {
+        return;
+    }
+    let Some(asset) = app
+        .asset_resolver()
+        .get(ghost_reports::chunks::FILE.to_string())
+    else {
+        return;
+    };
+    match ghost_reports::chunks::PageChunks::parse(asset.bytes()) {
+        Ok(c) => r.set_page_chunks(c),
+        Err(e) => eprintln!("ghost: error reports: {e}"),
+    }
+}
+
 /// The page's uncaught error, from the main window or the floating room.
 #[tauri::command]
 pub fn report_page_error(error: PageError) -> Result<(), String> {
