@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit -p tsconfig.json && vite build",
+    "build:release": "tsc --noEmit -p tsconfig.json && GHOST_REPORT_SOURCEMAPS=1 vite build && python3 -I ../../tools/report_chunks.py inject dist \"${GHOST_REPORT_MAPS_DIR:?the release build needs GHOST_REPORT_MAPS_DIR (docs/releasing.md)}\"",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "preview": "vite preview",
     "tauri": "tauri",

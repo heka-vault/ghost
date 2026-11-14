@@ -65,7 +65,10 @@ export default defineConfig({
   build: {
     target: "es2022",
     outDir: "dist",
-    sourcemap: false,
+    // Error reports (ADR 0067): the release build alone (`build:release`, through
+    // tauri.release.conf.json) writes source maps, "hidden" so no script names one; they are
+    // uploaded to PostHog and moved out of dist before the shell embeds it, so none ships.
+    sourcemap: process.env.GHOST_REPORT_SOURCEMAPS === "1" ? "hidden" : false,
     // Three pages: the app's window, the floating room's surface, and the stage (ADR 0059).
     rollupOptions: {
       input: {
