@@ -1,0 +1,433 @@
+/*
+ * heyghost.app. Dark on purpose, whatever the OS asks: the site is the floating room's stage,
+ * and takes its palette (apps/desktop/src/floating/floating.css, docs/design-system.md, The
+ * floating room): glow on black, the phase hues pushed to neon, weight 800 for display only.
+ * Green listens, violet works, cyan speaks; amber means only "waiting for your yes" (the one
+ * picture of it) and red only the mic off, so neither is used anywhere else. The float's own
+ * language is the page's structure: a beam runs down it (the spine), each part starts where a
+ * place would light up on it (the kicker's dot), and the line of light at rest is Ghost waiting.
+ */
+:root {
+  color-scheme: dark;
+  --ink: #eafcff;
+  --text: #c9d6df;
+  --text-2: #93a0ab;
+  --cyan: #5fe3ff;
+  --green: #4dffb8;
+  --violet: #a98bff;
+  --amber: #ffb547;
+  --ground: #04050a;
+  --hair: rgb(234 252 255 / 0.1);
+  --hair-2: rgb(234 252 255 / 0.18);
+  --mono: "JetBrains Mono Variable", ui-monospace, "DejaVu Sans Mono", monospace;
+  --sans: "Inter Variable", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --gutter: clamp(16px, 4vw, 64px);
+  --measure: 1280px;
+}
+
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
+html {
+  background: var(--ground);
+  scroll-behavior: smooth;
+  overflow-x: clip;
+  -webkit-text-size-adjust: 100%;
+}
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--text);
+  font: 400 17px/1.6 var(--sans);
+  font-feature-settings: "cv11", "ss01", "ss03";
+  -webkit-font-smoothing: antialiased;
+  overflow-x: clip;
+}
+img { max-width: 100%; height: auto; display: block; }
+a { color: var(--cyan); text-underline-offset: 3px; text-decoration-thickness: 1px; }
+a:hover { color: var(--ink); }
+:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; border-radius: 4px; }
+code {
+  font: 500 0.86em/1.5 var(--mono);
+  color: var(--ink);
+  background: rgb(95 227 255 / 0.07);
+  border: 1px solid rgb(95 227 255 / 0.14);
+  border-radius: 6px;
+  padding: 0.08em 0.4em;
+  overflow-wrap: anywhere;
+}
+h1, h2, h3 { color: var(--ink); margin: 0; }
+
+.skip {
+  position: absolute;
+  left: 12px;
+  top: -60px;
+  padding: 8px 14px;
+  background: var(--cyan);
+  color: #021015;
+  font-weight: 700;
+  border-radius: 8px;
+  z-index: 10;
+}
+.skip:focus { top: 12px; }
+
+/* ---------------------------------------------------------------- the kicker: a place lighting up */
+.kicker {
+  position: relative;
+  margin: 0 0 22px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font: 600 12px/16px var(--mono);
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--cyan);
+  text-shadow: 0 0 14px rgb(95 227 255 / 0.5);
+}
+.kicker:has(.kicker__dot--green) { color: var(--green); text-shadow: 0 0 14px rgb(77 255 184 / 0.5); }
+.kicker:has(.kicker__dot--violet) { color: var(--violet); text-shadow: 0 0 14px rgb(169 139 255 / 0.55); }
+.kicker__dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: currentColor; box-shadow: 0 0 0 3px rgb(4 5 10), 0 0 16px currentColor; }
+@media (max-width: 420px) {
+  .kicker { letter-spacing: 0.2em; }
+}
+
+/* ---------------------------------------------------------------- the top bar, over the desktop */
+.top {
+  position: absolute;
+  z-index: 5;
+  top: 0;
+  left: 0;
+  right: 0;
+  padding: 18px var(--gutter) 40px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: linear-gradient(180deg, rgb(2 3 8 / 0.85), rgb(2 3 8 / 0.5) 55%, transparent);
+}
+.top__brand { color: var(--ink); text-decoration: none; }
+.top__nav { display: flex; gap: clamp(14px, 2.4vw, 32px); }
+.top__nav a {
+  color: var(--text);
+  text-decoration: none;
+  font: 600 12px/16px var(--mono);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  text-shadow: 0 1px 6px rgb(0 0 0 / 0.9);
+}
+.top__nav a:hover { color: var(--cyan); }
+@media (max-width: 560px) {
+  .top__nav a:not(:last-child) { display: none; }
+}
+
+.mark { display: inline-flex; align-items: center; gap: 10px; color: var(--ink); }
+.mark__wisp { width: 26px; height: 26px; color: var(--cyan); filter: drop-shadow(0 0 8px rgb(95 227 255 / 0.6)); }
+.mark__name { font: 800 20px/1 var(--sans); letter-spacing: -0.02em; }
+
+/* ---------------------------------------------------------------- the hero: the desktop, edge to edge */
+.hero {
+  position: relative;
+  height: 100svh;
+  min-height: 640px;
+  max-height: 1600px;
+  overflow: clip;
+  display: grid;
+  align-content: center;
+  isolation: isolate;
+}
+.hero__float { position: absolute; inset: 0; z-index: -2; background: #020308; }
+.hero__still { width: 100%; height: 100%; object-fit: cover; object-position: 75% 50%; transition: opacity 0.5s ease; }
+.hero__frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.5s ease;
+}
+[data-live] .hero__frame { opacity: 1; }
+[data-live] .hero__still { opacity: 0; }
+/* The quiet side darkened enough to read on, and the desktop falling into the page below. */
+.hero__shade {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    linear-gradient(0deg, var(--ground) 0%, rgb(4 5 10 / 0.6) 9%, transparent 22%),
+    linear-gradient(90deg, rgb(2 3 8 / 0.93) 0%, rgb(2 3 8 / 0.86) 28%, rgb(2 3 8 / 0.6) 44%, transparent 60%);
+}
+.hero__copy {
+  padding: 96px var(--gutter) 72px;
+  max-width: min(48vw, 900px);
+  box-sizing: content-box;
+}
+.hero__title {
+  font: 800 clamp(48px, 5.2vw, 104px) / 0.94 var(--sans);
+  letter-spacing: -0.045em;
+  text-shadow: 0 2px 30px rgb(0 0 0 / 0.6);
+}
+.hero__title span {
+  background: linear-gradient(92deg, var(--cyan) 0%, #8fd0ff 45%, var(--violet) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 0 22px rgb(95 227 255 / 0.35));
+}
+.hero__lede { margin: 26px 0 0; max-width: 32em; font-size: clamp(17px, 1.25vw, 21px); color: var(--ink); text-shadow: 0 1px 12px rgb(0 0 0 / 0.8); }
+.hero__acts { margin: 30px 0 0; display: flex; flex-wrap: wrap; gap: 12px; }
+.hero__fine { margin: 18px 0 0; max-width: 34em; font-size: 14px; color: var(--text); text-shadow: 0 1px 8px rgb(0 0 0 / 0.9); }
+.hero__note {
+  position: absolute;
+  left: var(--gutter);
+  right: var(--gutter);
+  bottom: 22px;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font: 500 12px/18px var(--mono);
+  letter-spacing: 0.04em;
+  color: var(--text-2);
+}
+.hero__live { width: 7px; height: 7px; border-radius: 50%; background: var(--text-2); flex: none; }
+[data-live] .hero__live { background: var(--green); box-shadow: 0 0 10px var(--green); }
+.hero__play {
+  font: 600 12px/1 var(--mono);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink);
+  background: rgb(2 3 8 / 0.6);
+  border: 1px solid var(--hair-2);
+  border-radius: 999px;
+  padding: 8px 14px;
+  min-height: 32px;
+  cursor: pointer;
+  flex: none;
+}
+.hero__play:hover { border-color: var(--cyan); }
+
+/* A phone, or any screen taller than wide: the float on top, centred, the words under it. */
+@media (max-width: 899px), (max-aspect-ratio: 1/1) {
+  .hero { height: auto; min-height: 0; max-height: none; display: flex; flex-direction: column; overflow: visible; }
+  .hero__float { position: relative; inset: auto; z-index: 0; height: min(64svh, 133vw); min-height: 360px; overflow: hidden; }
+  .hero__still { object-position: 50% 50%; }
+  .hero__shade { inset: 0 0 auto 0; height: min(64svh, 133vw); min-height: 360px; z-index: 1; background: linear-gradient(0deg, var(--ground) 0%, transparent 9%); }
+  .hero__note { position: static; order: 1; padding: 10px var(--gutter) 0; }
+  .hero__copy { order: 2; max-width: 680px; padding: 28px var(--gutter) 0; }
+  .hero__title { font-size: clamp(42px, 10.5vw, 76px); }
+  .hero__lede { color: var(--text); text-shadow: none; }
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  padding: 0 22px;
+  border-radius: 999px;
+  border: 1px solid var(--hair-2);
+  background: rgb(2 3 8 / 0.55);
+  color: var(--ink);
+  text-decoration: none;
+  font: 700 15px/1 var(--sans);
+  letter-spacing: 0.01em;
+  transition: box-shadow 0.2s, background-color 0.2s, border-color 0.2s;
+}
+.btn:hover { border-color: var(--cyan); color: var(--ink); box-shadow: 0 0 0 1px var(--cyan), 0 0 24px rgb(95 227 255 / 0.25); }
+.btn--go { background: var(--cyan); border-color: var(--cyan); color: #021015; box-shadow: 0 0 28px rgb(95 227 255 / 0.4); }
+.btn--go:hover { background: #8aecff; color: #021015; box-shadow: 0 0 44px rgb(95 227 255 / 0.6); }
+.btn--big { min-height: 60px; padding: 0 34px; font-size: 18px; }
+
+/* ---------------------------------------------------------------- the spine: one beam down the page */
+.spine {
+  position: relative;
+  max-width: calc(var(--measure) + 2 * var(--gutter));
+  margin: 0 auto;
+  padding: 0 var(--gutter);
+}
+@media (min-width: 1200px) {
+  .spine { padding-left: calc(var(--gutter) + 64px); }
+  .spine::before {
+    content: "";
+    position: absolute;
+    left: calc(var(--gutter) + 15px);
+    top: -40px;
+    bottom: 0;
+    width: 2px;
+    background: linear-gradient(180deg, transparent, var(--cyan) 6%, var(--violet) 30%, var(--cyan) 50%, var(--cyan) 66%, var(--green) 80%, var(--violet) 94%, transparent);
+    opacity: 0.45;
+    box-shadow: 0 0 14px rgb(95 227 255 / 0.4);
+  }
+  /* Each part's dot sits on the beam, and a short beam reaches out to its name. */
+  .part > .kicker .kicker__dot { position: absolute; left: -54px; width: 12px; height: 12px; }
+  .part > .kicker::before {
+    content: "";
+    position: absolute;
+    left: -40px;
+    width: 30px;
+    height: 1px;
+    background: linear-gradient(90deg, currentColor, transparent);
+    opacity: 0.7;
+  }
+}
+
+.part { padding-top: clamp(104px, 14vw, 200px); }
+.say {
+  font: 800 clamp(36px, 5.4vw, 92px) / 0.98 var(--sans);
+  letter-spacing: -0.04em;
+  max-width: 15em;
+  text-wrap: balance;
+}
+.say--huge { font-size: clamp(44px, 7.6vw, 140px); max-width: 12em; letter-spacing: -0.045em; }
+.part__lede { margin: 26px 0 0; max-width: 38em; font-size: clamp(17px, 1.35vw, 21px); color: var(--text); }
+.part__fine { margin: 40px 0 0; max-width: 52em; font-size: 15px; color: var(--text-2); }
+
+/* ---------------------------------------------------------------- the float's states */
+.states {
+  list-style: none;
+  margin: 64px 0 0;
+  padding: 0;
+  display: grid;
+  gap: clamp(40px, 5vw, 72px) clamp(24px, 3.4vw, 48px);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr));
+}
+.state { --tone: var(--cyan); --tone-rgb: 95 227 255; }
+.state--green { --tone: var(--green); --tone-rgb: 77 255 184; }
+.state--violet { --tone: var(--violet); --tone-rgb: 169 139 255; }
+.state--amber { --tone: var(--amber); --tone-rgb: 255 181 71; }
+.state__pic {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: 14px;
+  background: #020308;
+  box-shadow: 0 0 0 1px rgb(var(--tone-rgb) / 0.35), 0 0 70px rgb(var(--tone-rgb) / 0.16), 0 30px 80px rgb(0 0 0 / 0.6);
+}
+.state__pic img { width: 100%; height: 100%; object-fit: cover; }
+/* Reaching is the README's whole desktop: shown at Ghost's end of it. */
+.state__pic--crop img { position: absolute; right: 0; top: 50%; width: 128%; max-width: none; height: auto; transform: translateY(-50%); }
+.state__word {
+  margin: 22px 0 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font: 800 clamp(24px, 2.3vw, 36px) / 1.1 var(--sans);
+  letter-spacing: -0.025em;
+  color: var(--tone);
+  text-shadow: 0 0 24px rgb(var(--tone-rgb) / 0.45);
+}
+.state__word::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--tone); box-shadow: 0 0 14px var(--tone); flex: none; }
+.state p { margin: 8px 0 0; color: var(--text); max-width: 30em; }
+
+/* ---------------------------------------------------------------- what Ghost does: lines, not boxes */
+.does { margin: 56px 0 0; }
+.does div {
+  position: relative;
+  display: grid;
+  gap: 10px 48px;
+  padding: 30px 0;
+}
+.does div::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, rgb(169 139 255 / 0.7), rgb(95 227 255 / 0.25) 40%, transparent);
+}
+@media (min-width: 900px) {
+  .does div { grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); align-items: baseline; }
+}
+.does dt { font: 800 clamp(24px, 2.5vw, 38px) / 1.12 var(--sans); letter-spacing: -0.03em; color: var(--ink); }
+.does dd { margin: 0; font-size: 18px; color: var(--text); }
+
+/* ---------------------------------------------------------------- privacy: a statement and the line */
+.rest { margin: 48px 0 40px; height: 40px; display: flex; align-items: center; }
+.rest span {
+  display: block;
+  width: clamp(120px, 14vw, 200px);
+  height: 3px;
+  border-radius: 3px;
+  background: var(--cyan);
+  box-shadow: 0 0 10px var(--cyan), 0 0 34px rgb(95 227 255 / 0.7), 0 0 90px rgb(95 227 255 / 0.4);
+}
+.facts { margin: 64px 0 0; display: grid; gap: 36px clamp(28px, 4vw, 64px); grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); }
+.facts dt { font: 600 12px/16px var(--mono); letter-spacing: 0.22em; text-transform: uppercase; color: var(--green); }
+.facts dd { margin: 10px 0 0; font-size: 17px; }
+
+/* ---------------------------------------------------------------- the app, large */
+.shot { margin: 0; }
+.shot img { border-radius: 14px; box-shadow: 0 0 0 1px var(--hair-2), 0 0 80px rgb(95 227 255 / 0.08), 0 40px 100px rgb(0 0 0 / 0.65); background: #0a0d14; }
+.shot figcaption { margin: 16px 2px 0; font-size: 15px; color: var(--text-2); }
+.shot b { color: var(--ink); font-weight: 700; margin-right: 4px; }
+.shot--lead { margin-top: 64px; }
+.shots { margin: clamp(40px, 5vw, 64px) 0 0; display: grid; gap: clamp(32px, 4vw, 48px); grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); }
+
+/* ---------------------------------------------------------------- install */
+.install__go { margin: 40px 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: 14px 24px; }
+.install__go span { font: 500 13px/1.5 var(--mono); color: var(--text-2); letter-spacing: 0.04em; }
+.steps { list-style: none; margin: 72px 0 0; padding: 0; counter-reset: step; display: grid; gap: 40px clamp(28px, 4vw, 56px); grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); }
+.steps li { counter-increment: step; position: relative; padding-top: 34px; }
+.steps li::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, var(--green), rgb(77 255 184 / 0.15));
+}
+.steps li::after {
+  content: counter(step, decimal-leading-zero);
+  position: absolute;
+  top: -9px;
+  left: 0;
+  padding-right: 12px;
+  background: var(--ground);
+  font: 700 13px/18px var(--mono);
+  letter-spacing: 0.16em;
+  color: var(--green);
+  text-shadow: 0 0 12px rgb(77 255 184 / 0.6);
+}
+.steps h3 { font: 800 clamp(22px, 2vw, 28px) / 1.2 var(--sans); letter-spacing: -0.02em; }
+.steps p { margin: 10px 0 0; }
+.needs { margin: 56px 0 0; max-width: 52em; color: var(--text-2); font-size: 16px; }
+.needs b { color: var(--ink); }
+
+/* ---------------------------------------------------------------- where it stands */
+.rough { margin: 56px 0 0; display: grid; gap: 34px clamp(28px, 4vw, 64px); grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); }
+.rough dt { font: 600 12px/16px var(--mono); letter-spacing: 0.22em; text-transform: uppercase; color: var(--violet); }
+.rough dd { margin: 8px 0 0; }
+
+/* ---------------------------------------------------------------- the end: Ghost back to its line */
+.foot {
+  max-width: calc(var(--measure) + 2 * var(--gutter));
+  margin: clamp(120px, 16vw, 220px) auto 0;
+  padding: 0 var(--gutter) 56px;
+  display: grid;
+  justify-items: center;
+  text-align: center;
+  gap: 28px;
+}
+.foot__line { height: 24px; display: flex; align-items: center; }
+.foot__line span { display: block; width: 56px; height: 2px; border-radius: 2px; background: var(--cyan); box-shadow: 0 0 8px var(--cyan), 0 0 28px rgb(95 227 255 / 0.6); }
+.foot__brand p { margin: 10px 0 0; color: var(--text-2); font-size: 15px; }
+.foot__links { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px 28px; }
+.foot__links a { color: var(--text); text-decoration: none; font-size: 15px; }
+.foot__links a:hover { color: var(--cyan); }
+.foot__fine { margin: 0; font-size: 13px; color: var(--text-2); }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { transition: none !important; animation: none !important; }
+}
+@media (forced-colors: active) {
+  .hero__title span { color: CanvasText; background: none; filter: none; }
+  .btn--go { border: 2px solid ButtonText; }
+  .hero__shade { display: none; }
+}

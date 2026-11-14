@@ -3,6 +3,7 @@ packages:
   - packages/ui
   - apps/desktop
   - apps/mobile
+  - site
 
 allowBuilds:
   esbuild: true

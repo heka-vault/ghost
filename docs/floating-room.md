@@ -356,7 +356,11 @@ from the frame loop.
 - `?mock=floating-tour` plays one short tour once on a fixed clock (a whole turn in 12 s, then a
   yes, then a question) for the README's pictures: `make screenshots` lays the page over a
   made-up desktop (`apps/desktop/shots/desktop.html`, `/shots/desktop.html` on the dev server)
-  and takes them with `scripts/floating-shots.mjs`.
+  and takes them with `scripts/floating-shots.mjs`. The desktop itself is `shots/world.ts` and
+  `shots/world.css`, shared with the site's hero (docs/site.md).
+- `?mock=floating-site` is the site's cut of the tour, over and over every 18.5 s: the wake at
+  0.6 s, six places from 2.6 s, the reply from 5.6 s, a yes waiting from 9.2 s and said at
+  13.2 s, the goodbye at 14.8 s.
 - The real surface on this desktop, with the mock page (debug builds only):
   `GDK_BACKEND=x11 GHOST_FLOATING_URL='http://localhost:1420/floating.html?mock=floating' target/debug/heka-ghost-desktop --floating`
   (the page must come from the app's dev address, 1420; close it with Ctrl+C or by closing

@@ -1,0 +1,267 @@
+---
+/**
+ * heyghost.app. One page, in the order the float, what Ghost does, privacy, the desktop app,
+ * install, where it stands. The float's own language carries the page: a beam of light runs down
+ * it, each part starts where a place would light up, and Wisp's states (listening, reaching,
+ * speaking, waiting for a yes) are the pictures. Every claim is one the README or CLAUDE.md's
+ * rules make; when the product changes what it promises, change this page in the same pull
+ * request. The version is the repository's (package.json), never typed here.
+ */
+import Base from "../layouts/Base.astro";
+import Hero from "../components/Hero.astro";
+import Wordmark from "../components/Wordmark.astro";
+import { version } from "../../../package.json";
+import listening from "../assets/float-listening.webp?url";
+import reaching from "../../../docs/screenshots/floating-hero.webp?url";
+import speaking from "../../../docs/screenshots/floating-speaking.webp?url";
+import yes from "../../../docs/screenshots/floating-yes.webp?url";
+import home from "../../../docs/screenshots/home.webp?url";
+import session from "../../../docs/screenshots/session.webp?url";
+import watching from "../../../docs/screenshots/watching.webp?url";
+
+const REPO = "https://github.com/heka-vault/ghost";
+const DOWNLOAD = `${REPO}/releases/latest`;
+const doc = (path: string) => `${REPO}/blob/main/${path}`;
+
+const states = [
+  {
+    tone: "green",
+    word: "Listening",
+    src: listening,
+    crop: false,
+    p: "Green while it hears you. No transcript: you know what you said.",
+    alt: "Wisp in a green ring, listening to the operator",
+  },
+  {
+    tone: "violet",
+    word: "Reaching",
+    src: reaching,
+    crop: true,
+    p: "A beam to every app and agent it looks in, lit while the call runs.",
+    alt: "Wisp with beams out to Linear, Docs, Agents, Memory, Calendar and GitHub",
+  },
+  {
+    tone: "cyan",
+    word: "Speaking",
+    src: speaking,
+    crop: false,
+    p: "Its own voice moves the light. You hear the answer; you don't read it.",
+    alt: "Wisp in cyan light, speaking",
+  },
+  {
+    tone: "amber",
+    word: "Waiting for your yes",
+    src: yes,
+    crop: false,
+    p: "The one thing it asks you to read: say yes, or press it.",
+    alt: "A change waiting for a yes: close app#151 as a duplicate of #148, with Yes and No",
+  },
+];
+
+const does = [
+  ["Talk to it across the desk.", "Say “Hey Ghost” and ask. It answers out loud, you can talk over it, and “that's all” sends it away. Typing works too."],
+  ["It runs where you work.", "The assistant, its ears and its voice run on your Linux desktop. There is no Ghost account and no Ghost server."],
+  ["It uses the apps you connect.", "GitHub, Linear, your calendar, and any app that speaks the Model Context Protocol. Connect it once, sign in or paste a key, and every agent can use it."],
+  ["A team that works while you don't.", "Hire agents with their own job, voice, memory and look. They run on a schedule with nobody there and leave what they found on a list for you."],
+  ["It tells you what it changed.", "By default it does what you ask and says what it did. Your permissions name what it must ask about first or never do; every change is in an audit log, and there is no undo: to reverse something, ask for the opposite change."],
+];
+
+const privacy = [
+  ["Its ears and voice are local", "Parakeet hears you and Kokoro speaks, both on your own processor. Your voice leaves only if you turn on the optional realtime voice."],
+  ["You choose the model", "After the wake word the conversation goes as text to the provider you pick: Anthropic, OpenRouter, OpenAI, or a local model in Ollama or LM Studio, and then nothing leaves at all."],
+  ["Passwords in its own vault", "Encrypted, keyed by your login keyring, never shown again, never logged, never given to the model."],
+  ["Off means off", "Turn listening off and no microphone is opened at all until you turn it back on. Typing still works."],
+  ["What it keeps stays home", "Transcripts after the wake word and the audit log live under your home folder, never uploaded by Ghost. Delete the folder and they are gone."],
+];
+
+const rough = [
+  ["Waking", "How well it hears its name depends on the microphone, the room and the music. A headset or a good USB microphone does much better than a laptop's."],
+  ["Speed", "A reply's pause is mostly the model. A slow provider, or a large local model on a CPU, makes Ghost wait; it tells you when it is too slow and what would help."],
+  ["Sound", "Tuned on one setup, a microphone array. Open speakers need the echo canceller it can set up for you, or headphones."],
+  ["The float", "Needs X11 or XWayland (GNOME on Wayland has it), and hides while your screen is shared unless you choose to show it. No native Wayland, KDE or wlroots version yet."],
+  ["Platforms", "Linux only, x86-64. The .deb and AppImage are checked on clean Ubuntu 24.04 and 26.04, not yet on many people's machines. The Android app is build-it-yourself."],
+];
+---
+
+<Base
+  title="Ghost: a voice on your own machine"
+  description="Ghost is a voice-first assistant for your Linux desktop. Say its name and it floats in over your work, uses the apps you connect, answers out loud and tells you what it changed. Open source, MIT."
+>
+  <a class="skip" href="#main">Skip to the content</a>
+  <header class="top">
+    <a class="top__brand" href="/" aria-label="Ghost, home"><Wordmark /></a>
+    <nav class="top__nav" aria-label="Sections">
+      <a href="#float">The float</a>
+      <a href="#privacy">Privacy</a>
+      <a href="#install">Install</a>
+      <a href={REPO}>GitHub</a>
+    </nav>
+  </header>
+
+  <main id="main">
+    <Hero>
+      <p class="kicker"><span class="kicker__dot kicker__dot--green"></span>Voice first · your machine</p>
+      <h1 id="hero-title" class="hero__title">Say its name.<br /><span>It comes forward.</span></h1>
+      <p class="hero__lede">
+        Ghost is a voice assistant that lives on your Linux desktop. Call it and it floats in beside your work, reaches into
+        the apps you connect, answers out loud, and drops back to a line of light when you're done.
+      </p>
+      <p class="hero__acts">
+        <a class="btn btn--go" href={DOWNLOAD}>Download for Linux</a>
+        <a class="btn" href={REPO}>Source on GitHub</a>
+      </p>
+      <p class="hero__fine">Free and open source, MIT. Version {version}, for Ubuntu 24.04 and 26.04 or any distribution with the AppImage.</p>
+    </Hero>
+
+    <div class="spine">
+      <section id="float" class="part" aria-labelledby="float-title">
+        <p class="kicker"><span class="kicker__dot kicker__dot--cyan"></span>The float</p>
+        <h2 id="float-title" class="say">The window stays closed.</h2>
+        <p class="part__lede">
+          Most of the time Ghost is a thin line at the bottom of your screen. Say “Ghost” and it comes forward beside what you're
+          working on, without taking the screen or the keyboard: clicks go straight through to your work. You can tell what it
+          is doing without reading a word.
+        </p>
+        <ol class="states">
+          {states.map((s) => (
+            <li class={`state state--${s.tone}`}>
+              <div class={s.crop ? "state__pic state__pic--crop" : "state__pic"}>
+                <img src={s.src} width="1440" height="810" alt={s.alt} loading="lazy" decoding="async" />
+              </div>
+              <h3 class="state__word">{s.word}</h3>
+              <p>{s.p}</p>
+            </li>
+          ))}
+        </ol>
+        <p class="part__fine">
+          The float is optional (Settings › General), hides while your screen is shared unless you choose to show it, and needs
+          X11 or XWayland, which GNOME on Wayland has by default. <a href={doc("docs/floating-room.md")}>How it works</a>.
+        </p>
+      </section>
+
+      <section class="part" aria-labelledby="does-title">
+        <p class="kicker"><span class="kicker__dot kicker__dot--violet"></span>What Ghost does</p>
+        <h2 id="does-title" class="say">An assistant you talk to, on hardware you own.</h2>
+        <dl class="does">
+          {does.map(([t, p]) => (
+            <div>
+              <dt>{t}</dt>
+              <dd>{p}</dd>
+            </div>
+          ))}
+        </dl>
+      </section>
+
+      <section id="privacy" class="part part--privacy" aria-labelledby="privacy-title">
+        <p class="kicker"><span class="kicker__dot kicker__dot--cyan"></span>Privacy</p>
+        <div class="rest" aria-hidden="true"><span></span></div>
+        <h2 id="privacy-title" class="say say--huge">Before its name, nothing leaves the machine.</h2>
+        <p class="part__lede">
+          That line is Ghost waiting. While it waits, the microphone feeds only models on your own processor: voice activity, the
+          wake word and speech-to-text. What it hears is checked for its name and dropped: not logged, not stored, not shown.
+        </p>
+        <dl class="facts">
+          {privacy.map(([t, p]) => (
+            <div>
+              <dt>{t}</dt>
+              <dd>{p}</dd>
+            </div>
+          ))}
+        </dl>
+        <p class="part__fine">
+          What Ghost fetches by itself: the speech models once, from their publishers, and once a day a check of GitHub for a new
+          release that carries nothing about you (you can turn it off). The whole account is the README's
+          <a href={`${REPO}#privacy`}>Privacy</a> section. This site has no analytics, sets no cookies and loads nothing from anyone
+          else.
+        </p>
+      </section>
+
+      <section class="part part--app" aria-labelledby="app-title">
+        <p class="kicker"><span class="kicker__dot kicker__dot--cyan"></span>Open in Ghost</p>
+        <h2 id="app-title" class="say">When you'd rather read, the app is a briefing.</h2>
+        <p class="part__lede">The day, the live conversation, what Ghost is watching and every change it made.</p>
+        <figure class="shot shot--lead">
+          <img src={home} width="1440" height="900" alt="Ghost's desktop app, Today: a summary of the day, a change waiting for your okay, and the agents on the rail" loading="lazy" decoding="async" />
+          <figcaption><b>Today.</b> The day's summary, a change waiting for your okay, the agents on the rail.</figcaption>
+        </figure>
+        <div class="shots">
+          <figure class="shot">
+            <img src={session} width="1440" height="900" alt="Ghost's desktop app, a conversation as a timeline of what was said, which apps were called and what changed" loading="lazy" decoding="async" />
+            <figcaption><b>The conversation.</b> What was said, which apps were called, what changed.</figcaption>
+          </figure>
+          <figure class="shot">
+            <img src={watching} width="1440" height="900" alt="Ghost's desktop app, Watching: the schedules and watches that run with nobody there" loading="lazy" decoding="async" />
+            <figcaption><b>Watching.</b> What the agents do with nobody there, and when.</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section id="install" class="part part--install" aria-labelledby="install-title">
+        <p class="kicker"><span class="kicker__dot kicker__dot--green"></span>Say “Ghost”</p>
+        <h2 id="install-title" class="say">Ghost {version}.</h2>
+        <p class="part__lede">
+          The first release. From here on Ghost updates itself: it checks once a day and installs a new version only when you
+          press Update and restart in Settings › General.
+        </p>
+        <p class="install__go">
+          <a class="btn btn--go btn--big" href={DOWNLOAD}>Download Ghost {version}</a>
+          <span>.deb for Ubuntu 24.04 and 26.04 · AppImage for the rest · x86-64</span>
+        </p>
+        <ol class="steps">
+          <li>
+            <h3>Download</h3>
+            <p><code>heka-ghost-desktop_{version}_amd64.deb</code>, or the <code>.AppImage</code> for other distributions (it needs FUSE 2).</p>
+          </li>
+          <li>
+            <h3>Install</h3>
+            <p>Open it with App Center, or <code>sudo apt install ./heka-ghost-desktop_{version}_amd64.deb</code>. apt brings what it needs.</p>
+          </li>
+          <li>
+            <h3>Open Ghost</h3>
+            <p>
+              The first run does the rest: its ears and voice (2.9 GB, downloaded once with progress), a model, the microphone, the
+              wake word, a voice, an app and an agent. Every step can be skipped.
+            </p>
+          </li>
+        </ol>
+        <p class="needs">
+          <b>It needs</b> a model (a key from Anthropic, OpenRouter or OpenAI, or a local model in Ollama or LM Studio), a microphone
+          and speakers or a headset (or type to it), and about 3 GB of disk; the speech models run on the CPU, no graphics card.
+          <a href={`${REPO}#build-from-source`}>Build from source</a> instead.
+        </p>
+      </section>
+
+      <section class="part part--status" aria-labelledby="status-title">
+        <p class="kicker"><span class="kicker__dot kicker__dot--violet"></span>Where it stands</p>
+        <h2 id="status-title" class="say">Young, and built at one desk.</h2>
+        <p class="part__lede">
+          Ghost works end to end on a stock machine, but it was built for one person's desk, and it shows. The rough edges we know
+          about:
+        </p>
+        <dl class="rough">
+          {rough.map(([t, p]) => (
+            <div>
+              <dt>{t}</dt>
+              <dd>{p}</dd>
+            </div>
+          ))}
+        </dl>
+        <p class="part__fine">Found another? <a href={`${REPO}/issues`}>Open an issue</a>; <a href={doc("CONTRIBUTING.md")}>CONTRIBUTING.md</a> says what to put in it.</p>
+      </section>
+    </div>
+  </main>
+
+  <footer class="foot">
+    <div class="foot__line" aria-hidden="true"><span></span></div>
+    <div class="foot__brand"><Wordmark /><p>A voice on your own machine.</p></div>
+    <nav class="foot__links" aria-label="More">
+      <a href={DOWNLOAD}>Download</a>
+      <a href={`${REPO}/releases`}>Releases</a>
+      <a href={REPO}>Source</a>
+      <a href={`${REPO}#readme`}>Docs, on GitHub</a>
+      <a href={doc("docs/floating-room.md")}>The floating room</a>
+      <a href={doc("LICENSE")}>MIT licence</a>
+    </nav>
+    <p class="foot__fine">The pictures on this page are the app's own screens playing made-up data. No cookies, no analytics.</p>
+  </footer>
+</Base>

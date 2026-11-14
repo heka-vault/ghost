@@ -1,0 +1,70 @@
+name: site
+# heyghost.app (site/, docs/site.md): built with Astro's official action, deployed to GitHub
+# Pages from main only. A pull request that touches the site or what its hero imports (the
+# desktop app's floating room, its mock daemon, the README's desktop and screenshots, the shared UI) builds
+# it without deploying; nothing else runs it. Pages must be set to "GitHub Actions" as its
+# source in the repository's settings (docs/site.md has the steps).
+on:
+  push:
+    branches: [main]
+    paths:
+      - site/**
+      - apps/desktop/src/**
+      - apps/desktop/shots/**
+      - packages/ui/**
+      - packages/client-ts/**
+      - docs/screenshots/**
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - .github/workflows/site.yml
+  pull_request:
+    paths:
+      - site/**
+      - apps/desktop/src/**
+      - apps/desktop/shots/**
+      - packages/ui/**
+      - packages/client-ts/**
+      - docs/screenshots/**
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - .github/workflows/site.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      # Installs the workspace with the pnpm root package.json pins, builds, and uploads
+      # site/dist as the Pages artifact (CNAME included).
+      - uses: withastro/action@v6.1.4
+        env:
+          ASTRO_TELEMETRY_DISABLED: "1"
+        with:
+          path: .
+          node-version: 22
+          build-cmd: pnpm --filter @ghost/site site:check && pnpm --filter @ghost/site site:build
+          out-dir: site/dist
+
+  deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5.0.1

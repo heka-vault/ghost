@@ -1,0 +1,72 @@
+---
+/**
+ * The hero's moving picture, loaded behind the front page's words only once the page has
+ * settled (src/components/Hero.astro): the README's made-up desktop (apps/desktop/shots/world.*,
+ * one world for both) scaled to cover the window, and over it the desktop app's floating room
+ * playing the `floating-site` loop. Its own page so the room has a window of its own to measure
+ * (it lays itself out from the window, as on a monitor), and so none of its script is on the
+ * front page's first paint. Not in the sitemap, not indexed.
+ *
+ * `?arrange=site` (the default) moves the windows right of the middle so the left of the screen
+ * is quiet for the front page's words, with Ghost beside the work on the right;
+ * `?arrange=readme` is the README's own desk. The room takes `?placement=centre` on a phone.
+ * When Ghost first comes forward the page tells its parent (`ghost:forward`), which then shows
+ * it in place of the still.
+ */
+import "@fontsource-variable/inter/opsz.css";
+import "@fontsource-variable/jetbrains-mono";
+import "../../../apps/desktop/shots/world.css";
+import FloatDemo from "../components/FloatDemo";
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <meta name="color-scheme" content="dark" />
+    <title>Ghost, floating</title>
+    <style is:global>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #020308; }
+      .world { transform-origin: 0 0; }
+      /* The site's desk: the work right of the middle, the wallpaper's city quiet on the left. */
+      /* The site's nav sits where the desktop's tray would be. */
+      .world[data-arrange="site"] .bar .tray { visibility: hidden; }
+      .world[data-arrange="site"] .editor { left: 468px; top: 58px; width: 560px; height: 410px; }
+      .world[data-arrange="site"] .term { left: 506px; top: 482px; width: 540px; }
+      .world[data-arrange="site"] .browser { left: 860px; top: 86px; width: 410px; }
+      .world[data-arrange="site"] .browser .cols { grid-template-columns: repeat(2, 1fr); }
+      .world[data-arrange="site"] .browser .col:last-child { display: none; }
+      /* The floating room draws over the desktop, as it does over a real one. */
+      .demo-room { position: fixed; inset: 0; z-index: 2; }
+    </style>
+  </head>
+  <body>
+    <div class="world" id="world" aria-hidden="true"></div>
+    <div class="demo-room"><FloatDemo client:only="react" /></div>
+    <script>
+      import { mountWorld, WORLD_H, WORLD_W } from "../../../apps/desktop/shots/world";
+
+      const world = document.getElementById("world")!;
+      world.dataset.arrange = new URLSearchParams(location.search).get("arrange") === "readme" ? "readme" : "site";
+      mountWorld(world);
+      // Cover the window, centred, as a wallpaper does.
+      const fit = () => {
+        const s = Math.max(innerWidth / WORLD_W, innerHeight / WORLD_H);
+        world.style.transform = `translate(${(innerWidth - WORLD_W * s) / 2}px, ${(innerHeight - WORLD_H * s) / 2}px) scale(${s})`;
+      };
+      fit();
+      addEventListener("resize", fit);
+
+      // Tell the front page when Ghost first comes forward, so the still can give way to it.
+      const told = new MutationObserver(() => {
+        if (document.querySelector('.flt-root[data-shown="1"]')) {
+          parent.postMessage({ ghost: "forward" }, location.origin);
+          told.disconnect();
+        }
+      });
+      told.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-shown"] });
+    </script>
+  </body>
+</html>
