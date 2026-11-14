@@ -39,7 +39,7 @@ by one and `make perf-llm` the real model connection with Ghost's prompt and too
 `make perf-providers` runs the provider check the product runs (Settings › Model's Test,
 `ghostd llm test`; ADR 0056) against every provider named that the environment has a key for,
 keys from the variables named on the command line and never the vault, and writes a dated
-comparison here (`docs/benchmarks/perf/<date>-providers.md`): `PROVIDERS="proxy
+comparison here (`docs/benchmarks/perf/<date>-providers.md`): `PROVIDERS="custom
 anthropic:ANTHROPIC_API_KEY openrouter:OPENROUTER_API_KEY openrouter-openai"`. The model's
 first word is the one wait Ghost can't hide: past 1.5 s, by the latest check or by the
 operator's last ten spoken turns, the waiting list says so and what would help. The

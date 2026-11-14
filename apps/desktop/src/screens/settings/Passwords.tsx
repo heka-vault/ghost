@@ -29,7 +29,7 @@ export function passwordTitle(p: Pick<PasswordInfo, "name" | "used_by" | "ghost"
   return isAppSecret(p.name) ? secretLabel(p.name) : p.name;
 }
 const TITLES: Record<string, string> = {
-  ANTHROPIC_AUTH_TOKEN: "CLIProxy",
+  ANTHROPIC_AUTH_TOKEN: "Anthropic-compatible address",
   ANTHROPIC_API_KEY: "Anthropic",
   OPENAI_API_KEY: "OpenAI",
   LLM_API_KEY: "Your own address",

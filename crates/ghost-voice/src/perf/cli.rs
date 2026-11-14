@@ -11,7 +11,7 @@
 //!                   [--pad-tokens N] [--first-byte-ms N]  (a real model shaped as real use
 //!                    is, `perf::shaped`; `pad=` and `delay=` in a variant)
 //! ghost-perf micro  [--only stt,tts,jev,turn] [--n N] [--out DIR]
-//! ghost-perf llm    [--model a,b] [--endpoint current,proxy,openrouter+sysbp,<provider>]
+//! ghost-perf llm    [--model a,b] [--endpoint current,custom,openrouter+sysbp,<provider>]
 //!                   [--openrouter-models a,b] [--thinking between_tools] [--n N] [--out DIR]
 //! ghost-perf report DIR/records.json
 //! ghost-perf hear   [--takes DIR|latest] [--channel aec|raw] [--voices am_michael,bf_emma]
@@ -565,7 +565,7 @@ async fn run(args: &Args, out: &Path, scratch: &Path, root: &Path) -> i32 {
             return 2;
         }
     };
-    // A real model instead of the script: `--llm-url http://host:8317 --llm-model m
+    // A real model instead of the script: `--llm-url http://host:8080 --llm-model m
     // [--llm-fast-model m] [--llm-key-env NAME] [--llm-protocol anthropic|openai]`. Only the
     // variable named is read for a key, and it is never printed.
     let real = args.one("llm-url").map(|url| RealModel {

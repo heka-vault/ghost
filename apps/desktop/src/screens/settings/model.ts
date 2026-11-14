@@ -135,7 +135,7 @@ export const SECRET_ORDER = ["ANTHROPIC_AUTH_TOKEN", "GITHUB_TOKEN", "TYPESAFE_A
 export const isOptionalSecret = (name: string) => !!SECRET_INFO[name]?.optional;
 
 export const SECRET_INFO: Record<string, { help: string; optional?: boolean; placeholder: string }> = {
-  ANTHROPIC_AUTH_TOKEN: { help: "For CLIProxy or another Anthropic-compatible address, when it takes one.", optional: true, placeholder: "sk-ant-…" },
+  ANTHROPIC_AUTH_TOKEN: { help: "For another Anthropic-compatible address, when it takes one.", optional: true, placeholder: "Paste the value" },
   ANTHROPIC_API_KEY: { help: "Lets Ghost think and talk through Anthropic.", optional: true, placeholder: "sk-ant-api…" },
   OPENAI_API_KEY: { help: "Lets Ghost think and talk through OpenAI.", optional: true, placeholder: "sk-…" },
   LLM_API_KEY: { help: "For your own address, when it takes one.", optional: true, placeholder: "Paste the value" },
@@ -305,11 +305,7 @@ export function validateConnection(v: Values): Record<string, string> {
   return e;
 }
 
-/** The five ways in, as the page offers them. OpenAI, Ollama and LM Studio share one. */
-export type ProviderChoice = "anthropic" | "openrouter" | "cliproxy" | "openai-compatible" | "custom";
-export const OPENAI_COMPATIBLE = ["openai", "ollama", "lmstudio"] as const;
-export const choiceOf = (provider: string): ProviderChoice =>
-  (OPENAI_COMPATIBLE as readonly string[]).includes(provider) ? "openai-compatible" : (provider as ProviderChoice);
+export { choiceOf, draftConnection, LEGACY_PROVIDERS, namedProvider, OPENAI_COMPATIBLE, type ProviderChoice } from "./provider";
 
 /** "412 ms", "1.24 s": a time to first token, the way the perf report reads. */
 export const msWords = (ms: number) => (ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(2)} s`);
