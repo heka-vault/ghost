@@ -56,7 +56,7 @@ pub fn parse_named(spec: &str) -> Result<Named, String> {
         None => (spec, None),
     };
     let (default, optional) = match name {
-        "custom" => (None, true), // its default depends on the address: `custom_settings`
+        "custom" => (None, true), // its default depends on the address: `key_var`
         "anthropic" => (Some("ANTHROPIC_API_KEY"), false),
         "openrouter" | "openrouter-openai" => (Some("OPENROUTER_API_KEY"), false),
         "openai" => (Some("OPENAI_API_KEY"), false),
