@@ -28,6 +28,7 @@ pub mod phone_host;
 pub mod players;
 pub mod push;
 pub mod reply_duck;
+pub mod reports;
 pub mod routes;
 pub mod schedules;
 pub mod session;

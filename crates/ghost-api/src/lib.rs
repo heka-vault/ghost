@@ -28,6 +28,7 @@ pub mod passwords;
 pub mod questions;
 pub mod reach;
 pub mod realtime;
+pub mod reports;
 pub mod schedules;
 pub mod server;
 pub mod skill_catalog;

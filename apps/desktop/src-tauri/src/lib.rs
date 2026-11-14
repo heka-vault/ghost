@@ -8,6 +8,7 @@
 mod autostart;
 mod bridge;
 pub mod floating;
+mod reports;
 mod supervisor;
 mod tray;
 mod updater;
@@ -64,6 +65,7 @@ fn start_supervisor(app: &tauri::AppHandle) -> Handle {
     let emitter = app.clone();
     let sup = Supervisor::new(system, adopt_only(), move |e| {
         eprintln!("ghost: daemon {e:?}");
+        reports::on_daemon_event(e);
         if let Some(d) = emitter.try_state::<Daemon>() {
             *d.last.lock().unwrap() = Some(e.clone());
         }
@@ -95,6 +97,8 @@ pub fn run() {
     if std::env::args().any(|a| a == floating::ARG) {
         #[cfg(target_os = "linux")]
         {
+            // ADR 0067: the floating room's own panics, and its page's errors.
+            reports::start(ghost_reports::Component::Floating);
             let mut ctx = context();
             // The surface has its own window and no main one.
             ctx.config_mut().app.windows.clear();
@@ -102,6 +106,8 @@ pub fn run() {
         }
         return;
     }
+    // ADR 0067: the shell's panics, the window's errors, the daemon's start and exits.
+    reports::start(ghost_reports::Component::Shell);
     let app = tauri::Builder::default()
         // First, so a second launch hands off and exits before anything else starts.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -136,7 +142,8 @@ pub fn run() {
             updater::update_check,
             updater::update_set_check,
             updater::update_install,
-            updater::update_cancel
+            updater::update_cancel,
+            reports::report_page_error
         ])
         .setup(|app| {
             let floating = floating::setup(app.handle());

@@ -15,6 +15,8 @@ path = "src/main.rs"
 ghost-api.workspace = true
 ghost-core.workspace = true
 ghost-llm.workspace = true
+# Error reports (ADR 0067): the panic hook, the typed failures, `ghostd reports`.
+ghost-reports.workspace = true
 # restore-volumes: the ducked volumes a crash left (crates/ghost-audio, ADR 0038); the desk's
 # devices and the passive capture (W7).
 ghost-audio.workspace = true
@@ -61,6 +63,7 @@ rustix = { workspace = true, features = ["termios", "process"] }
 
 [dev-dependencies]
 tempfile.workspace = true
+wiremock.workspace = true
 # The integration test reads the daemon's own socket (`GET /session/turns`).
 hyper.workspace = true
 # A paused clock for the passive listener's idle test.

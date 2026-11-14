@@ -468,6 +468,12 @@ impl SpeechModelsPort for SpeechModelsDesk {
                     }
                     Err(e) => {
                         warn!("speech models: {e}");
+                        // ADR 0067: by kind; the operator's own stop is not a failure.
+                        if !stop.is_cancelled() {
+                            ghost_reports::failure(ghost_reports::Failure::new(
+                                ghost_reports::FailureKind::SpeechModelsDownload,
+                            ));
+                        }
                         s.state = SpeechModelsFetchState::Failed;
                         s.error = Some(e);
                     }

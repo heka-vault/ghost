@@ -392,7 +392,8 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             floating_share,
             floating_shell,
             floating_log,
-            floating_sound
+            floating_sound,
+            crate::reports::report_page_error
         ])
         .setup(|app| {
             // The window's own capability: the daemon bridge, its events and the commands

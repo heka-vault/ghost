@@ -74,7 +74,7 @@ const does = [
 
 const privacy = [
   ["Its ears and voice are local", "Parakeet hears you and Kokoro speaks, both on your own processor. Your voice leaves only if you turn on the optional realtime voice."],
-  ["You choose the model", "After the wake word the conversation goes as text to the provider you pick: Anthropic, OpenRouter, OpenAI, or a local model in Ollama or LM Studio, and then nothing leaves at all."],
+  ["You choose the model", "After the wake word the conversation goes as text to the provider you pick: Anthropic, OpenRouter, OpenAI, or a local model in Ollama or LM Studio, and then none of it leaves at all."],
   ["Passwords in its own vault", "Encrypted, keyed by your login keyring, never shown again, never logged, never given to the model."],
   ["Off means off", "Turn listening off and no microphone is opened at all until you turn it back on. Typing still works."],
   ["What it keeps stays home", "Transcripts after the wake word and the audit log live under your home folder, never uploaded by Ghost. Delete the folder and they are gone."],
@@ -163,7 +163,7 @@ const rough = [
       <section id="privacy" class="part part--privacy" aria-labelledby="privacy-title">
         <p class="kicker"><span class="kicker__dot kicker__dot--cyan"></span>Privacy</p>
         <div class="rest" aria-hidden="true"><span></span></div>
-        <h2 id="privacy-title" class="say say--huge">Before its name, nothing leaves the machine.</h2>
+        <h2 id="privacy-title" class="say say--huge">Before its name, nothing it hears leaves the machine.</h2>
         <p class="part__lede">
           That line is Ghost waiting. While it waits, the microphone feeds only models on your own processor: voice activity, the
           wake word and speech-to-text. What it hears is checked for its name and dropped: not logged, not stored, not shown.
@@ -178,7 +178,9 @@ const rough = [
         </dl>
         <p class="part__fine">
           What Ghost fetches by itself: the speech models once, from their publishers, and once a day a check of GitHub for a new
-          release that carries nothing about you (you can turn it off). The whole account is the README's
+          release that carries nothing about you (you can turn it off). When something in Ghost breaks, it sends an error report:
+          what failed and where in its code, never what you said or typed (on by default, said in the first run, off in
+          Settings). The whole account is the README's
           <a href={`${REPO}#privacy`}>Privacy</a> section. This site has no analytics, sets no cookies and loads nothing from anyone
           else.
         </p>

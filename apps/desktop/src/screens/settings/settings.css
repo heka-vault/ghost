@@ -243,3 +243,13 @@
 .room-select select { width: 100%; }
 /* The release notes (ADR 0066): plain text, its own lines kept. */
 .set-notes { white-space: pre-wrap; display: block; max-height: 16rem; overflow: auto; }
+
+/* Error reports (ADR 0067): the last reports sent, exactly as sent. */
+.set-reports { display: flex; flex-direction: column; gap: var(--space-3); margin-top: var(--space-3); }
+.set-report { display: block; }
+.set-report__head { display: block; font-weight: 500; color: var(--text-1); }
+.set-report__body {
+  margin: var(--space-1) 0 0; padding: var(--space-2) var(--space-3); max-height: 16rem; overflow: auto;
+  font-family: var(--font-mono); font-size: var(--text-xs); line-height: var(--leading-xs); white-space: pre;
+  background: var(--bg-sunken); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+}
