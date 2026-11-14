@@ -289,7 +289,7 @@ With `make dev` running and the window open:
 
 ## Privacy
 
-**Before the wake word, nothing leaves the machine.** Microphone audio goes to the voice
+**Before the wake word, nothing Ghost hears leaves the machine.** Microphone audio goes to the voice
 activity detector, the wake word detector and speech-to-text (Parakeet), all running locally on
 your CPU. What Parakeet reads while Ghost is idle is checked for its name and then dropped: it
 is not logged, stored or shown. With listening off, the microphone isn't opened at all.
@@ -324,6 +324,17 @@ day whether there is a new release (one request for the release's `latest.json`,
 identifier; turn it off in Settings › General › Updates), and downloads a new version only
 when you press Update and restart. The first run downloads the speech models once, from their
 publishers on Hugging Face and GitHub.
+
+**Error reports:** when something in an installed Ghost breaks (a crash, a page of the app
+failing, or one of a short list of failures such as the speech models not loading), it sends
+an error report to Ghost's error tracking (PostHog), so it can be fixed: what failed, where in
+Ghost's code, the version, and coarse facts about the computer (the OS and its version, X11 or
+Wayland, the processor type, .deb or AppImage) with a random id made for this purpose. Never
+what you said, typed or heard, audio, an app's or a model's words, a password, your name,
+paths in your home folder, addresses, or the contents of your files. It is on by default in a
+released build and said in the first run; turn it off in Settings › General (off sends nothing
+and deletes the id), and see the last 20 reports exactly as they were sent there
+([docs/error-reports.md](docs/error-reports.md)). A build from the checkout never sends any.
 
 ## How it is built
 

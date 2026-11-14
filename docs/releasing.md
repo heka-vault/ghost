@@ -216,6 +216,34 @@ once.
 **A build from the checkout never offers an update** (`make dev`, `cargo build`: debug
 assertions or no bundle type): Settings says it is a development build.
 
+## Error reports
+
+A released Ghost sends error reports to the project's PostHog error tracking (ADR 0067,
+[error-reports.md](error-reports.md)). The project key is the repository secret
+`POSTHOG_API_KEY`; the release workflow's build step passes it as `GHOST_POSTHOG_KEY`, which
+`ghost-reports` compiles into `ghostd` and the shell (`option_env!`), and refuses to build
+without it. Nothing else has it: `make bundle`, CI and a checkout's build have no sender. A dry
+run builds with the key too, and its install test only checks that it is there (`ghostd
+reports status` says `error reports: on`) with `GHOST_REPORTS_URL` pointing at nothing, so the
+dry run sends nothing.
+
+**After a release**, on a machine with the new version installed: `ghostd reports test` sends
+one report marked `test` and prints it; it appears in PostHog's Error tracking within a minute,
+grouped under the `test` type, with the release's version in `ghost_version`. Settings ›
+General › Error reports shows it under What was sent. Check in PostHog's project settings that
+the client's IP address is discarded (Ghost sets `$geoip_disable`, but the address a request
+comes from is the project's to drop).
+
+**Trying it from the checkout** without the real project: run a stub (anything that answers
+`POST /i/v0/e/` with 200) and start the daemon or the app with
+`GHOST_POSTHOG_KEY=dev GHOST_REPORTS_URL=http://127.0.0.1:<port>`. Never set the real key in
+`settings.env` or a unit file.
+
+**Readable page frames** need the release's source maps uploaded to PostHog (`posthog-cli
+sourcemap inject --directory apps/desktop/dist` and `upload`) with a personal API key that has
+the error tracking write scope, as a second secret; until then a page's frames are minified,
+named by the bundle's hashed file and the version.
+
 ## What each build says it is
 
 The daemon reports its version and its build in the status the control API returns
