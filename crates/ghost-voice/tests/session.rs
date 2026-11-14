@@ -209,6 +209,11 @@ struct Setup {
     sources: Vec<ToolSource>,
     /// The voice renders in this many windows a clause; 0, whole.
     windows: usize,
+    /// How the session opens, and what the operator said with the name.
+    greeting: Greeting,
+    first: Option<String>,
+    /// A model of its own in place of the scripted one (the operator's Claude Code).
+    model: Option<Arc<dyn ModelPort>>,
 }
 
 impl Setup {
@@ -224,6 +229,9 @@ impl Setup {
             vars: Vec::new(),
             sources: Vec::new(),
             windows: 0,
+            greeting: Greeting::Text("Yeah?".into()),
+            first: None,
+            model: None,
         }
         // Asking the main model beside the fast one (GHOST_LLM_RACE) is off here, so
         // "the main model was asked" means it was needed; the race has its own tests.
@@ -340,6 +348,9 @@ fn world_setup(setup: Setup) -> World {
         vars,
         sources,
         windows,
+        greeting,
+        first,
+        model,
     } = setup;
     let settings = VoiceSettings::from_vars(|name| {
         if let Some((_, v)) = vars.iter().find(|(k, _)| *k == name) {
@@ -407,19 +418,21 @@ fn world_setup(setup: Setup) -> World {
     let session = build_session(SessionParams {
         settings: Arc::new(settings),
         models,
-        model: Arc::new(Asked {
-            model: ScriptedModel::new(replies, Duration::from_millis(50)),
-            asked: asked.clone(),
-            offered: offered.clone(),
-            warmed: warmed.clone(),
+        model: model.unwrap_or_else(|| {
+            Arc::new(Asked {
+                model: ScriptedModel::new(replies, Duration::from_millis(50)),
+                asked: asked.clone(),
+                offered: offered.clone(),
+                warmed: warmed.clone(),
+            })
         }),
         fast_model,
         sources,
         gate,
         events: None,
         media,
-        greeting: Greeting::Text("Yeah?".into()),
-        first_utterance: None,
+        greeting,
+        first_utterance: first,
         first_typed: false,
         hooks: SessionHooks {
             on_turn: Some(on_turn),
@@ -559,6 +572,104 @@ async fn wait_for(records: &Arc<Mutex<Vec<Value>>>, kind: &str, within: Duration
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
+}
+
+/// A fake `claude` (ghost-llm's, speaking the recorded stream-json) whose start takes
+/// `start_secs`, as the real program's does on a cold machine, its scenario `turns`.
+fn slow_fake_claude(
+    tmp: &std::path::Path,
+    turns: Value,
+    start_secs: f64,
+) -> ghost_llm::claude_code::ClaudeCode {
+    use std::os::unix::fs::PermissionsExt;
+    let fixtures = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../ghost-llm/tests/fixtures/claude-code"
+    );
+    let help = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../ghost-core/src/other_tools/fixtures/claude-help.txt"
+    );
+    let home = tmp.join("home");
+    let dir = home.join(".fake-claude");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("scenario.json"),
+        json!({"help": help, "turns": turns}).to_string(),
+    )
+    .unwrap();
+    let bin = tmp.join("claude");
+    std::fs::write(
+        &bin,
+        format!(
+            "#!/bin/sh\nsleep {start_secs}\nexec python3 -I {fixtures}/fake_claude.py \"$@\"\n"
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let started: std::collections::HashMap<String, String> = [
+        ("HOME".to_string(), home.display().to_string()),
+        ("PATH".to_string(), std::env::var("PATH").unwrap()),
+    ]
+    .into_iter()
+    .collect();
+    let mut settings = ghost_llm::claude_code::Settings::new(bin, "haiku", started);
+    settings.runtime_dir = tmp.join("run");
+    ghost_llm::claude_code::ClaudeCode::new(settings)
+}
+
+/// The first meeting (ADR 0059 as amended 2026-11-14) with the operator's own Claude Code as
+/// the model: its process starts with the session's first model call, and Ghost's own line is
+/// said before it, not after the program has started, and before any word the program writes.
+#[tokio::test]
+async fn the_first_meeting_is_said_before_claude_code_has_even_started() {
+    let tmp = tempfile::tempdir().unwrap();
+    let hello = "Hi, I'm Ghost. Good to meet you.";
+    let cc = slow_fake_claude(
+        tmp.path(),
+        json!([[{"text": "Paris is the capital."}]]),
+        2.0,
+    );
+    let w = world_setup(Setup {
+        greeting: Greeting::Intro(hello.into()),
+        first: Some("What's the capital of France?".into()),
+        model: Some(Arc::new(cc) as Arc<dyn ModelPort>),
+        ..Setup::new(&[], Vec::new())
+    });
+    let t0 = Instant::now();
+    w.session.start(true).await;
+    // Ghost's own line reaches the voice at once, while the program is still starting.
+    let deadline = t0 + Duration::from_secs(1);
+    while Instant::now() < deadline && w.spoken.lock().unwrap().is_empty() {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let first_sound = t0.elapsed();
+    // The voice renders a clause at a time: the line's first clause is the first sound.
+    let early = w.spoken.lock().unwrap().clone();
+    assert_eq!(
+        early.first().map(String::as_str),
+        Some("Hi, I'm Ghost."),
+        "{early:?}"
+    );
+    assert!(first_sound < Duration::from_secs(1), "{first_sound:?}");
+    assert!(
+        !tmp.path().join("home/.fake-claude/runs.jsonl").exists(),
+        "said before the program had even started"
+    );
+    // Then the program's answer, after the line, and never in front of it.
+    let deadline = t0 + Duration::from_secs(30);
+    while Instant::now() < deadline && !w.spoken.lock().unwrap().iter().any(|s| s.contains("Paris"))
+    {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let spoken = w.spoken.lock().unwrap().clone();
+    let at_answer = spoken
+        .iter()
+        .position(|s| s.contains("Paris"))
+        .expect("the program answered");
+    // The whole line, then the program's words: nothing of the answer in front of it.
+    assert_eq!(spoken[..at_answer].join(" "), hello, "{spoken:?}");
+    finish(&w).await;
 }
 
 #[tokio::test]

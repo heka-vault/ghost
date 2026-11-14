@@ -239,6 +239,8 @@ export class MockDaemon {
   private models: ModelsView;
   /** When the mock's speech download began (ADR 0066): it takes eight seconds. */
   private speechStarted: number | null = null;
+  /** The first run's moment is armed (`PUT /first-meeting`, ADR 0059 as amended 2026-11-14). */
+  private firstMeeting = false;
   private voices: VoiceInfo[];
   private phone: PhoneView;
   private pairing: PhonePairing | null = null;
@@ -312,7 +314,26 @@ export class MockDaemon {
         { kind: "file", path: "~/.config/ghost/apps.env" },
       ];
     this.devices = f.settings.devices;
+    // `&mic=none`: a computer with no microphone at all (the first run's typed moment).
+    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("mic") === "none")
+      this.devices = { ...this.devices, microphone: null, devices: this.devices.devices.map((d) => ({ ...d, max_input_channels: 0, is_default_input: false })) };
     this.models = f.settings.models;
+    // `floating.html?…&first=1&heyghost=<ms>`: the first run's moment on the floating page alone
+    // (no wizard to arm it): armed from the start.
+    if (typeof window !== "undefined") {
+      const q = new URLSearchParams(window.location.search);
+      if (q.get("first") === "1" && q.get("heyghost")) {
+        this.firstMeeting = true;
+        queueMicrotask(() => this.planHeyGhost());
+      }
+    }
+    // `&speech=fetching`: Ghost's ears already downloading (40 s into three minutes).
+    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("speech") === "fetching") {
+      this.speechStarted = Date.now() - 40_000;
+      this.models = { ...this.models, ready: false };
+    }
+    // `&speech=following`: a terminal's download under way, so the ears aren't here yet either.
+    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("speech") === "following") this.models = { ...this.models, ready: false };
     this.skills = f.skills;
     this.waitingItems = f.waiting;
     // The daemon's own item while the keyring is locked (ghostd::passwords::problems).
@@ -940,9 +961,11 @@ export class MockDaemon {
   private speech(): SpeechModelsView {
     const total = 2_903_552_740;
     const base = { folder: "/home/you/.cache/ghost/models/parakeet-tdt-0.6b-v3", free_bytes: 120e9 };
-    const asked = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("speech") : null;
-    const fresh = asked === "missing" || asked === "following";
-    const following = asked === "following";
+    const how = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("speech") : null;
+    const following = how === "following";
+    const fresh = how === "missing" || how === "slow" || how === "fetching" || following;
+    // `&speech=slow` and `&speech=fetching` take three minutes, so the time left reads.
+    const takes = how === "slow" || how === "fetching" ? 180_000 : 8000;
     // The terminal's download started before the app opened: 41% done, eight seconds to go.
     if (following && this.speechStarted === null && !this.models.ready) this.speechStarted = Date.now() - 0.41 * 8000;
     if (this.models.ready || (!fresh && this.speechStarted === null)) return { ...base, ready: this.models.ready, missing: [], missing_bytes: 0, fetch: { state: "idle", done_bytes: 0, total_bytes: 0, file: null, error: null, following: false } };
@@ -951,7 +974,7 @@ export class MockDaemon {
       { model: "Kokoro", name: "kokoro-v1.0.onnx", bytes: 325_532_387 },
     ];
     if (this.speechStarted === null) return { ...base, ready: false, missing, missing_bytes: total, fetch: { state: "idle", done_bytes: 0, total_bytes: 0, file: null, error: null, following: false } };
-    const share = Math.min(1, (Date.now() - this.speechStarted) / 8000);
+    const share = Math.min(1, (Date.now() - this.speechStarted) / takes);
     if (share >= 1) {
       this.models = { ...this.models, ready: true, kokoro_present: true };
       this.status = { ...this.status, models_ready: true };
@@ -965,11 +988,58 @@ export class MockDaemon {
   private requireReady() {
     if (!this.status.models_ready) throw new HttpError(409, "Ghost is still loading its voice models.");
   }
+  /**
+   * The first meeting's words, as the daemon has them (`ghostd::first_meeting`): Ghost's own,
+   * never a model's.
+   */
+  private meetingLine(request: boolean): string {
+    const hello = "Hi, I'm Ghost. Good to meet you.";
+    if (!this.model.view().ready) return `${hello} I can hear you, but I need a model to think with before I can answer. It's the first step on your screen.`;
+    return request ? hello : `${hello} I come forward whenever you say my name. What can I do for you?`;
+  }
+  /** How long the first meeting's line is still being said, for a typed request after it. */
+  private meetingMs = 0;
+  /**
+   * `&heyghost=<ms>` with the first run's moment armed: the person says “Hey Ghost” that long
+   * after, then asks something, then lets Ghost go. Synthetic words only.
+   */
+  private heyGhostPlanned = false;
+  private planHeyGhost() {
+    const ms = typeof window !== "undefined" ? Number(new URLSearchParams(window.location.search).get("heyghost")) : NaN;
+    if (!Number.isFinite(ms) || ms <= 0 || this.heyGhostPlanned) return;
+    this.heyGhostPlanned = true;
+    this.later(ms, () => {
+      if (!this.firstMeeting || this.status.session_id || !this.status.models_ready) return;
+      this.wake("ghost");
+      const ready = this.model.view().ready;
+      const after = this.meetingMs + 900;
+      if (!ready) {
+        this.later(after + 3000, () => {
+          this.pushStatus({ ending: true });
+          this.reply("Talk soon.", 1200);
+        });
+        return;
+      }
+      this.later(after, () => this.act("you_started"));
+      this.later(after + 1400, () => {
+        this.act("you_stopped");
+        const words = "What can you do?";
+        this.addTurn("user", words, "voice");
+        this.heard(words);
+        this.pushStatus({ phase: "thinking" });
+      });
+      this.later(after + 2400, () => this.reply("I watch your apps, make changes you allow, and hand work to agents. Ask me for today’s issues, or to draft a reply.", 5200));
+      this.later(after + 9500, () => {
+        this.pushStatus({ ending: true });
+        this.reply("Talk soon.", 1200);
+      });
+    });
+  }
   /** A session opens with Ghost, or with the agent a Call names; a retired or unknown agent is refused, as the daemon does. */
-  private wake(conversation?: string | null) {
+  private wake(conversation?: string | null, request = false): boolean {
     this.requireReady();
     if (this.status.phase === "recording") throw new HttpError(409, "The Hearing test has the mic: close it first.");
-    if (this.status.session_id) return;
+    if (this.status.session_id) return true;
     const slug = conversation || "ghost";
     const target = this.agents.get(slug)?.detail;
     if (!target || target.retired_at) throw new HttpError(409, `There's no working agent called ${slug}.`);
@@ -977,7 +1047,17 @@ export class MockDaemon {
     this.replyNo = -1;
     this.setActive(slug);
     this.pushStatus({ session_id: newId(), phase: "listening", conversation: slug, session_origin: "desk", session_typed: false });
+    // The first run's moment: Ghost's own first line, once (the daemon's `first_meeting`).
+    if (this.firstMeeting && target.is_ghost) {
+      this.firstMeeting = false;
+      const line = this.meetingLine(request);
+      this.meetingMs = Math.max(1600, (line.length / 14) * 1000);
+      this.reply(line, this.meetingMs);
+      return this.model.view().ready;
+    }
+    this.meetingMs = 0;
     this.addTurn("assistant", target.is_ghost ? "Ghost here." : `${target.name} here.`, "system");
+    return true;
   }
   private setActive(slug: string | null) {
     for (const l of this.agents.values()) l.detail.active = l.detail.slug === slug;
@@ -985,10 +1065,23 @@ export class MockDaemon {
   private say(text: string, conversation?: string | null) {
     // Typed with no session open: a typed session, the mic closed (the daemon, 2026-11-13).
     if (!this.status.session_id) {
-      this.wake(conversation);
+      const goOn = this.wake(conversation, true);
       this.pushStatus({ session_typed: true });
+      // The first meeting: its line first; with no model the request goes nowhere.
+      if (!goOn) return void this.addTurn("user", text, "text");
+      if (this.meetingMs) {
+        const ms = this.meetingMs;
+        this.meetingMs = 0;
+        this.addTurn("user", text, "text");
+        this.later(ms, () => this.answerTyped(text));
+        return;
+      }
     }
     this.addTurn("user", text, "text");
+    this.answerTyped(text);
+  }
+  /** The model's answer to a typed line (the mock's script). */
+  private answerTyped(text: string) {
     this.pushStatus({ phase: "thinking" });
     // A reply that reads an app first: the calls go out, come back, then Ghost answers.
     const calls = this.script.replies.find((r) => r.match.test(text))?.calls ?? [];
@@ -1742,6 +1835,13 @@ export class MockDaemon {
     if (path.startsWith("/wake/takes")) {
       const answer = this.wakeTakes.handle(method, path, b);
       if (answer !== undefined) return answer;
+    }
+    if (method === "GET" && path === "/first-meeting") return { armed: this.firstMeeting };
+    if (method === "PUT" && path === "/first-meeting") {
+      if (typeof b.armed !== "boolean") throw new HttpError(422, "armed is required");
+      this.firstMeeting = b.armed;
+      if (b.armed) this.planHeyGhost();
+      return { armed: this.firstMeeting };
     }
     if (method === "GET" && path === "/listening") return this.listeningView();
     if (method === "PUT" && path === "/listening") return this.setListening(b);

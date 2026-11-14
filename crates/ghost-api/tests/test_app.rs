@@ -31,6 +31,32 @@ async fn status_and_wake_sleep() {
 }
 
 #[tokio::test]
+async fn the_first_meeting_is_armed_by_the_window_and_taken_once() {
+    // ADR 0059 as amended 2026-11-14: the first run arms it; the next desk session takes it.
+    let w = World::new();
+    let c = w.client();
+    assert_eq!(c.get("/first-meeting").await["armed"], false);
+    assert_eq!(
+        c.put("/first-meeting", json!({"armed": true})).await["armed"],
+        true
+    );
+    assert_eq!(c.get("/first-meeting").await["armed"], true);
+    assert!(w.state.take_first_meeting());
+    assert!(!w.state.take_first_meeting(), "once");
+    assert_eq!(c.get("/first-meeting").await["armed"], false);
+    c.put("/first-meeting", json!({"armed": true})).await;
+    assert_eq!(
+        c.put("/first-meeting", json!({"armed": false})).await["armed"],
+        false
+    );
+    assert!(!w.state.take_first_meeting());
+    assert_eq!(
+        c.put("/first-meeting", json!({"on": true})).await.status,
+        422
+    );
+}
+
+#[tokio::test]
 async fn listening_is_turned_off_and_on_and_the_status_says_so() {
     // ADR 0057: the switch the desktop, the tray and the phone use.
     let w = World::new();

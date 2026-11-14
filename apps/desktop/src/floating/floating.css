@@ -145,6 +145,15 @@ body {
   align-items: center;
   gap: 10px;
 }
+.flt-hint {
+  margin: 0;
+  white-space: nowrap;
+  font: 500 calc(12px * max(var(--flt-s), 0.85)) / 16px var(--flt-mono);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgb(255 255 255 / 0.78);
+  text-shadow: 0 1px 2px rgb(0 0 0 / 0.9), 0 0 6px rgb(0 0 0 / 0.8);
+}
 .flt-label__dot {
   width: 6px;
   height: 6px;
@@ -455,7 +464,7 @@ body {
   .flt-line { transition: none; }
 }
 @media (forced-colors: active) {
-  .flt-ask__q, .flt-node__name, .flt-node__word, .flt-label { text-shadow: none; }
+  .flt-ask__q, .flt-node__name, .flt-node__word, .flt-label, .flt-hint { text-shadow: none; }
   .flt-card::before, .flt-captions, .flt-pill, .flt-shared, .flt-sharecard { background: Canvas; }
   .flt-shared__dot { background: Mark; box-shadow: none; }
 }

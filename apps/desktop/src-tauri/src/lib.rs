@@ -137,6 +137,8 @@ pub fn run() {
             daemon_start,
             floating::floating_status,
             floating::floating_set,
+            floating::floating_first_run,
+            floating::floating_first_meeting,
             floating::stage::stage_open,
             updater::update_view,
             updater::update_check,

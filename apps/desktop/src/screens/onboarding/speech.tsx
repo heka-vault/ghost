@@ -8,9 +8,10 @@
  * shows its progress and moves on when it ends.
  */
 import type { GhostClient, SpeechModelsView } from "@ghost/client-ts";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Badge, Button, errorText, ListRow, Progress, Skeleton } from "../../ui";
+import { timeLeft } from "./state";
 
 export const gb = (bytes: number) => `${(bytes / 1e9).toFixed(1)} GB`;
 
@@ -31,10 +32,32 @@ export function speechLine(v: SpeechModelsView | null): { state: "unknown" | "he
   return { state: "missing", text: `Ghost’s ears (Parakeet) and voice (Kokoro) are ${gb(v.missing_bytes)} to download, once. After that speech never needs the internet.${short}` };
 }
 
-export function useSpeechModels(client: GhostClient, online: boolean) {
+export interface Speech {
+  view: SpeechModelsView | null;
+  fetch: () => Promise<void>;
+  error: string | null;
+  /** “about 3 min left”, once the download has a rate. */
+  left: string | null;
+  /** 0 to 1 while downloading. */
+  share: number;
+}
+
+export function useSpeechModels(client: GhostClient, online: boolean): Speech {
   const [view, setView] = useState<SpeechModelsView | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const read = useCallback(() => client.speechModels().then(setView, () => undefined), [client]);
+  // The last half minute of readings, for the time left.
+  const samples = useRef<{ at: number; bytes: number }[]>([]);
+  const read = useCallback(
+    () =>
+      client.speechModels().then((v) => {
+        if (v.fetch.state === "fetching") {
+          const now = Date.now();
+          samples.current = [...samples.current.filter((x) => now - x.at < 30_000), { at: now, bytes: v.fetch.done_bytes }];
+        } else samples.current = [];
+        setView(v);
+      }, () => undefined),
+    [client],
+  );
   useEffect(() => {
     if (!online) return;
     void read();
@@ -54,20 +77,27 @@ export function useSpeechModels(client: GhostClient, online: boolean) {
       setError(errorText(e));
     }
   }, [client]);
-  return { view, fetch, error };
+  const share = view && view.fetch.state === "fetching" && view.fetch.total_bytes > 0 ? view.fetch.done_bytes / view.fetch.total_bytes : 0;
+  const left = view?.fetch.state === "fetching" ? timeLeft(samples.current, view.fetch.total_bytes) : null;
+  return { view, fetch, error, left, share };
+}
+
+/** One row with a reader of its own (Settings › Sound). */
+export function SpeechModelsRow({ client, online }: { client: GhostClient; online: boolean }) {
+  return <SpeechRow speech={useSpeechModels(client, online)} online={online} />;
 }
 
 /** One row: what is here, the download, or why it stopped. */
-export function SpeechModelsRow({ client, online }: { client: GhostClient; online: boolean }) {
-  const { view, fetch, error } = useSpeechModels(client, online);
+export function SpeechRow({ speech, online }: { speech: Speech; online: boolean }) {
+  const { view, fetch, error, share, left } = speech;
   const line = speechLine(view);
-  const share = view && view.fetch.total_bytes > 0 ? view.fetch.done_bytes / view.fetch.total_bytes : 0;
   return (
     <ListRow
       title="Ghost’s ears and voice"
       description={
         <>
           {error ?? line.text}
+          {line.state === "fetching" && left ? ` · ${left}` : ""}
           {line.state === "fetching" && <Progress value={share * 100} label="Downloading the speech models" />}
         </>
       }

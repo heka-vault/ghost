@@ -1,10 +1,11 @@
 /** Owner: onboarding. The first run's frame: the step rail, a step's header and footer, the hero presence. */
 import { ArrowLeft, Check, Flag, Hand, Minus } from "lucide-react";
-import { createContext, type FormEvent, type KeyboardEvent, type ReactNode, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createContext, Fragment, type FormEvent, type KeyboardEvent, type ReactNode, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-import { Button, cx, type GhostPhase, Skeleton, VoicePresence } from "../../ui";
-import { type Progress, type StepDef, STEPS, type StepId, stepIndex, taskNumber, TASKS } from "./state";
+import { Button, cx, type GhostPhase, Progress as Bar, Skeleton, VoicePresence } from "../../ui";
+import type { Speech } from "./speech";
+import { MEET, type Progress, type StepDef, STEPS, type StepId, stepIndex, taskNumber, TASKS } from "./state";
 
 /* -------------------------------------------------------------------------------- rail */
 
@@ -14,6 +15,8 @@ export interface RailProps {
   /** The first answer from Ghost hasn't come: no count yet, a placeholder instead. */
   checking: boolean;
   onGo: (id: StepId) => void;
+  /** Ghost's ears and voice: while they download, the rail's foot says how far, quietly. */
+  speech?: Speech;
 }
 
 const NETWORK_NOTE: Record<StepDef["network"], string | null> = { none: null, maybe: null, needs: "Needs the internet" };
@@ -22,7 +25,7 @@ const NETWORK_NOTE: Record<StepDef["network"], string | null> = { none: null, ma
  * Every step, in order, each one a button: setup resumes anywhere and nothing is locked.
  * One Tab stop (the current step); arrows, Home and End move between steps.
  */
-export function Rail({ current, progress, checking, onGo }: RailProps) {
+export function Rail({ current, progress, checking, onGo, speech }: RailProps) {
   const buttons = useRef<(HTMLButtonElement | null)[]>([]);
   const [focusAt, setFocusAt] = useState(stepIndex(current));
   useEffect(() => setFocusAt(stepIndex(current)), [current]);
@@ -51,7 +54,11 @@ export function Rail({ current, progress, checking, onGo }: RailProps) {
           <Skeleton width={56} height={12} className="onb-rail__count-skel" />
         ) : (
           <p className="t-small t-2 t-num">
-            {progress.done === progress.total ? "All done" : `${progress.done} of ${progress.total} tasks done`}
+            {progress.done === progress.total
+              ? "All done"
+              : progress.met
+                ? `You’ve met Ghost · ${progress.done} of ${progress.total} done`
+                : `${MEET.filter((m) => progress.state[m.id] === "done").length} of ${MEET.length} to meet Ghost`}
             {unknown && " · start Ghost to check the rest"}
           </p>
         )}
@@ -66,8 +73,15 @@ export function Rail({ current, progress, checking, onGo }: RailProps) {
           const isDone = s.task && st === "done";
           const isSkipped = s.task && st === "skipped";
           const note = isSkipped ? "Skipped" : !isDone ? NETWORK_NOTE[s.network] : null;
+          const opensPart = s.part !== STEPS[i - 1]?.part && s.part;
           return (
-            <li key={s.id} className={cx("onb-rail__item", isDone && "is-done", isCurrent && "is-current")}>
+            <Fragment key={s.id}>
+            {opensPart && (
+              <li className="onb-rail__part" aria-hidden>
+                {s.part === "meet" ? "Meet Ghost" : "Make it yours · optional"}
+              </li>
+            )}
+            <li className={cx("onb-rail__item", isDone && "is-done", isCurrent && "is-current", s.part === "yours" && STEPS[i + 1]?.part !== "yours" && "ends-part", s.part === "meet" && STEPS[i + 1]?.part !== "meet" && "ends-part")}>
               <button
                 ref={(el) => {
                   buttons.current[i] = el;
@@ -96,12 +110,25 @@ export function Rail({ current, progress, checking, onGo }: RailProps) {
                   <span className="onb-rail__label">{s.label}</span>
                   {note && <span className="onb-rail__note">{note}</span>}
                 </span>
-                <span className="sr-only">{isDone ? ", done" : isSkipped ? ", skipped" : st === "unknown" ? ", can’t check yet" : ""}</span>
+                <span className="sr-only">
+                  {isDone ? ", done" : isSkipped ? ", skipped" : st === "unknown" ? ", can’t check yet" : ""}
+                  {s.part === "yours" ? ", optional" : ""}
+                </span>
               </button>
             </li>
+            </Fragment>
           );
         })}
       </ol>
+      {speech?.view?.fetch.state === "fetching" && (
+        <div className="onb-rail__foot" role="status">
+          <p className="t-small t-2 t-num">
+            Ghost’s ears · {speech.view.fetch.following ? "already downloading · " : ""}
+            {Math.floor(speech.share * 100)}%{speech.left ? ` · ${speech.left}` : ""}
+          </p>
+          <Bar value={speech.share * 100} label="Downloading Ghost’s ears and voice" tone="info" />
+        </div>
+      )}
     </nav>
   );
 }

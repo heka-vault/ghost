@@ -4,7 +4,7 @@
  * surface is up, whether the screen is being captured, the monitors, and the GNOME Shell
  * helper. In a browser (the mock) `&floating=on|off|refused` and `&capture=yes` stand in.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { Sharing } from "../floating/scene";
 import { inTauri } from "../transport";
@@ -26,6 +26,8 @@ export interface FloatingSettings {
   captions?: FloatingCaptions;
   /** Older shells don't send it: hidden while shared. */
   while_shared?: WhileShared;
+  /** The first run has turned it on once (ADR 0059 as amended 2026-11-14); never again after. */
+  offered?: boolean;
 }
 
 export interface FloatingStatus {
@@ -63,7 +65,7 @@ function mockStatus(): FloatingStatus {
   const ws = p.get("while_shared");
   return {
     support: f === "refused" ? { kind: "no", why: "The floating room needs XWayland, and this desktop isn't running it." } : { kind: "xwayland" },
-    settings: { on: f === "on", monitor: "other", placement: "beside", captions: "off", while_shared: ws === "show" || ws === "ask" ? ws : "hide" },
+    settings: { on: f === "on", monitor: "other", placement: "beside", captions: "off", while_shared: ws === "show" || ws === "ask" ? ws : "hide", offered: f === "on" || f === "off" },
     running: f === "on",
     capture: c === "yes" ? "yes" : c === "unknown" ? "unknown" : "no",
     sharing: c !== "yes" ? "none" : sh === "shown" || sh === "asking" ? sh : "hidden",
@@ -75,7 +77,45 @@ function mockStatus(): FloatingStatus {
   };
 }
 
-export function useFloating(): { status: FloatingStatus | null; set: (s: FloatingSettings) => Promise<void>; error: string | null } {
+/**
+ * The first run's offer (ADR 0059 as amended 2026-11-14), as the shell decides it: on once,
+ * where the desktop can float, and never again after the operator's own choice. In the mock
+ * the same rule over the URL's status.
+ */
+export function offerOnce(s: FloatingSettings, supported: boolean): FloatingSettings | null {
+  if (s.offered) return null;
+  return { ...s, on: s.on || supported, offered: true };
+}
+
+/** The first run's wake beat is open: the surface comes forward over the window (`floating_first_meeting`). */
+export async function setFirstMeeting(on: boolean): Promise<void> {
+  if (!inTauri) return;
+  const { invoke } = await import("@tauri-apps/api/core");
+  await invoke("floating_first_meeting", { on }).catch(() => undefined);
+}
+
+/** Ghost came forward over the desktop (the surface told the shell): for the first run. */
+export function useFloatingForward(onForward: () => void): void {
+  const cb = useRef(onForward);
+  cb.current = onForward;
+  useEffect(() => {
+    if (!inTauri) return;
+    let live = true;
+    let stop: (() => void) | null = null;
+    void (async () => {
+      const { listen } = await import("@tauri-apps/api/event");
+      const un = await listen("ghost://floating-forward", () => cb.current());
+      if (live) stop = un;
+      else un();
+    })();
+    return () => {
+      live = false;
+      stop?.();
+    };
+  }, []);
+}
+
+export function useFloating(): { status: FloatingStatus | null; set: (s: FloatingSettings) => Promise<void>; offer: () => Promise<FloatingStatus | null>; error: string | null } {
   const [status, setStatus] = useState<FloatingStatus | null>(() => (inTauri ? null : mockStatus()));
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -109,7 +149,30 @@ export function useFloating(): { status: FloatingStatus | null; set: (s: Floatin
       setError(String(e));
     }
   }, []);
-  return { status, set, error };
+  // The first run's offer: the shell's own rule (`floating::offer`), once.
+  const offer = useCallback(async () => {
+    setError(null);
+    if (!inTauri) {
+      let out: FloatingStatus | null = null;
+      setStatus((s) => {
+        if (!s) return s;
+        const next = offerOnce(s.settings, s.support.kind !== "no");
+        out = next ? { ...s, settings: next, running: next.on && s.support.kind !== "no" } : s;
+        return out;
+      });
+      return out;
+    }
+    const { invoke } = await import("@tauri-apps/api/core");
+    try {
+      const s = await invoke<FloatingStatus>("floating_first_run");
+      setStatus(s);
+      return s;
+    } catch (e) {
+      setError(String(e));
+      return null;
+    }
+  }, []);
+  return { status, set, offer, error };
 }
 
 /** This window has the keyboard and is on screen: the operator is using it. */

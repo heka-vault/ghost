@@ -4,7 +4,8 @@
  * `&main=active` (the main window is the one in use), `&capture=yes|no|unknown`,
  * `&covered=1` (a full-screen app has the only monitor), `&side=left|right`,
  * `&placement=beside|centre|corner`, `&captions=off|muted|always`, `&sound=muted`,
- * `&sharing=hidden|shown|asking` (with `&capture=yes`: what the operator chose for the share).
+ * `&sharing=hidden|shown|asking` (with `&capture=yes`: what the operator chose for the share),
+ * `&first=1` (the first run's wake beat is open: its moment floats over the main window).
  */
 import { useEffect, useState } from "react";
 
@@ -19,6 +20,8 @@ export interface ShellWord {
   sharing: Sharing;
   placement: FloatingPlacement;
   captions: FloatingCaptions;
+  /** The first run's wake beat is open: come forward even while the main window is in use. */
+  firstMeeting: boolean;
 }
 
 export interface Sound {
@@ -70,6 +73,11 @@ export function answerShare(show: boolean): void {
   void invoke("floating_share", { show });
 }
 
+/** Ghost came forward: the shell tells the first run, which says where the moment happened. */
+export function forwarded(): void {
+  void invoke("floating_forward");
+}
+
 /** "Open in Ghost": the shell brings the main window to this workspace and to the front. */
 export function openApp(): void {
   void invoke("floating_open_app");
@@ -105,6 +113,7 @@ export function useShellWord(): ShellWord {
       sharing: sharingOf(capture, sh === "hidden" || sh === "shown" || sh === "asking" ? sh : null),
       placement: pl === "centre" || pl === "corner" ? pl : "beside",
       captions: cap === "muted" || cap === "always" ? cap : "off",
+      firstMeeting: p.get("first") === "1",
     };
   });
   useEffect(() => {
@@ -113,7 +122,7 @@ export function useShellWord(): ShellWord {
     let live = true;
     void (async () => {
       type Settings = { placement?: FloatingPlacement; captions?: FloatingCaptions };
-      const first = await invoke<{ main_active: boolean; capture: Capture | null; sharing?: Sharing; settings: Settings }>("floating_shell");
+      const first = await invoke<{ main_active: boolean; capture: Capture | null; sharing?: Sharing; settings: Settings; first_meeting?: boolean }>("floating_shell");
       if (live && first)
         setWord({
           mainActive: first.main_active,
@@ -121,11 +130,13 @@ export function useShellWord(): ShellWord {
           sharing: sharingOf(first.capture, first.sharing),
           placement: first.settings?.placement ?? "beside",
           captions: first.settings?.captions ?? "off",
+          firstMeeting: !!first.first_meeting,
         });
       const { listen } = await import("@tauri-apps/api/event");
-      const un = await listen<{ t: string; active?: boolean; capture?: Capture; sharing?: Sharing; settings?: Settings }>("floating://shell", (e) => {
+      const un = await listen<{ t: string; active?: boolean; on?: boolean; capture?: Capture; sharing?: Sharing; settings?: Settings }>("floating://shell", (e) => {
         const m = e.payload;
         if (m.t === "main_active") setWord((w) => ({ ...w, mainActive: !!m.active }));
+        else if (m.t === "first_meeting") setWord((w) => ({ ...w, firstMeeting: !!m.on }));
         else if (m.t === "capture" && m.capture) setWord((w) => ({ ...w, capture: m.capture!, sharing: sharingOf(m.capture!, m.sharing) }));
         else if (m.t === "settings" && m.settings) setWord((w) => ({ ...w, placement: m.settings!.placement ?? "beside", captions: m.settings!.captions ?? "off" }));
       });

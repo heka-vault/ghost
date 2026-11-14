@@ -112,6 +112,9 @@ pub struct DaemonState {
     started: Instant,
     pub bus: EventBus,
     provider: RwLock<Option<StatusProvider>>,
+    /// The first run's moment is open (ADR 0059 as amended 2026-11-14): the next session
+    /// with Ghost at this desk opens with Ghost's own first line. Memory only, taken once.
+    first_meeting: std::sync::atomic::AtomicBool,
 }
 
 impl std::fmt::Debug for DaemonState {
@@ -157,6 +160,7 @@ impl DaemonState {
             started: Instant::now(),
             bus: EventBus::default(),
             provider: RwLock::new(None),
+            first_meeting: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -297,6 +301,23 @@ impl DaemonState {
         if changed {
             self.publish_status();
         }
+    }
+
+    /// The first run arms (or disarms) its moment: the next desk session with Ghost opens
+    /// with Ghost's own first line (ADR 0059 as amended 2026-11-14).
+    pub fn set_first_meeting(&self, armed: bool) {
+        self.first_meeting
+            .store(armed, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    pub fn first_meeting(&self) -> bool {
+        self.first_meeting.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// The session opening now takes the moment: true once, then disarmed.
+    pub fn take_first_meeting(&self) -> bool {
+        self.first_meeting
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
     }
 
     pub fn set_models_ready(&self, ready: bool) {

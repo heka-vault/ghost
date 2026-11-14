@@ -269,7 +269,12 @@ a second or two more before Ghost starts to answer; the model's own first word i
 
 ## Your first ten minutes
 
-With `make dev` running and the window open:
+With `make dev` running and the window open, the first run takes you to Ghost in three short
+steps: a model (one click when Ollama, LM Studio or a key is already on the computer; skip it and
+Ghost still meets you), its ears (no click when the microphone is fine; the speech models download
+from Welcome on), and "Hey Ghost". Ghost comes forward over your desktop in the floating room,
+says hello in its own words and answers. The floating room stays on after that; the switch is
+right there. Its voice, an app, an agent and a first question follow, each optional.
 
 1. **Wake it.** Say "Hey Ghost". You hear a chime and a greeting; the window shows Listening.
    Ask "what's the capital of France?" and hear "Paris." Say "that's all" to end, or just stop
@@ -292,8 +297,9 @@ With `make dev` running and the window open:
 5. **Make a schedule.** "Every weekday at nine, check what's open in the app repo and tell me",
    or **Watching › Add schedule**. The run happens with nobody there; its answer lands on
    **Today**. A change it would make that needs your yes waits there instead.
-6. **The floating room.** **Settings › General › The room › Float over the desktop** (or the tray)
-   shows Ghost over your work while you talk to it, without the window. It needs X11 or XWayland (GNOME on Wayland has XWayland
+6. **The floating room.** The first run turns it on when you first say "Hey Ghost";
+   **Settings › General › The room › Float over the desktop** (or the tray) turns it off and on.
+   It shows Ghost over your work while you talk to it, without the window. It needs X11 or XWayland (GNOME on Wayland has XWayland
    by default). See [docs/floating-room.md](docs/floating-room.md).
 7. **Stop listening.** Ctrl+Shift+M, the switch by Ghost's name in the window, "Ghost, stop
    listening", or `target/debug/ghostd listening off`. No microphone is open at all until you

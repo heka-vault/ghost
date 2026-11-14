@@ -13,7 +13,7 @@ in the [README](../README.md#over-your-desktop).*
 ## Turning it on
 
 Settings › General › The room › **Float over the desktop**, or the tray's **Float over the
-desktop**. Off by default. Under it, **Ghost appears on**: the other monitor (default), a
+desktop**. Off by default, until the first run's wake beat turns it on once (below). Under it, **Ghost appears on**: the other monitor (default), a
 named monitor, or where I am; **Where on the screen**: beside your work (default: the owner,
 seeing it come forward on the other monitor in a column rather than over the whole screen, "I
 liked Ghost showing up without taking the full screen"), in the corner, or in the centre; and **Captions**: off (default), when the sound is off, or always.
@@ -24,6 +24,27 @@ Ghost, like the room's own delays.
 When it is on and you call Ghost while the main window isn't the one you are using, the
 session comes forward over the desktop. If the main window is focused, the session stays in
 it (and goes to its room after 20 s, as before). A room you hold in the window (Ctrl+.) wins.
+
+## The first run's moment (2026-11-14)
+
+The first run's third beat, “Say “Hey Ghost””, is where a newcomer first sees the floating room
+(ADR 0059 as amended 2026-11-14). When that beat first opens the shell turns the floating room
+on, once (`floating::offer`; `offered` in `floating.json`), and the beat shows the switch with one
+line, so the choice is visible and can be undone right there; it is never turned on again after
+that, and an install that finished the first run before this is not offered it.
+
+While the beat is open the window arms the moment twice: on Ghost (`PUT /first-meeting`), so the
+next desk session opens with Ghost's own first line (`ghostd::first_meeting`: “Hi, I'm Ghost. Good
+to meet you.”, then an invitation, or the sentence that it needs a model), and on the shell
+(`floating_first_meeting`), so the session floats even though the first run's window has the
+keyboard (`introducing` in `posture.ts`). The surface comes forward, lit, shows nothing but its
+state and one line under Wisp (“Say “that’s all” to send me back”), and tells the shell it came
+forward, which the first run then says (“It came forward over your desktop at 3:04 PM”). Where it
+can't float (no X11, a share Ghost is kept out of), the first run holds the window's room view for
+the session instead. A typed first line (no microphone) gets the same.
+
+In the mock: `floating.html?mock=floating&first=1&main=active` comes forward though the main
+window is in use; `?mock=firstrun&heyghost=2500#/welcome` plays the whole moment on the wizard.
 
 ## Where it works
 

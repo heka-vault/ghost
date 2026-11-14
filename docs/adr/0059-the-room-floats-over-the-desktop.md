@@ -153,6 +153,42 @@ Cost: nothing at rest or forward changes; the share's word rides on the existing
 poll and one line on the surface's stdin when it changes. The stage is a second webview while it
 is open, costing what the floating room costs forward (not measured on its own); closed, nothing.
 
+## Amended 2026-11-14: the first run turns it on, at the moment
+
+The owner: the first run was "very 'blocking' and people would struggle to get started"; "reduce
+the steps it takes to get to the first 'hey ghost' and them seeing Ghost in the floating room",
+which they call the killer feature. Off until found in Settings › General, a newcomer could finish
+setup and never see it. So:
+
+- **The first run turns it on, once, by the person's visible choice.** Its wake beat ("Say “Hey
+  Ghost”") shows one plain line with a switch, on: "Ghost floats over your work when you call it",
+  and after the moment "Keep Ghost floating over your work". The shell turns it on when that beat
+  first opens and records that it did (`floating.json`'s `offered`, `floating::offer`, tested), so
+  it never turns it on again: someone who turns it off keeps it off, someone who skips the first
+  run keeps today's behaviour, and an install that finished the first run before this change (its
+  window's `finished`) is not offered it at all. Where the desktop can't float the offer is
+  recorded and nothing turns on.
+- **The moment floats over the window that called it.** While the wake beat is open the shell tells
+  the surface (`first_meeting` on its stdin) and the posture rule takes one more input,
+  `introducing`: a desk session floats even while the main window has the keyboard. Everything
+  else about the rule holds: a share keeps Ghost out unless the operator chose to show it, a held
+  room wins, and with no X11 the moment is the window's room view with the sentence the switch
+  already uses. The surface says when it came forward (`forward` on its stdout, `ghost://floating-forward`
+  to the window), so the first run says where it happened. On the surface, the first meeting adds
+  one line under Wisp, Ghost's own: "Say “that’s all” to send me back".
+- **Ghost's own first line.** The first run arms the daemon too (`PUT /first-meeting`, memory only,
+  the operator's window only): the next desk session with Ghost takes it once and opens with a
+  fixed line, said before the model is asked anything (`ghostd::first_meeting`, `Greeting::Intro`),
+  so a slow model never delays the first thing a newcomer hears; a request said with the name is
+  answered by the model after it. With no model connected the line says, in one sentence, that
+  Ghost needs one and where to give it, and every turn of that session answers with Ghost's own
+  sentence (a scripted stand-in that reaches no network and calls no tool), never a failed call.
+  A phone's call, a call to an agent and a session Ghost raised itself never take it.
+
+Cost: nothing on a turn; one PUT when the beat opens and closes, one stdin line to the surface,
+one stdout line back. The surface is started at the wake beat instead of never, which is the
+floating room's own cost (below) from then on, as for anyone who turned it on.
+
 ## What it costs (ADR 0018)
 
 Measured on the workstation (Intel UHD 750, GNOME Shell 50.1, XWayland, two 1920×1080

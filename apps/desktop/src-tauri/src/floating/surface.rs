@@ -34,6 +34,8 @@ pub struct ShellState {
     pub capture: Option<Capture>,
     /// What to do about a share now (`share.rs`).
     pub sharing: Sharing,
+    /// The first run's wake beat is open: come forward even while the main window is in use.
+    pub first_meeting: bool,
 }
 
 struct State {
@@ -222,6 +224,12 @@ fn floating_open_app() {
     say(&FromSurface::OpenApp);
 }
 
+/// Ghost came forward: the shell tells the first run (ADR 0059 as amended 2026-11-14).
+#[tauri::command]
+fn floating_forward() {
+    say(&FromSurface::Forward);
+}
+
 /// The share card's answer: show Ghost in this share, or keep it out (for this share only).
 #[tauri::command]
 fn floating_share(show: bool) {
@@ -274,6 +282,7 @@ fn listen_to_shell(app: tauri::AppHandle) {
                         s.sharing = *sharing;
                     }
                     ToSurface::Settings { settings } => s.settings = settings.clone(),
+                    ToSurface::FirstMeeting { on } => s.first_meeting = *on,
                 }
             }
             let _ = app.emit_to(LABEL, "floating://shell", &msg);
@@ -390,6 +399,7 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             floating_summon,
             floating_open_app,
             floating_share,
+            floating_forward,
             floating_shell,
             floating_log,
             floating_sound,

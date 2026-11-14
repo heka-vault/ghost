@@ -1,8 +1,8 @@
 /**
- * Owner: onboarding. The first run's steps, from nothing to a first spoken answer: the model
- * and its check, the microphone, the wake heard, the voice, an app, an agent, a question.
- * Every step reads what is true from Ghost and saves through it; none promises what Ghost
- * hasn't said.
+ * Owner: onboarding. The first run's steps. Meet Ghost: the model and its check, the
+ * microphone (a glance when it is healthy), and the moment, “Hey Ghost” answered over the
+ * desktop. Make it yours: the voice, an app, an agent, a question. Every step reads what is
+ * true from Ghost and saves through it; none promises what Ghost hasn't said.
  */
 import type { CatalogEntryView, ConversationDetail, ModelConnectionView } from "@ghost/client-ts";
 import { lookOf, useGhost } from "@ghost/ui";
@@ -19,15 +19,18 @@ import {
   Card,
   cx,
   errorText,
+  GhostChip,
   GhostMark,
   Input,
   LineGlyph,
   ListRow,
   Notice,
+  Progress,
   quoted,
   RadioGroup,
   Select,
   Skeleton,
+  Switch,
   useLive,
 } from "../../ui";
 import { AddOwnDialog } from "../apps/AddOwnDialog";
@@ -41,8 +44,11 @@ import { CLAUDE_CODE, claudeCodeOffer, claudeCodeValues } from "../settings/clau
 import { GhostVoice } from "../settings/GhostVoice";
 import { CONNECTION_KEYS, micOptions, validateConnection } from "../settings/model";
 import { ModelSection } from "../settings/ModelSection";
-import { HeroPresence, StepFrame } from "./frame";
-import { SpeechModelsRow, useSpeechModels } from "./speech";
+import { HeroPresence, StepFrame, type StepFrameProps } from "./frame";
+import { canFloat, setFirstMeeting, useFloating, useFloatingForward } from "../../app/floating";
+import { markStateOf, moodOf } from "../../app/mood";
+import { usePosture } from "../../app/PostureContext";
+import { gb, speechLine, SpeechRow } from "./speech";
 import type { Wizard } from "./index";
 import { firstSentence, inputName, phraseCase, splitList, wakeHelp } from "./state";
 import { keeping } from "../hear/wakeTakes";
@@ -122,10 +128,9 @@ const PROMISES = [
 
 export function WelcomeStep({ w }: { w: Wizard }) {
   const back = w.returning;
-  const { online } = useLive();
   // ADR 0066: Ghost's ears and voice are not in the bundle. Get started also starts their
-  // download, so it runs while the model and the microphone are set up.
-  const speech = useSpeechModels(w.client, online);
+  // download, so it runs while the model and the microphone are set up, on the rail's foot.
+  const speech = w.speech;
   const missing = !!speech.view && speech.view.missing.length > 0 && speech.view.fetch.state !== "fetching";
   const start = () => {
     if (missing) void speech.fetch();
@@ -136,7 +141,7 @@ export function WelcomeStep({ w }: { w: Wizard }) {
       id="welcome"
       lead={<GhostMark size={40} />}
       title={back ? "Welcome back" : "Welcome to Ghost"}
-      description={back ? "Pick up where you left off." : "Seven short steps to your first spoken answer. Skip any of them; setup picks up where you stop."}
+      description={back ? "Pick up where you left off." : "Three short steps and you’ll call Ghost by name. Everything after that is yours to choose, and every step can wait."}
       primary={back ? { label: "Continue setup", onClick: () => w.go(w.progress.next) } : { label: "Get started", onClick: start }}
       autoFocus={w.focusOnOpen}
     >
@@ -155,7 +160,7 @@ export function WelcomeStep({ w }: { w: Wizard }) {
       </ul>
       {speech.view && speech.view.missing.length > 0 && (
         <p className="onb-promise__body" style={{ marginTop: "var(--space-5)" }}>
-          {speech.view.fetch.state === "fetching" ? "Ghost’s ears and voice are downloading; setup carries on meanwhile." : `Get started also downloads Ghost’s ears and voice, ${(speech.view.missing_bytes / 1e9).toFixed(1)} GB, while you set up the rest.`}
+          {speech.view.fetch.state === "fetching" ? "Ghost’s ears and voice are downloading; setup carries on meanwhile." : `Get started also downloads Ghost’s ears and voice, ${(speech.view.missing_bytes / 1e9).toFixed(1)} GB, while you do the rest.`}
         </p>
       )}
     </StepFrame>
@@ -238,6 +243,7 @@ export function ModelStep({ w }: { w: Wizard }) {
       }
       onBack={w.back}
       onSkip={w.progress.state.model === "done" ? undefined : w.skip}
+      skipLabel={w.saved.met ? "Skip for now" : "Skip: meet Ghost first"}
       autoFocus={w.focusOnOpen}
       notices={
         <>
@@ -469,7 +475,7 @@ export function HearStep({ w }: { w: Wizard }) {
             </label>
             <Select id="onb-mic" value={value} onChange={(e) => setDevice(e.target.value)} options={micOptions(d, value)} />
           </div>
-          <SpeechModelsRow client={w.client} online={live.online} />
+          <SpeechRow speech={w.speech} online={live.online} />
         </Card>
       )}
     </StepFrame>
@@ -481,20 +487,129 @@ export function HearStep({ w }: { w: Wizard }) {
 /** How long Ghost may stay quiet, ready and listening, before the step offers help. */
 const NOT_HEARD_AFTER_MS = 12_000;
 
+/**
+ * Where the moment will happen, in one line, with the switch right there (ADR 0059 as amended
+ * 2026-11-14): over the desktop, by the person's visible choice, or in this window and why.
+ */
+function FloatLine({ floating, met }: { floating: ReturnType<typeof useFloating>; met: boolean }) {
+  const st = floating.status;
+  if (!st) return null;
+  if (st.support.kind === "no") return <p className="onb-try__meta">{st.support.why} Ghost answers here in this window instead.</p>;
+  const shared = st.sharing === "hidden" || st.sharing === "asking" || (!st.sharing && st.capture === "yes");
+  return (
+    <div className="onb-float">
+      <Switch
+        checked={st.settings.on}
+        onChange={(on) => void floating.set({ ...st.settings, on })}
+        label={met ? "Keep Ghost floating over your work" : "Ghost floats over your work when you call it"}
+      />
+      {shared && st.settings.on && <p className="onb-try__meta">Your screen is being shared, so this time Ghost answers here in this window.</p>}
+      {!st.settings.on && <p className="onb-try__meta">Off: Ghost answers in this window. Settings › General turns it back on.</p>}
+    </div>
+  );
+}
+
+/**
+ * The moment (2026-11-14): the person says “Hey Ghost” (or types a first line where there is
+ * no microphone) and Ghost comes forward over their desktop, lit, and says its own first line
+ * (the daemon's `first_meeting`, never a model's), then answers what they said. The first run
+ * arms it on Ghost (`PUT /first-meeting`) and on the floating room (`floating_first_meeting`,
+ * so it floats over this window too), turns the floating room on once by the person's visible
+ * choice (the switch under the title), and says where it happened. Where the desktop can't
+ * float, or the screen is shared, the moment is the window's room view.
+ */
 export function WakeStep({ w }: { w: Wizard }) {
   const live = useLive();
+  const { status } = useGhost();
+  const floating = useFloating();
+  const posture = usePosture();
   const [waking, setWaking] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [typing, setTyping] = useState(false);
+  const [text, setText] = useState("");
+  const [sending, setSending] = useState(false);
   const phrases = splitList(w.settings?.values.GHOST_WAKE_PHRASES);
   const list = phrases.length ? phrases : ["hey ghost"];
   const phrase = phraseCase(list[0]);
   const awake = isAwake(live.online, live.phase);
   const heard = w.saved.heard ?? (w.demo === "heard" ? "voice" : null);
-  const ready = live.online && !live.loadingModels && w.models?.ready !== false;
   const fuzzy = Number(w.settings?.values.GHOST_WAKE_FUZZY || 0.9);
   const off = useMicOff();
   // ADR 0065: takes are kept only under the trained detector; transcript wake keeps none.
-  const kept = keeping(useGhost().status?.wake_mode, 0);
+  const kept = keeping(status?.wake_mode, 0);
+  const met = w.saved.met ?? (w.demo === "met" || w.demo === "met-nomodel" ? "voice" : null);
+  const modelReady = w.demo === "met-nomodel" ? false : w.facts.modelReady === true;
+  const sp = w.speech.view;
+  const fetching = sp?.fetch.state === "fetching";
+  const earsMissing = !!sp && sp.missing.length > 0 && !fetching;
+  const loading = live.loadingModels || (w.models?.ready === false && !fetching && !earsMissing);
+  const ready = live.online && !live.loadingModels && w.models?.ready !== false;
+  const noMic = w.facts.micNone === true;
+  const floats = canFloat(floating.status);
+  const session = status?.session_id ?? null;
+  const desk = !!session && status?.session_origin !== "phone";
+  const mp = w.devices?.microphone ?? null;
+
+  // The floating room, on once, by the first run (never for an install that finished it).
+  const offered = useRef(false);
+  useEffect(() => {
+    if (offered.current || w.saved.finished || w.saved.floatOffered || !floating.status) return;
+    offered.current = true;
+    void floating.offer().then(() => w.setSaved({ floatOffered: true }));
+  }, [floating, w]);
+
+  // Arm the moment on Ghost while it hasn't happened, and on the floating room until the
+  // session it opened has ended, so Ghost stays over the desktop while it talks.
+  const armed = live.online && !met;
+  useEffect(() => {
+    if (!armed) return;
+    void w.client.setFirstMeeting(true).catch(() => undefined);
+    return () => void w.client.setFirstMeeting(false).catch(() => undefined);
+  }, [armed, w.client]);
+  const introducing = !met || desk;
+  useEffect(() => {
+    if (!introducing) return;
+    void setFirstMeeting(true);
+    return () => void setFirstMeeting(false);
+  }, [introducing]);
+
+  // The moment: the first desk session to open while this beat is armed is the meeting.
+  const [bump, setBump] = useState(0);
+  const prevSession = useRef(session);
+  useEffect(() => {
+    const was = prevSession.current;
+    prevSession.current = session;
+    if (was || !session || !desk || met) return;
+    setBump((n) => n + 1);
+    w.setSaved({
+      met: status?.session_typed ? "typed" : "voice",
+      metAt: new Date().toISOString(),
+      // The surface says when it came forward (in the app); in a browser the rule's word stands.
+      metWhere: floats ? (inTauri ? null : "floating") : "window",
+    });
+    // Where it can't float, the moment is the window's room view (released when it ends);
+    // where it floats, this window keeps the first run in view underneath, so it can say
+    // what happened the moment Ghost goes back.
+    heldDesk.current = floats;
+    posture.hold(floats ? "desk" : "room");
+    // Only the session's start matters here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session]);
+  const heldDesk = useRef(false);
+  useEffect(() => {
+    if (desk || !heldDesk.current) return;
+    heldDesk.current = false;
+    posture.hold("auto");
+  }, [desk, posture]);
+  useEffect(
+    () => () => {
+      if (heldDesk.current) posture.hold("auto");
+    },
+    // On leaving the step only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+  useFloatingForward(() => w.setSaved({ metWhere: "floating" }));
 
   const { alreadyAwake, markClick } = useWakeWatch(awake, (how, at) => {
     if (w.saved.heard !== "voice") w.setSaved({ heard: how, heardAt: at.toISOString() });
@@ -502,7 +617,7 @@ export function WakeStep({ w }: { w: Wizard }) {
 
   // Ready and nothing heard for a while: what to try, from what is true now.
   const [quiet, setQuiet] = useState(w.demo === "nothear");
-  const waiting = ready && !awake && heard !== "voice";
+  const waiting = ready && !awake && !met && heard !== "voice";
   useEffect(() => {
     if (!waiting || w.demo === "nothear") return;
     setQuiet(false);
@@ -523,6 +638,20 @@ export function WakeStep({ w }: { w: Wizard }) {
       setWaking(false);
     }
   };
+  const send = async () => {
+    const t = text.trim();
+    if (!t) return;
+    setSending(true);
+    setError(null);
+    try {
+      await w.client.say(t);
+      setText("");
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setSending(false);
+    }
+  };
   const fix = async (id: string) => {
     setError(null);
     try {
@@ -535,47 +664,102 @@ export function WakeStep({ w }: { w: Wizard }) {
     }
   };
   const FIX_LABEL: Record<string, string> = { listen: "Turn listening on", mic: "Check the microphone", fuzzy: "Match more loosely", hearing: "Open the Hearing test" };
+  const [installing, setInstalling] = useState(false);
+  const echoOffer = !!mp && mp.case === "unprotected" && !w.devices?.echo_cancel_active;
+  const installEcho = async () => {
+    setInstalling(true);
+    setError(null);
+    try {
+      const r = await w.client.setupEchoCancel(false);
+      if (!r.ok) setError(r.detail ?? "The installer stopped without saying why. Run ghostd setup echo-cancel in a terminal to see it.");
+      await w.reload();
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setInstalling(false);
+    }
+  };
+
+  const at = w.saved.metAt ? new Date(w.saved.metAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) : null;
+  const where = w.saved.metWhere ?? (w.demo?.startsWith("met") ? "floating" : null);
 
   let title: string;
   let line: ReactNode = null;
-  let presence = live.phase;
-  let success = false;
+  let primary: StepFrameProps["primary"];
+  let state: "waiting" | "ears" | "live" | "met" | "off" = "waiting";
   if (!live.online) {
-    presence = "offline";
     title = "Ghost isn’t running";
     line = "It has to be running to hear its name.";
+    state = "off";
+  } else if (met && desk) {
+    state = "live";
+    title = where === "floating" ? "Ghost is over your desktop" : "Ghost is answering";
+    line = `Say ${quoted("that’s all")} when you’re done.`;
+  } else if (met && !modelReady) {
+    state = "met";
+    title = "Ghost needs a model to think";
+    line = "It heard you and said hello. Give it a model and it answers you too.";
+    primary = { label: "Give it a model", onClick: w.next };
+  } else if (met) {
+    state = "met";
+    title = "You’ve met Ghost";
+    line =
+      where === "floating"
+        ? `It came forward over your desktop${at ? ` at ${at}` : ""} and answered out loud.`
+        : `It answered you here${at ? ` at ${at}` : ""}, out loud.`;
+    primary = { label: "Make it yours", onClick: w.next };
+  } else if (earsMissing) {
+    state = "ears";
+    title = "Ghost needs its ears first";
+    line = speechLine(sp).text;
+    primary = { label: "Download them", onClick: () => w.speech.fetch() };
+  } else if (fetching) {
+    state = "ears";
+    title = "Ghost’s ears are on their way";
+    // A download a terminal started is the same one, followed (#135).
+    line = `${sp?.fetch.following ? "Already downloading: " : ""}${Math.floor(w.speech.share * 100)}% of ${gb(sp?.fetch.total_bytes ?? 0)}${w.speech.left ? ` · ${w.speech.left}` : " · working out how long"}. Setup comes back here by itself when they’re ready.`;
+    primary = {
+      label: "Make it yours meanwhile",
+      onClick: () => {
+        w.setSaved({ waitingForEars: true });
+        w.go("voice");
+      },
+    };
+  } else if (loading) {
+    title = `Say ${quoted(phrase)} in a moment`;
+    line = "Its ears are loading.";
   } else if (off) {
     title = "Ghost isn’t listening";
-    line = "The microphone is off. Turn listening on and say its name.";
-  } else if (live.loadingModels || w.models?.ready === false) {
-    presence = "starting";
-    title = `Say ${quoted(phrase)} in a moment`;
-    line = "Its ears are still loading.";
-  } else if (heard === "voice") {
-    success = true;
-    title = "Ghost heard you";
-    line = w.saved.heardAt ? `It woke on its name at ${new Date(w.saved.heardAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}, on this computer.` : "It woke on its name, on this computer.";
+    line = "The microphone is off. Turn listening on and say its name, or type a first line.";
+  } else if (noMic) {
+    title = "Type to meet Ghost";
+    line = "There’s no microphone on this computer, so type a first line. Ghost answers out loud all the same.";
   } else if (alreadyAwake) {
     title = "Ghost is already awake";
     line = `Say ${quoted("that’s all")}, then try ${quoted(phrase)}.`;
-  } else if (awake) {
-    title = "Awake, from a click";
-    line = `A click doesn’t check the microphone. Once it’s back to listening, say ${quoted(phrase)}.`;
   } else {
     title = `Say ${quoted(phrase)}`;
-    line = heard === "click" ? "Out loud this time, the way you normally talk." : "Ghost lights up the moment it hears it.";
+    line = heard === "click" ? "Out loud this time, the way you normally talk." : null;
   }
+  const typed = state === "waiting" && live.online && !loading && (noMic || off || typing);
+  const presence = !live.online ? "offline" : state === "ears" || loading ? "starting" : live.phase;
 
   return (
     <StepFrame
       id="wake"
       centered
-      lead={<HeroPresence phase={presence} ok={success} />}
+      plain
+      lead={
+        <span className={cx("onb-moment", state === "met" && "is-met")}>
+          <GhostChip size={128} ring="arc" state={markStateOf(presence, off && !met)} mood={moodOf(presence, off && !met, !!status?.session_typed)} trigger={bump} idle />
+        </span>
+      }
       title={title}
-      primary={success ? { label: "Continue", onClick: w.next } : undefined}
+      primary={primary}
       onBack={w.back}
-      onSkip={success ? undefined : w.skip}
+      onSkip={state === "met" || state === "live" ? undefined : w.skip}
       autoFocus={w.focusOnOpen}
+      footNote={state === "met" && modelReady ? "Its voice, an app, an agent: each one optional." : undefined}
       notices={
         <>
           <NeedsGhost w={w} what="hear its name" />
@@ -592,21 +776,62 @@ export function WakeStep({ w }: { w: Wizard }) {
       </p>
       <div className="onb-try">
         {line && <p className="onb-try__line">{line}</p>}
-        <p className="onb-try__meta">
-          {kept.notice}
-          {kept.controls && (
-            <>
-              {" "}
-              <a href="#/settings/sound" onClick={(e) => (e.preventDefault(), navigate("/settings/sound"))}>
-                Turn off or delete
-              </a>
-            </>
-          )}
-        </p>
-        {/* ADR 0067: on by default in a released build, so said here at the same weight. */}
-        <ErrorReportsLine />
-        {list.length > 1 && !success && !quiet && <p className="onb-try__meta">It also answers to {list.slice(1).map((o) => quoted(phraseCase(o))).join(" and ")}.</p>}
-        {(quiet || off) && !success && (
+        {state === "ears" && fetching && <Progress value={w.speech.share * 100} label="Downloading Ghost’s ears and voice" tone="info" className="onb-try__bar" />}
+        {(state === "waiting" || state === "met") && live.online && <FloatLine floating={floating} met={state === "met"} />}
+        {state === "waiting" && mp && !off && !noMic && ready && (
+          <p className="onb-try__meta">
+            Listening through {inputName(mp.session_input)}.{" "}
+            <button type="button" className="onb-link" onClick={() => w.go("hear")}>
+              Change
+            </button>
+          </p>
+        )}
+        {state === "waiting" && echoOffer && ready && (
+          <p className="onb-try__meta">
+            On speakers? Ghost can take its own voice out of the microphone.{" "}
+            <Button size="sm" variant="ghost" loading={installing} onClick={() => void installEcho()}>
+              Set it up
+            </Button>
+          </p>
+        )}
+        {(state === "waiting" || state === "ears") && (
+          <>
+            <p className="onb-try__meta">
+              {kept.notice}
+              {kept.controls && (
+                <>
+                  {" "}
+                  <a href="#/settings/sound" onClick={(e) => (e.preventDefault(), navigate("/settings/sound"))}>
+                    Turn off or delete
+                  </a>
+                </>
+              )}
+            </p>
+            {/* ADR 0067: on by default in a released build, so said here at the same weight. */}
+            <ErrorReportsLine />
+          </>
+        )}
+        {state === "waiting" && list.length > 1 && !quiet && !typed && <p className="onb-try__meta">It also answers to {list.slice(1).map((o) => quoted(phraseCase(o))).join(" and ")}.</p>}
+        {state === "waiting" && off && (
+          <Button size="sm" variant="secondary" onClick={() => void fix("listen")}>
+            Turn listening on
+          </Button>
+        )}
+        {typed && (
+          <form
+            className="onb-ask__form onb-try__type"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void send();
+            }}
+          >
+            <Input value={text} onChange={(e) => setText(e.target.value)} placeholder="Hi Ghost, what can you do?" aria-label="Your first line to Ghost" autoFocus={typing} />
+            <Button type="submit" variant="secondary" loading={sending} disabled={!text.trim()} trailingIcon={<ArrowRight />}>
+              Send
+            </Button>
+          </form>
+        )}
+        {state === "waiting" && quiet && !off && !noMic && (
           <div className="onb-ladder">
             <p className="onb-ladder__head">Not hearing it? Try these, in order:</p>
             <ol className="onb-ladder__list">
@@ -623,10 +848,15 @@ export function WakeStep({ w }: { w: Wizard }) {
             </ol>
           </div>
         )}
-        {waiting && !off && (
-          <Button variant="ghost" size="sm" loading={waking} onClick={wake} className="onb-try__wake">
-            Wake it with a click instead
-          </Button>
+        {waiting && !off && !noMic && !typing && (
+          <div className="onb-try__actions">
+            <Button variant="ghost" size="sm" onClick={() => setTyping(true)}>
+              Type instead
+            </Button>
+            <Button variant="ghost" size="sm" loading={waking} onClick={wake}>
+              Wake it with a click
+            </Button>
+          </div>
         )}
       </div>
     </StepFrame>

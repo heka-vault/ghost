@@ -1,12 +1,15 @@
 /**
- * Owner: onboarding. The first run at #/welcome: from nothing to a first spoken answer.
+ * Owner: onboarding. The first run at #/welcome: from nothing to Ghost answering its name over
+ * the desktop, in as few steps as can be (2026-11-14).
  *
- * Seven tasks: a model and its check (any provider), the microphone and Ghost's own voice taken
- * out of it, its name heard on the operator's voice, how it speaks, an app, an agent with a
- * shape, and a question answered aloud. Each is done only when Ghost says so (`progressOf`),
- * each can be skipped, and setup resumes from where it stopped (localStorage, and the step in
- * the address). The steps that need nothing from outside this computer work without a network;
- * the rail says which one needs it. Real endpoints only: nothing here exists only in the mock.
+ * Meet Ghost, three beats: a model (any provider, or skipped: Ghost still meets them and says
+ * it needs one), its ears (a glance when the microphone is healthy; the speech models download
+ * from Welcome on and ride along), and “Hey Ghost”, answered with Ghost's own first line over
+ * the desktop in the floating room (ADR 0059 as amended 2026-11-14), or in this window where it
+ * can't float. Then Make it yours, each optional: its voice, an app, an agent, a question. Each
+ * task is done only when Ghost says so (`progressOf`), each can be skipped, Continue and Skip go
+ * where `routeAfter` says, and setup resumes from where it stopped (localStorage, and the step
+ * in the address). Real endpoints only: nothing here exists only in the mock.
  */
 import type { AppView, ConversationView, DevicesView, GhostClient, ModelsView, SettingsUpdate, SettingsView } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
@@ -16,13 +19,18 @@ import type { RouteProps } from "../../app/routes";
 import { useDesign } from "../../design/context";
 import { Page, scrollPanelToTop, useLive } from "../../ui";
 import { DockContext, Rail } from "./frame";
+import { notListening } from "../../app/listening";
+import { type Speech, useSpeechModels } from "./speech";
 import {
   demoState,
   type Facts,
   isStep,
   loadSaved,
+  micHealthyOf,
+  partOf,
   type Progress,
   progressOf,
+  routeAfter,
   type Saved,
   type StepDef,
   STEPS,
@@ -66,6 +74,9 @@ export interface Wizard {
   focusOnOpen: boolean;
   /** ?state= for a designed state under the mock. */
   demo: string | null;
+  /** Ghost's ears and voice: here, downloading (with the time left), or missing. One reader for every step. */
+  speech: Speech;
+  facts: Facts;
 }
 
 export default function Onboarding({ params }: RouteProps) {
@@ -143,10 +154,13 @@ export default function Onboarding({ params }: RouteProps) {
             apps: apps ? apps.filter((a) => a.state === "connected" && a.name !== "ghost-mock-github").length : null,
             agents: agents ? agents.filter((a) => !a.is_ghost && !a.retired_at).length : null,
             voiceSet: settings ? !!settings.values.GHOST_VOICE_MODE : null,
+            micHealthy: devices ? micHealthyOf(devices.microphone, !!notListening(status)) : null,
+            micNone: devices ? !devices.devices.some((x) => x.max_input_channels > 0) : null,
           }
-        : { modelReady: null, modelChecked: null, speechReady: null, echo: null, apps: null, agents: null, voiceSet: null },
-    [live.online, modelReady, models, devices, apps, agents, settings],
+        : { modelReady: null, modelChecked: null, speechReady: null, echo: null, apps: null, agents: null, voiceSet: null, micHealthy: null, micNone: null },
+    [live.online, modelReady, models, devices, apps, agents, settings, status],
   );
+  const speech = useSpeechModels(client, live.online);
   const progress = useMemo(() => progressOf(facts, saved), [facts, saved]);
 
   const [returning, setReturning] = useState<boolean | null>(null);
@@ -169,15 +183,29 @@ export default function Onboarding({ params }: RouteProps) {
   const offset = (d: number) => STEPS[Math.max(0, Math.min(STEPS.length - 1, stepIndex(step) + d))].id;
   const skippedRef = useRef(saved.skipped);
   skippedRef.current = saved.skipped;
+  // Where Continue and Skip go is `routeAfter`'s: a beat that needs nothing is passed.
+  const savedRef = useRef(saved);
+  savedRef.current = saved;
+  const factsRef = useRef(facts);
+  factsRef.current = facts;
+  const ahead = () => routeAfter(step, factsRef.current, savedRef.current);
   const next = () => {
     setSaved({ skipped: skippedRef.current.filter((s) => s !== step) });
-    go(offset(1));
+    go(ahead());
   };
   const back = () => go(offset(-1));
   const skip = () => {
     if (!skippedRef.current.includes(step)) setSaved({ skipped: [...skippedRef.current, step] });
-    go(offset(1));
+    go(ahead());
   };
+
+  // They went on to Make it yours while Ghost's ears downloaded: back to the moment the
+  // moment they are here, unless a dialog is open (a sign-in, hiring an agent).
+  useEffect(() => {
+    if (!saved.waitingForEars || saved.met || facts.speechReady !== true || partOf(step) !== "yours") return;
+    if (document.querySelector("dialog[open]")) return;
+    go("wake");
+  }, [saved.waitingForEars, saved.met, facts.speechReady, step, go]);
 
   const w: Wizard = {
     client,
@@ -200,13 +228,15 @@ export default function Onboarding({ params }: RouteProps) {
     go,
     focusOnOpen,
     demo,
+    speech,
+    facts,
   };
 
   return (
     <Page bare width="default" title="Set up Ghost" dock={<div ref={setDock} className="onb-dock" />}>
       <DockContext.Provider value={dock}>
         <div className="onb">
-          <Rail current={step} progress={progress} checking={!loaded} onGo={go} />
+          <Rail current={step} progress={progress} checking={!loaded} onGo={go} speech={speech} />
           <div className="onb-main">
             {step === "welcome" && <WelcomeStep w={w} />}
             {step === "model" && <ModelStep w={w} />}

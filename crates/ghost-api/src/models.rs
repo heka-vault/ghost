@@ -152,6 +152,20 @@ pub struct ListeningRequest {
     pub minutes: Option<u32>,
 }
 
+/// `PUT /first-meeting`: the first run opens (or closes) its moment (ADR 0059 as amended
+/// 2026-11-14). Armed, the next desk session with Ghost opens with Ghost's own first line,
+/// once. The operator's window only: no tool, outside client or phone reaches it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct FirstMeetingRequest {
+    pub armed: bool,
+}
+
+/// What `GET` and `PUT /first-meeting` answer: whether the next session is the first meeting.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct FirstMeetingView {
+    pub armed: bool,
+}
+
 /// What `GET` and `PUT /listening` answer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct ListeningView {

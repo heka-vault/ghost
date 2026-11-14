@@ -24,6 +24,18 @@
   top: calc(var(--space-0_5) + var(--space-1_5) + var(--space-5) + var(--space-0_5)); bottom: calc(var(--space-1) * -1);
 }
 .onb-rail__item.is-done:not(:last-child)::after { background: var(--ok-border); }
+/* The two parts: Meet Ghost (the three beats), Make it yours (optional). The thread breaks
+   between them, so the moment reads as the end of something. */
+.onb-rail__item.ends-part::after { display: none; }
+.onb-rail__part {
+  margin: var(--space-4) 0 var(--space-1); padding-left: var(--space-2);
+  font-size: var(--text-xs); line-height: var(--leading-xs); font-weight: var(--weight-medium);
+  letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-3);
+}
+.onb-rail__part:first-child { margin-top: 0; }
+/* While Ghost's ears download, the rail's foot says how far, quietly. */
+.onb-rail__foot { display: flex; flex-direction: column; gap: var(--space-2); padding: 0 var(--space-2); }
+.onb-rail__foot p { margin: 0; }
 .onb-rail__btn {
   display: flex; align-items: flex-start; gap: var(--space-3); width: 100%;
   min-height: var(--control-md); padding: var(--space-1_5) var(--space-2); margin: var(--space-0_5) 0;
@@ -138,6 +150,25 @@
 .onb-hero--96 .onb-hero__ok svg { width: var(--icon-sm); height: var(--icon-sm); }
 @keyframes onb-hero-ok { from { opacity: 0; transform: scale(0.6); } to { opacity: 1; transform: none; } }
 
+/* The moment: Ghost's own mark, lit, its state's arc on the ring. When it has met the person
+   a slow ring of its light goes out once (the arrival's shockwave, in the window). */
+.onb-moment { position: relative; display: inline-grid; place-items: center; }
+.onb-moment.is-met::after {
+  content: ""; position: absolute; inset: 0; border-radius: var(--radius-full); pointer-events: none;
+  box-shadow: 0 0 0 1px var(--accent-border);
+  animation: onb-moment-ring var(--duration-posture) var(--ease-emphasized) both;
+}
+@keyframes onb-moment-ring { from { opacity: 0.9; transform: scale(0.9); } to { opacity: 0; transform: scale(1.6); } }
+/* Where the moment happens, and its switch, under the title. */
+.onb-float { display: flex; flex-direction: column; align-items: center; gap: var(--space-2); margin: var(--space-2) 0; color: var(--text-1); }
+.onb-try__bar { width: 100%; max-width: var(--field-control-width); margin: var(--space-2) 0; }
+.onb-try__type { margin-top: var(--space-2); }
+.onb-link {
+  padding: 0; border: 0; background: none; font: inherit; color: var(--accent-text); cursor: pointer;
+  text-decoration: underline; text-underline-offset: 2px; border-radius: var(--radius-xs);
+}
+.onb-link:hover { text-decoration-thickness: 2px; }
+
 /* ------------------------------------------------------------------- the first run */
 .onb-rail__bar { height: 2px; margin-top: var(--space-2); border-radius: var(--radius-full); background: var(--border-subtle); overflow: hidden; }
 .onb-rail__bar > span { display: block; height: 100%; background: var(--ok); transform-origin: left center; transition: transform var(--duration-slow) var(--ease-out); }
@@ -206,6 +237,7 @@
   .onb-rail { position: static; gap: var(--space-3); }
   .onb-rail__list { flex-direction: row; flex-wrap: wrap; gap: var(--space-1); }
   .onb-rail__item::after { display: none; }
+  .onb-rail__part { display: none; }
   .onb-rail__btn { width: auto; padding: var(--space-1); }
   .onb-rail__text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .onb-rail__btn[aria-current="step"] .onb-rail__text { position: static; width: auto; height: auto; clip: auto; overflow: visible; }
@@ -214,6 +246,7 @@
   .onb-path__stop:nth-child(2) .onb-path__wire { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .onb-hired__mark, .onb-hero__ok { animation: none; }
+  .onb-hired__mark, .onb-hero__ok, .onb-moment.is-met::after { animation: none; }
+  .onb-moment.is-met::after { opacity: 0; }
   .onb-rail__bar > span { transition: none; }
 }

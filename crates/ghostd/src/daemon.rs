@@ -2887,6 +2887,18 @@ impl Daemon {
         (self.ports.model)(&self.voice(), &self.env())
     }
 
+    /// The model connection has everything it needs (`GET /model`'s `ready`): an address, a
+    /// model and its password or sign-in. The first meeting reads it (ADR 0059 as amended
+    /// 2026-11-14) to say honestly that Ghost has no model yet.
+    pub(crate) fn model_ready(&self) -> bool {
+        let env = self.env();
+        let locked = self.passwords().is_some_and(|v| !v.is_open());
+        self.voice()
+            .llm_connection()
+            .problems(&env, locked)
+            .is_empty()
+    }
+
     /// The model a turn's first call goes to, when the connection names one (ADR 0050).
     pub(crate) fn fast_model(&self) -> Option<Arc<dyn ModelPort>> {
         (self.ports.fast_model)(&self.voice(), &self.env())

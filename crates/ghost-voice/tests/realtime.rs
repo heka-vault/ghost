@@ -814,6 +814,11 @@ async fn a_key_refused_at_the_start_is_said_and_the_session_is_local() {
         Failure::Refused(_)
     ));
     assert_eq!(w.fake.wrong_keys(), 1);
+    // The operator answers once Ghost's opening has played, as the other fallback's test does:
+    // `local` is what was rendered, not what was heard, and a turn begun 0.06 s into the
+    // opening falls inside the echo filter's warm-up over Ghost's voice, kept or dropped by
+    // how the scheduler ran (CI, 2026-11-14: "never: the agent answers locally").
+    quiet(&w).await;
     say(&w, 0.3).await;
     until("the agent answers locally", Duration::from_secs(8), || {
         w.local
