@@ -9,6 +9,9 @@ without the others (ADR 0048).
 
 ## Connect a tool
 
+A coding agent setting Ghost up for you does this itself as its last step
+([agent-setup.md](agent-setup.md)).
+
 In the desktop app: **Settings › Outside tools › Connect a tool**. Give it a name (Claude
 Code, Cursor) and Ghost shows its token once, with the line to paste into the tool.
 

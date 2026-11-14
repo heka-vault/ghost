@@ -75,7 +75,20 @@ page links to them.
   organisation's avatar (`docs/brand/`).
 - **The version** on the page (the Download button, the file names) is the repository's own,
   read from the root `package.json` at build time, which `scripts/version.py` keeps with every
-  other copy; the button goes to the latest release.
+  other copy; the button goes to the latest release. The .deb and AppImage links name the files
+  in `releases/latest/download/` by that version, so between a version bump's merge and its tag
+  being pushed (docs/releasing.md) they point at a file not there yet: push the tag soon after.
+- **Give this to your agent** sits straight under the hero (`AgentStart.astro`): the prompt a
+  person pastes into the coding agent they already have (`site/src/agent-prompt.txt`, the same
+  words as the README's Install, held together by `tools/tests/test_agent_setup.py`), a Copy
+  button with no library (it says Copied, and selects the words where the clipboard is
+  refused), and a line for people without an agent that goes to the .deb and the AppImage. The
+  prompt names `/agents.md`, which is `docs/agent-setup.md` served whole as Markdown
+  (`src/pages/agents.md.ts`, read at build), and `/llms.txt` says in a few lines what Ghost is
+  and points at it. `pnpm --dir site site:verify`, run by the site workflow after the build,
+  fails when the built `/agents.md` is not the repository's file or the page lost the prompt.
+  The guide is data an agent obeys on a stranger's machine: every command in it must exist in
+  the published release and have been run in a clean container (its PR has the transcript).
 - **The favicon** is the mark's 16 px drawing from `packages/ui` (`markSvg`), rendered at build
   time (`site/src/pages/favicon.svg.ts`), with `/favicon.ico` beside it for browsers that don't
   take an SVG.
@@ -87,7 +100,7 @@ page links to them.
 `site` is a member of the pnpm workspace so it can import the desktop's sources with one
 install. It has no `build`, `test` or `typecheck` script, so the root `pnpm build`, `pnpm test`
 and `pnpm typecheck` (and the `ci` workflow) don't run it; its own scripts are `site:build`,
-`site:check`, `site:stills`, `site:audio`, `site:sound-check` and `dev`. It adds about 250
+`site:check`, `site:verify`, `site:stills`, `site:audio`, `site:sound-check` and `dev`. It adds about 250
 packages to the lock and about a second to a cold `pnpm install` (measured 2026-11-13: 3.4 s to
 4.4 s with an empty store, 690 to 844 MB of store).
 
