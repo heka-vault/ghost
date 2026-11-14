@@ -109,8 +109,10 @@ succeeds for you without a password may you run it yourself, after their yes. Th
 ghostd version
 ```
 
-Correct: `Ghost <version> · release <commit>`, the release's tag without its `v` (for example
-`Ghost 2026.11.0 · release b83e1f7`).
+Correct: `Ghost <version> · release <commit>`, the release's tag without its `v`. **Only if it
+is `2026.11.0`** (older than this guide): in step 5 use
+`grep -v INFO /tmp/ghost-models.log | tail -1` and ask the person not to open Ghost until the
+fetch ends; add `> /dev/null` after step 8's `--command` and `sleep 5;` before step 9's `}`.
 
 **AppImage instead**: no password. Move the file from step 3's `ready:` path to
 `~/Applications/` and `chmod +x` it. There is no `ghostd` command with the AppImage: skip steps
@@ -127,13 +129,13 @@ ghostd models list; nohup ghostd models fetch > /tmp/ghost-models.log 2>&1 &
 ```
 
 ```bash
-grep -v INFO /tmp/ghost-models.log | tail -1
+tail -1 /tmp/ghost-models.log
 ```
 
 Correct: `missing: …` lines and `ghostd models fetch downloads them (2.9 GB)`, then progress
 lines such as ` 41% encoder-model.onnx.data`, ending in `every speech model is here`. Stopped
-or failed: run `ghostd models fetch` again; it resumes. Don't open Ghost (step 7) until it has
-finished: the app would start the same download.
+or failed: run `ghostd models fetch` again; it resumes. The person may open Ghost whenever they
+like: the app picks up this same download and shows its progress ("Already downloading").
 
 ## 6. Sound
 
@@ -141,12 +143,12 @@ finished: the app would start the same download.
 ghostd echo-cancel status
 ```
 
-`echo canceller: not running` is normal on a fresh install. Ask the person what they will
-use. A headset, or a speakerphone or microphone array with its own echo cancelling: nothing
-to do. Open speakers with a laptop or webcam microphone: Ghost's echo canceller keeps it from
-hearing itself. The first run offers it (Set it up); you may run `ghostd echo-cancel on` only
-if they say yes (a user service, no password; `ghostd echo-cancel off` removes it). Play no
-sound and open no microphone yourself.
+`echo canceller: not running` is normal on a fresh install; `It can't be set up here` says why
+(tell the person; suggest headphones). Otherwise ask what they will use. A headset, or a
+speakerphone or microphone array with its own echo cancelling: nothing to do. Open speakers
+with a laptop or webcam microphone: Ghost's echo canceller keeps it from hearing itself. The
+first run offers it (Set it up); you may run `ghostd echo-cancel on` only if they say yes (a
+user service, no password; `echo-cancel off` removes it). No sound and no microphone from you.
 
 ## 7. A model, and opening Ghost
 
@@ -162,33 +164,41 @@ curl -s -m 2 http://127.0.0.1:11434/api/tags >/dev/null && echo "Ollama is runni
 curl -s -m 2 http://127.0.0.1:1234/v1/models >/dev/null && echo "LM Studio is running"; true
 ```
 
-<!-- ghostd setup: the commands that detect local AI tools for the first run go here. -->
-
-Then ask the person to open **Ghost** from their app menu (Activities, type "Ghost"). Don't
-start it from your shell: it would take your environment, your keys included. Tell them what
-they will see: "Welcome to Ghost", then Get started, which walks through connecting a model,
-letting Ghost hear them, saying "Hey Ghost", a voice, an app and an agent. Every step can be
-skipped. Wait until they say Ghost is open, then check:
+Then ask the person to open **Ghost** from their app menu (Activities, type "Ghost"); don't
+start it from your shell, which would give it your environment and keys. They will see
+"Welcome to Ghost", then Get started: connecting a model, letting Ghost hear them, saying "Hey
+Ghost", a voice, an app and an agent, each skippable. When they say Ghost is open, check:
 
 ```bash
 ghostd status | grep -E '"(phase|models_ready|version)"'
 ```
 
-Correct: `"phase": "passive"` (or `"session"`), `"models_ready": true`.
+Correct: `"phase": "passive"` (or `"session"`); `"models_ready": true` once step 5 has finished.
+
+### Use what the person already has
+
+Once Ghost is running, `ghostd setup detect` lists, per tool (`claude-code`, `cursor`, `codex`),
+the apps that tool uses, whether it already uses Ghost, and a model connection already here;
+nothing changes. Show the person the list, then with their yes: `ghostd setup import <tool>
+<app>…` (or `--all`), `ghostd setup link <tool>` (let that tool use Ghost; this replaces step
+8's by-hand lines when it works), `ghostd setup unlink <tool>`. Each prints what it will do and
+asks y/N; pass `--yes` only after the person has seen that and said yes. Ghost never reads
+another tool's sign-in.
 
 ## 8. Connect yourself to Ghost
 
 Ghost lets tools on this computer reach it as *outside tools*, each with a name and a token
 (<https://github.com/heka-vault/ghost/blob/main/docs/connect-ghost.md>). The token is a
-password: with the .deb, use the form that keeps it in a file only the person can read, and
-send `ghostd mcp add`'s output (which shows it) to `/dev/null`. Name yourself: `claude-code`,
-`codex`, `cursor` (lowercase letters, digits, hyphens), in place of `claude-code` below.
+password: with the .deb, use `--command`, which keeps it in a file only the person can read and
+does not print it. Name yourself: `claude-code`, `codex`, `cursor` (lowercase letters, digits,
+hyphens), in place of `claude-code` below.
 
 ```bash
-ghostd mcp add claude-code --command > /dev/null && ghostd mcp list
+ghostd mcp add claude-code --command && ghostd mcp list
 ```
 
-Correct: `claude-code  added …  never used`. Then add Ghost to your own configuration:
+Correct: `Connected claude-code. Its token is saved in …` and `claude-code  added …  never used`.
+Then add Ghost to your own configuration:
 
 - **Claude Code**: `claude mcp add --scope user ghost -- /usr/bin/ghostd mcp serve --client claude-code`
 - **Codex**: `codex mcp add ghost -- /usr/bin/ghostd mcp serve --client codex`
@@ -203,17 +213,15 @@ line it shows into their own terminal, not this chat.
 ## 9. Ghost says hello
 
 Ask the person whether Ghost may say one sentence out loud. With a yes, send it through the
-bridge (it reaches the Ghost that is running; nothing here needs your new tools):
+bridge with your client name from step 8 (it reaches the running Ghost; no new tools needed):
 
 ```bash
 { printf '%s\n' \
   '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"setup","version":"1"}}}' \
   '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
   '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"say","arguments":{"text":"Hello, I am Ghost. Say Hey Ghost whenever you want me."}}}'
-  sleep 5; } | timeout 30 /usr/bin/ghostd mcp serve --client claude-code | grep '"id":2'
+} | timeout 30 /usr/bin/ghostd mcp serve --client claude-code | grep '"id":2'
 ```
-
-(Use your own client name from step 8. The `sleep` keeps the bridge open for the answer.)
 
 Read the `status` in the answer and say it plainly:
 

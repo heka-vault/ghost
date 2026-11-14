@@ -4214,6 +4214,12 @@ export interface components {
             error: string | null;
             /** @description The file being fetched. */
             file: string | null;
+            /**
+             * @description Another Ghost process started this file's download first (the terminal's `ghostd
+             *     models fetch`, or the app): this one follows its progress and asks for nothing
+             *     itself, and carries on from where it stopped if it goes away (#135).
+             */
+            following?: boolean;
             state: components["schemas"]["SpeechModelsFetchState"];
             /** Format: int64 */
             total_bytes: number;

@@ -70,6 +70,38 @@ pub fn refusal(server: &SoundServer) -> Option<&'static str> {
     }
 }
 
+/// What `ghostd echo-cancel status` prints: whether the canceller runs, where its
+/// installer is, and, when it does not run, either that `on` sets it up or why it cannot be
+/// set up on this sound server, the check `on` makes (#138).
+pub fn status_lines(running: bool, installer: &Path, server: &SoundServer) -> Vec<String> {
+    let mut lines = vec![
+        format!(
+            "echo canceller: {}",
+            if running {
+                "running (ghost.mic)"
+            } else {
+                "not running"
+            }
+        ),
+        format!(
+            "installer: {}{}",
+            installer.display(),
+            if installer.is_file() {
+                ""
+            } else {
+                " (missing)"
+            }
+        ),
+    ];
+    if !running {
+        lines.push(match refusal(server) {
+            Some(why) => format!("It can't be set up here. {why}"),
+            None => "ghostd echo-cancel on sets it up".to_string(),
+        });
+    }
+    lines
+}
+
 /// The installer under `infra_dir`.
 pub fn installer(infra_dir: &Path) -> PathBuf {
     infra_dir.join("pipewire").join("install.sh")
@@ -213,5 +245,35 @@ mod tests {
         std::fs::remove_file(&ran).unwrap();
         let (ok, _) = run(tmp.path(), true, SoundServer::NoPactl).await;
         assert!(ok && ran.exists());
+    }
+
+    /// #138: `status` makes the check `on` makes, and does not suggest `on` where it
+    /// cannot work.
+    #[test]
+    fn status_says_why_the_canceller_cannot_be_set_up_here() {
+        let tmp = tempfile::tempdir().unwrap();
+        let script = installer(tmp.path());
+        let joined = |r: bool, s: SoundServer| status_lines(r, &script, &s).join("\n");
+        let here = joined(false, SoundServer::PipeWire);
+        assert!(here.starts_with("echo canceller: not running"), "{here}");
+        assert!(here.ends_with("ghostd echo-cancel on sets it up"), "{here}");
+        for server in [
+            SoundServer::None,
+            SoundServer::PulseAudio,
+            SoundServer::NoPactl,
+        ] {
+            let text = joined(false, server.clone());
+            assert!(!text.contains("echo-cancel on"), "{text}");
+            assert!(
+                text.contains(&format!(
+                    "It can't be set up here. {}",
+                    refusal(&server).unwrap()
+                )),
+                "{text}"
+            );
+        }
+        let running = joined(true, SoundServer::PipeWire);
+        assert!(running.starts_with("echo canceller: running"), "{running}");
+        assert_eq!(running.lines().count(), 2);
     }
 }

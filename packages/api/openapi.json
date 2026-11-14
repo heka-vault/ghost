@@ -6559,6 +6559,10 @@
               "null"
             ]
           },
+          "following": {
+            "description": "Another Ghost process started this file's download first (the terminal's `ghostd\nmodels fetch`, or the app): this one follows its progress and asks for nothing\nitself, and carries on from where it stopped if it goes away (#135).",
+            "type": "boolean"
+          },
           "state": {
             "$ref": "#/components/schemas/SpeechModelsFetchState"
           },

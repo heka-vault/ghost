@@ -3,7 +3,9 @@
  * bundle, so the app downloads them, here, with progress and a failure said in plain words.
  * The daemon does the work (`POST /speech-models/fetch`), each file checked against its pin;
  * this only asks and shows. Read again every second while a download runs, every five while
- * something is missing, and not at all once everything is here.
+ * something is missing, and not at all once everything is here. A download a terminal started
+ * (`ghostd models fetch`) is the same one: the daemon follows it (`fetch.following`), so this
+ * shows its progress and moves on when it ends.
  */
 import type { GhostClient, SpeechModelsView } from "@ghost/client-ts";
 import { useCallback, useEffect, useState } from "react";
@@ -17,7 +19,9 @@ export function speechLine(v: SpeechModelsView | null): { state: "unknown" | "he
   if (!v) return { state: "unknown", text: "Checking what this computer has." };
   if (v.fetch.state === "fetching") {
     const of = `${gb(v.fetch.done_bytes)} of ${gb(v.fetch.total_bytes)}`;
-    return { state: "fetching", text: `Downloading ${of}${v.fetch.file ? ` · ${v.fetch.file}` : ""}` };
+    // Started elsewhere (a terminal's `ghostd models fetch`): the same download, followed (#135).
+    const verb = v.fetch.following ? "Already downloading" : "Downloading";
+    return { state: "fetching", text: `${verb} ${of}${v.fetch.file ? ` · ${v.fetch.file}` : ""}` };
   }
   if (v.missing.length === 0) {
     return v.ready ? { state: "here", text: "Ghost’s ears and voice are on this computer. Speech never needs the internet." } : { state: "loading", text: "Every file is here. Ghost is loading them." };
