@@ -89,7 +89,7 @@ const rough = [
 >
   <a class="skip" href="#main">Skip to the content</a>
   <header class="top">
-    <a class="top__brand" href="/" aria-label="Ghost, home"><Wordmark /></a>
+    <a class="top__brand" href="/" aria-label="Ghost, home"><Wordmark id="nav" /></a>
     <nav class="top__nav" aria-label="Sections">
       <a href="#float">The float</a>
       <a href="#privacy">Privacy</a>
@@ -253,7 +253,7 @@ const rough = [
 
   <footer class="foot">
     <div class="foot__line" aria-hidden="true"><span></span></div>
-    <div class="foot__brand"><Wordmark /><p>A voice on your own machine.</p></div>
+    <div class="foot__brand"><Wordmark use="nav" /><p>A voice on your own machine.</p></div>
     <nav class="foot__links" aria-label="More">
       <a href={DOWNLOAD}>Download</a>
       <a href={`${REPO}/releases`}>Releases</a>
@@ -265,7 +265,7 @@ const rough = [
     <p class="foot__fine">The pictures on this page are the app's own screens playing made-up data. No cookies, no analytics.</p>
     <p class="foot__fine">
       The hero's voices are synthetic, made with <a href="https://huggingface.co/hexgrad/Kokoro-82M">Kokoro-82M</a> by hexgrad
-      (<a href="https://www.apache.org/licenses/LICENSE-2.0">Apache-2.0</a>), the voice Ghost speaks in, run through
+      (<a href="https://www.apache.org/licenses/LICENSE-2.0">Apache-2.0</a>), the voice Ghost speaks in, run through{" "}
       <a href="https://github.com/thewh1teagle/kokoro-onnx">kokoro-onnx</a> (MIT).
     </p>
   </footer>

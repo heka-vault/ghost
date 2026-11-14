@@ -121,9 +121,10 @@ h1, h2, h3 { color: var(--ink); margin: 0; }
   .top__nav a:not(:last-child) { display: none; }
 }
 
-.mark { display: inline-flex; align-items: center; gap: 10px; color: var(--ink); }
-.mark__wisp { width: 26px; height: 26px; color: var(--cyan); filter: drop-shadow(0 0 8px rgb(95 227 255 / 0.6)); }
-.mark__name { font: 800 20px/1 var(--sans); letter-spacing: -0.02em; }
+/* The lockup: the mark's chip (the night tile, Wisp lit on it) and the name in the wordmark's weight. */
+.mark { --chip: 30px; display: inline-flex; align-items: center; gap: calc(var(--chip) * 0.3); color: var(--ink); }
+.mark__chip { display: block; flex: none; width: var(--chip); height: var(--chip); box-shadow: 0 0 18px rgb(95 227 255 / 0.12); border-radius: 22.5%; }
+.mark__name { font: 800 calc(var(--chip) * 0.7)/1 var(--sans); letter-spacing: -0.035em; }
 
 /* ---------------------------------------------------------------- the hero: the desktop, edge to edge */
 .hero {
@@ -475,7 +476,8 @@ h1, h2, h3 { color: var(--ink); margin: 0; }
 }
 .foot__line { height: 24px; display: flex; align-items: center; }
 .foot__line span { display: block; width: 56px; height: 2px; border-radius: 2px; background: var(--cyan); box-shadow: 0 0 8px var(--cyan), 0 0 28px rgb(95 227 255 / 0.6); }
-.foot__brand p { margin: 10px 0 0; color: var(--text-2); font-size: 15px; }
+.foot__brand .mark { --chip: 40px; }
+.foot__brand p { margin: 14px 0 0; color: var(--text-2); font-size: 15px; }
 .foot__links { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px 28px; }
 .foot__links a { color: var(--text); text-decoration: none; font-size: 15px; }
 .foot__links a:hover { color: var(--cyan); }
@@ -486,6 +488,7 @@ h1, h2, h3 { color: var(--ink); margin: 0; }
   *, *::before, *::after { transition: none !important; animation: none !important; }
 }
 @media (forced-colors: active) {
+  .mark__chip { forced-color-adjust: none; }
   .hero__title span { color: CanvasText; background: none; filter: none; }
   .btn--go { border: 2px solid ButtonText; }
   .hero__shade { display: none; }

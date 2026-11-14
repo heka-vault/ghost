@@ -40,3 +40,7 @@ sheets, motion and SVGs here are the record of the round; the sources are in git
 
 [`stage-1/`](stage-1/) holds the rollout's before and after: the floating room in every state,
 the icon on a dock, the tray and the rail (PR #126).
+
+[`stage-2/`](stage-2/) holds the site's and the README's before and after: the nav, the footer,
+the hero's still against the live float, the four states, a browser tab, the social card at the
+sizes link previews use, and the README's header on GitHub's light and dark themes.
