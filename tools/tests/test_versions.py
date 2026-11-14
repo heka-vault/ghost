@@ -69,7 +69,11 @@ def every_copy() -> dict[str, str]:
         "package"
     ]["version"]
     cargo = _toml("Cargo.lock")["package"]
-    out["Cargo.lock"] = next(p["version"] for p in cargo if p["name"] == "heka-ghost-desktop")
+    # Every package of the workspace's own (no source): `cargo --locked` refuses a lock file
+    # in which one of them is not at its manifest's version (#120).
+    for p in cargo:
+        if "source" not in p:
+            out[f"Cargo.lock:{p['name']}"] = p["version"]
     # Gradle has no parser here: every quoted value on a version line, however it is written.
     gradle = (ROOT / version_script.GRADLE_MODULE).read_text()
     for i, line in enumerate(gradle.splitlines()):
@@ -85,6 +89,12 @@ def test_every_copy_says_the_root_version():
     wrong = {k: v for k, v in every_copy().items() if v != want}
     assert not wrong, f"pyproject.toml says {want}; run make version V={want}. Wrong: {wrong}"
     assert version_script.disagreeing() == []
+
+
+def test_every_workspace_package_in_cargo_lock_is_written():
+    """A new crate is added to the version script, or its lock entry stays behind (#120)."""
+    own = {p["name"] for p in _toml("Cargo.lock")["package"] if "source" not in p}
+    assert own == {*version_script.CRATES, version_script.SHELL}
 
 
 def test_the_version_is_a_date_version():

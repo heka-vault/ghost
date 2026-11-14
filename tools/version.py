@@ -41,6 +41,20 @@ ORACLE = "ghost-oracle"
 VOICE_TRIAL = "ghost-voice-trial"
 # Retraining the wake detector on the operator's takes (ADR 0065), its own lock too.
 WAKE_TRAIN = "ghost-wake-train"
+# The Cargo workspace's own packages as Cargo.lock names them: the crates that inherit
+# [workspace.package]'s version, and the desktop's shell, which keeps its own copy. A lock
+# entry left at the old version makes `cargo --locked` refuse the file (#120).
+CRATES = (
+    "ghost-api",
+    "ghost-audio",
+    "ghost-core",
+    "ghost-infer",
+    "ghost-llm",
+    "ghost-rtc",
+    "ghost-voice",
+    "ghostd",
+)
+SHELL = "heka-ghost-desktop"
 
 
 @dataclass(frozen=True)
@@ -90,7 +104,7 @@ COPIES: tuple[Copy, ...] = (
     # by the crates under crates/; the shell keeps its own copy; one lock file at the root.
     _project_toml("Cargo.toml"),
     _project_toml("apps/desktop/src-tauri/Cargo.toml"),
-    _lock("Cargo.lock", "heka-ghost-desktop"),
+    *(_lock("Cargo.lock", name) for name in (*CRATES, SHELL)),
     _top_json("apps/desktop/src-tauri/tauri.conf.json"),
     # The phone's call module (apps/mobile/android itself is generated and not committed).
     Copy(GRADLE_MODULE, r"^version = '([^']*)'$"),
