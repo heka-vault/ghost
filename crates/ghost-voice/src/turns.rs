@@ -231,7 +231,7 @@ pub struct SmartTurnParams {
     /// was right that the operator was going on; at 0.15 ("Yeah.") and 0.27 it was wrong.
     pub sentence_min_prob: f32,
     /// Added to the grace when the words end on a number ("four one five"): people pause
-    /// after reading one out and often go on ("… from quotient").
+    /// after reading one out and often go on ("… from acme").
     pub number_secs: f64,
     /// Audio before the speech started that is kept for the model.
     pub pre_speech_secs: f64,
@@ -608,7 +608,7 @@ impl EndWords {
 
     /// An end nobody goes on from mid-thought: a full stop, a question mark or an
     /// exclamation mark Parakeet wrote, no trailing word that wants more, and not a
-    /// number, after which people pause and go on ("four one five ... from quotient").
+    /// number, after which people pause and go on ("four one five ... from acme").
     pub fn sure(self) -> bool {
         self.sentence && !self.unfinished && !self.number
     }
@@ -2066,7 +2066,7 @@ impl Stage for UserAggregator {
                         // it buffered. A barge-in on a final ("Go with that." cut the
                         // reading and hung open 45 s), or an utterance that began over the
                         // greeting and ended after it ("Read me issue four one five from
-                        // quotient", 16 s of silence). A short tail after Ghost stopped
+                        // acme", 16 s of silence). A short tail after Ghost stopped
                         // ("What's up?", "One five.") is left to the next segment: most
                         // likely Ghost's own last words past the canceller.
                         debug::audio(|| {
@@ -3706,7 +3706,7 @@ mod tests {
         assert!(!pushed.iter().any(|f| matches!(f, Frame::UserStopped)));
 
         // An utterance that began over the greeting and ended after it (2026-10-30 18:12:
-        // "Read me issue four one five from quotient", 16 s of silence) closes on its own.
+        // "Read me issue four one five from acme", 16 s of silence) closes on its own.
         let mut agg = aggregator(3);
         let (out, mut rx) = Out::capture();
         agg.started(&out).await;
@@ -3716,7 +3716,7 @@ mod tests {
         agg.process(Frame::VadStopped { stop_secs: 0.2 }, Direction::Down, &out)
             .await;
         agg.process(
-            said("read me issue four one five from quotient"),
+            said("read me issue four one five from acme"),
             Direction::Down,
             &out,
         )
@@ -4054,7 +4054,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_words_that_end_on_a_number_wait_a_little_longer() {
-        // "four one five [pause] from quotient": people pause after reading a number out.
+        // "four one five [pause] from acme": people pause after reading a number out.
         let mut t = with_model(FakeModel, 0.05, 0.1, 0.4); // number_secs stays 0.5
         segment_ends(&mut t.s).await;
         t.hears("Read me issue four one five").await;

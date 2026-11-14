@@ -112,7 +112,7 @@ describe("a catalog entry's description", () => {
 
 describe("an input's name", () => {
   it("reads a PipeWire node as the device", () => {
-    expect(inputName("alsa_input.usb-Seeed_Studio_reSpeaker_XVF3800_4-Mic_Array_114993701262400500-00.iec958-stereo#0")).toBe("Seeed Studio reSpeaker XVF3800 4-Mic Array, channel 1");
+    expect(inputName("alsa_input.usb-Seeed_Studio_reSpeaker_XVF3800_4-Mic_Array_000000000000000000-00.iec958-stereo#0")).toBe("Seeed Studio reSpeaker XVF3800 4-Mic Array, channel 1");
     expect(inputName("alsa_input.usb-Shure_MV7+-00.analog-stereo")).toBe("Shure MV7+");
     expect(inputName("ghost.mic")).toBe("ghost.mic");
     expect(inputName("default source")).toBe("default source");

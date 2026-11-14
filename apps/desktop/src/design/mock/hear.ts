@@ -56,7 +56,7 @@ const REDO = new Set(["no_speech", "started_early", "cut_off", "clipping", "spee
 const warning = (kind: string, n?: number): HearWarning => ({ kind, text: WARNING_TEXT[kind]?.(n) ?? kind, redo: REDO.has(kind) });
 
 /** What a mock "hears" wrong: a name or two Parakeet really does miss. */
-const MISHEARD: Record<string, string> = { mobbin: "mobin", heka: "hecka", quotient: "quotion", phonon: "phone on", triage: "tree age" };
+const MISHEARD: Record<string, string> = { mobbin: "mobin", heka: "hecka", acme: "akmy", phonon: "phone on", triage: "tree age" };
 
 const words = (text: string) =>
   text

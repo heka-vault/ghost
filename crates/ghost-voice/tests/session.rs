@@ -792,7 +792,7 @@ async fn the_screen_is_told_the_turns_words_what_a_call_returned_and_which_words
     // ADR 0058: the closed turn's words, once; each call's result as the model got it;
     // and the reply's words as each piece of it plays, numbered as the screen counts.
     let w = world_with(
-        &["any critical issues in quotient"],
+        &["any critical issues in acme"],
         vec![vec![
             ScriptedModel::call("", "github_search_issues", Map::new()),
             ScriptedModel::say("Two are critical, both in the login flow."),
@@ -809,7 +809,7 @@ async fn the_screen_is_told_the_turns_words_what_a_call_returned_and_which_words
     tokio::time::sleep(Duration::from_millis(600)).await; // the last piece plays out
     let screen = w.screen.lock().unwrap().clone();
     assert!(
-        screen.contains(&"heard:any critical issues in quotient".to_string()),
+        screen.contains(&"heard:any critical issues in acme".to_string()),
         "{screen:?}"
     );
     assert!(
@@ -841,7 +841,7 @@ async fn the_screen_is_told_the_turns_words_what_a_call_returned_and_which_words
 #[tokio::test]
 async fn a_request_that_goes_to_an_app_is_acknowledged_before_the_answer() {
     let w = world_with(
-        &["any critical issues in quotient", "read out number three"],
+        &["any critical issues in acme", "read out number three"],
         vec![
             vec![
                 ScriptedModel::call("Let me check.", "github_search_issues", Map::new()),
@@ -1404,7 +1404,7 @@ async fn a_tool_call_from_the_fast_model_hands_the_turn_to_the_main_model() {
     assert!(preamble.len() > 240);
     let calls = Arc::new(AtomicUsize::new(0));
     let mut setup = Setup::new(
-        &["any critical issues in quotient"],
+        &["any critical issues in acme"],
         vec![vec![
             ScriptedModel::call("", "github_search_issues", Map::new())
                 .after(Duration::from_millis(300)), // past the 0.1 s grace: the turn's own
@@ -1445,7 +1445,7 @@ async fn a_tool_call_from_the_fast_model_hands_the_turn_to_the_main_model() {
     // model's in between, and was not offered the hand-over tool.
     assert_eq!(
         w.asked.lock().unwrap().first().cloned(),
-        Some(vec!["any critical issues in quotient".to_string()])
+        Some(vec!["any critical issues in acme".to_string()])
     );
     let main = w.offered.lock().unwrap().first().cloned().unwrap();
     assert!(!main.contains(&"think_harder".to_string()), "{main:?}");
@@ -1517,7 +1517,7 @@ async fn after_a_tool_result_the_main_model_answers_not_the_fast_one() {
     // The fast model is for a turn's first call. What follows a tool's result, and the
     // next turn's follow-up call, are the main model's.
     let mut setup = Setup::new(
-        &["any critical issues in quotient", "thanks"],
+        &["any critical issues in acme", "thanks"],
         vec![
             vec![
                 ScriptedModel::call("", "github_search_issues", Map::new())
@@ -1567,7 +1567,7 @@ async fn a_held_answer_handed_over_and_then_withdrawn_does_not_ask_the_fast_mode
     // hadn't ended). At the close the turn's own run goes straight to the main model.
     let calls = Arc::new(AtomicUsize::new(0));
     let mut setup = Setup::new(
-        &["any critical issues in quotient"],
+        &["any critical issues in acme"],
         vec![vec![
             ScriptedModel::call("", "github_search_issues", Map::new()),
             ScriptedModel::say("Two are critical."),
@@ -1671,7 +1671,7 @@ async fn the_fast_model_reads_and_answers_from_a_short_result_without_the_main_m
     let reads = Arc::new(AtomicUsize::new(0));
     let mut setup = fast_reads(
         Setup::new(
-            &["any critical issues in quotient"],
+            &["any critical issues in acme"],
             vec![vec![ScriptedModel::say("The main model was asked.")]],
         ),
         2000,
@@ -1714,7 +1714,7 @@ async fn after_a_long_result_the_main_model_answers() {
     let reads = Arc::new(AtomicUsize::new(0));
     let mut setup = fast_reads(
         Setup::new(
-            &["any critical issues in quotient"],
+            &["any critical issues in acme"],
             vec![vec![ScriptedModel::say("Of the many, two are critical.")]],
         ),
         2000,
@@ -1852,7 +1852,7 @@ async fn think_harder_and_a_read_after_its_rounds_hand_over_with_reads_on() {
     let reads = Arc::new(AtomicUsize::new(0));
     let mut setup = fast_reads(
         Setup::new(
-            &["any critical issues in quotient"],
+            &["any critical issues in acme"],
             vec![vec![
                 ScriptedModel::call("", "github_search_issues", Map::new()),
                 ScriptedModel::say("Two are critical."),
@@ -1881,7 +1881,7 @@ async fn think_harder_and_a_read_after_its_rounds_hand_over_with_reads_on() {
 async fn with_reads_off_any_call_hands_over_as_before() {
     let reads = Arc::new(AtomicUsize::new(0));
     let mut setup = Setup::new(
-        &["any critical issues in quotient"],
+        &["any critical issues in acme"],
         vec![vec![
             ScriptedModel::call("", "github_search_issues", Map::new())
                 .after(Duration::from_millis(300)),
@@ -2020,12 +2020,12 @@ async fn a_lookup_the_fast_model_makes_itself_is_covered_by_its_own_words() {
     // said as the call starts, as an acknowledgment is: before the answer, not in the
     // transcript.
     let mut setup = Setup::new(
-        &["any critical issues in quotient"],
+        &["any critical issues in acme"],
         vec![vec![ScriptedModel::say("The main model was not needed.")]],
     )
     .set("GHOST_TTS_PRERENDER", "false");
     setup.fast = Some(vec![vec![
-        ScriptedModel::call("Checking quotient.", "github_search_issues", Map::new()),
+        ScriptedModel::call("Checking acme.", "github_search_issues", Map::new()),
         ScriptedModel::say("Two are critical."),
     ]]);
     setup.sources = vec![github_app()];
@@ -2038,7 +2038,7 @@ async fn a_lookup_the_fast_model_makes_itself_is_covered_by_its_own_words() {
     assert!(ack < rec["reply"].as_f64().unwrap(), "{rec}");
     let rendered = w.spoken.lock().unwrap().clone();
     assert!(
-        rendered.iter().any(|t| t.contains("Checking quotient")),
+        rendered.iter().any(|t| t.contains("Checking acme")),
         "{rendered:?}"
     );
     assert_eq!(said_by_ghost(&w), vec!["Yeah?", "Two are critical."]);
@@ -2055,7 +2055,7 @@ async fn each_models_prompt_cache_is_warmed_as_the_session_opens_with_its_first_
     // (10,000 to 13,000 tokens written, first byte 1.9 to 2.7 s). The cache is written as
     // the session opens, with what the first call will send, so the first turn reads it.
     let mut setup = Setup::new(
-        &["any critical issues in quotient"],
+        &["any critical issues in acme"],
         vec![vec![ScriptedModel::say("Two are critical.")]],
     );
     setup.fast = Some(vec![vec![ScriptedModel::call(

@@ -1,6 +1,6 @@
 {
   "name": "@ghost/ui",
-  "version": "2026.10.0",
+  "version": "2026.11.0",
   "private": true,
   "description": "React components shared by the Ghost desktop and mobile apps",
   "type": "module",
