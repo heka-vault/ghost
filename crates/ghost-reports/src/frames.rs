@@ -10,14 +10,19 @@
 //! operator's path.
 //!
 //! A page's stack (WebKit's `fn@url:line:col`, or V8's `at fn (url:line:col)`) keeps the
-//! path of the URL and nothing else of it. The release bundle is minified: the function
-//! names are the minifier's and the version tells which bundle (ADR 0067).
+//! path of the URL and nothing else of it. The release bundle is minified. A frame in a
+//! script the build gave a chunk id ([`PageChunks`]) goes the way posthog-js sends one, so
+//! PostHog resolves it against the source map uploaded under that id: `platform:
+//! "web:javascript"`, `filename`, `function`, `lineno`, `colno`, `in_app` and `chunk_id`
+//! (cymbal's `RawJSFrame`; a filename that is not `http(s)` is never fetched, the id alone
+//! names the map). Any other frame goes as `custom`, minified, with the version.
 
 use std::sync::LazyLock;
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
+use crate::chunks::PageChunks;
 use crate::scrub::{FRAME_CHARS, Scrubber};
 
 /// At most this many frames: the ones nearest the failure.
@@ -26,7 +31,9 @@ pub const MAX_FRAMES: usize = 40;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Frame {
     pub platform: String,
-    pub lang: String,
+    /// `custom` frames say their language; a `web:javascript` frame's platform says it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lang: Option<String>,
     pub function: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filename: Option<String>,
@@ -35,7 +42,11 @@ pub struct Frame {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub colno: Option<u32>,
     pub in_app: bool,
-    pub resolved: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolved: Option<bool>,
+    /// The uploaded source map this frame resolves against (`web:javascript` only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chunk_id: Option<String>,
 }
 
 static RUST_FN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*\d+:\s+(.+?)\s*$").unwrap());
@@ -106,13 +117,14 @@ pub fn rust(backtrace: &str, scrub: &Scrubber) -> Vec<Frame> {
             let function = RUST_HASH.replace(&c[1], "").into_owned();
             frames.push(Frame {
                 platform: "custom".into(),
-                lang: "rust".into(),
+                lang: Some("rust".into()),
                 function: scrub.text(&function, FRAME_CHARS),
                 filename: None,
                 lineno: None,
                 colno: None,
                 in_app: false,
-                resolved: true,
+                resolved: Some(true),
+                chunk_id: None,
             });
         }
     }
@@ -161,8 +173,8 @@ fn js_file(url: &str) -> (String, bool) {
     }
 }
 
-/// The frames of a page's `Error.stack`.
-pub fn javascript(stack: &str, scrub: &Scrubber) -> Vec<Frame> {
+/// The frames of a page's `Error.stack`; `chunks`, the build's manifest, when it has one.
+pub fn javascript(stack: &str, scrub: &Scrubber, chunks: Option<&PageChunks>) -> Vec<Frame> {
     let mut frames: Vec<Frame> = stack
         .lines()
         .filter_map(|line| {
@@ -173,15 +185,18 @@ pub fn javascript(stack: &str, scrub: &Scrubber) -> Vec<Frame> {
                 .map(|m| m.as_str())
                 .filter(|s| !s.is_empty())
                 .unwrap_or("?");
+            let chunk_id = chunks.and_then(|m| m.get(&file)).map(str::to_string);
+            let known = chunk_id.is_some();
             Some(Frame {
-                platform: "custom".into(),
-                lang: "javascript".into(),
+                platform: if known { "web:javascript" } else { "custom" }.into(),
+                lang: (!known).then(|| "javascript".into()),
                 function: scrub.text(function, FRAME_CHARS),
                 filename: Some(scrub.text(&file, FRAME_CHARS)),
                 lineno: c[3].parse().ok(),
                 colno: c[4].parse().ok(),
                 in_app: own,
-                resolved: false,
+                resolved: (!known).then_some(false),
+                chunk_id,
             })
         })
         .take(MAX_FRAMES)
@@ -248,7 +263,7 @@ mod tests {
         let stack = "render@tauri://localhost/assets/index-AbC12.js:1:2345\n\
                      dispatch@https://cdn.example.com/lib/vendor.js?token=secret123:4:5\n\
                      global code@tauri://localhost/assets/index-AbC12.js:9:1";
-        let f = javascript(stack, &s());
+        let f = javascript(stack, &s(), None);
         assert_eq!(f.len(), 3);
         assert_eq!(f[2].function, "render");
         assert_eq!(f[2].filename.as_deref(), Some("assets/index-AbC12.js"));
@@ -262,10 +277,75 @@ mod tests {
         let f = javascript(
             "TypeError: x\n    at Foo (http://localhost:1430/src/app/App.tsx:10:3)\n    at http://localhost:1430/src/main.tsx:2:1",
             &s(),
+            None,
         );
         assert_eq!(f.len(), 2);
         assert_eq!(f[1].function, "Foo");
         assert_eq!(f[1].filename.as_deref(), Some("src/app/App.tsx"));
         assert_eq!(f[0].function, "?");
+    }
+
+    const CHUNK: &str = "1b7a3c6e-2f1d-5e8a-9b0c-4d3e2f1a0b9c";
+
+    fn chunks() -> PageChunks {
+        PageChunks::parse(format!(r#"{{"assets/index-AbC12.js": "{CHUNK}"}}"#).as_bytes()).unwrap()
+    }
+
+    #[test]
+    fn a_frame_in_a_script_with_a_chunk_id_is_sent_as_posthog_js_sends_it() {
+        let stack = "render@tauri://localhost/assets/index-AbC12.js:1:2345\n\
+                     helper@tauri://localhost/assets/vendor-Q1.js:4:5";
+        let f = javascript(stack, &s(), Some(&chunks()));
+        let resolved = serde_json::to_value(&f[1]).unwrap();
+        // cymbal's RawJSFrame: platform, filename, function, lineno and colno, in_app, chunk_id.
+        assert_eq!(
+            resolved,
+            serde_json::json!({
+                "platform": "web:javascript",
+                "filename": "assets/index-AbC12.js",
+                "function": "render",
+                "lineno": 1,
+                "colno": 2345,
+                "in_app": true,
+                "chunk_id": CHUNK,
+            })
+        );
+        // A script the build gave no id: as before.
+        let other = serde_json::to_value(&f[0]).unwrap();
+        assert_eq!(other["platform"], "custom");
+        assert_eq!(other["lang"], "javascript");
+        assert_eq!(other["resolved"], false);
+        assert!(other.get("chunk_id").is_none());
+    }
+
+    #[test]
+    fn without_a_manifest_page_frames_are_minified_as_before() {
+        let stack = "render@tauri://localhost/assets/index-AbC12.js:1:2345";
+        let f = javascript(stack, &s(), None);
+        assert_eq!(
+            serde_json::to_value(&f[0]).unwrap(),
+            serde_json::json!({
+                "platform": "custom",
+                "lang": "javascript",
+                "function": "render",
+                "filename": "assets/index-AbC12.js",
+                "lineno": 1,
+                "colno": 2345,
+                "in_app": true,
+                "resolved": false,
+            })
+        );
+    }
+
+    #[test]
+    fn a_resolved_frame_is_scrubbed_like_any_other() {
+        // A function name a page could make up still passes the scrubber, and the filename
+        // stays the bundle's relative path: the origin and the query never go.
+        let stack = "/home/alice/x@tauri://localhost/assets/index-AbC12.js?u=alice@example.com:3:4";
+        let f = javascript(stack, &s(), Some(&chunks()));
+        let all = serde_json::to_string(&f).unwrap();
+        assert!(!all.contains("alice") && !all.contains("tauri://"), "{all}");
+        assert_eq!(f[0].filename.as_deref(), Some("assets/index-AbC12.js"));
+        assert_eq!(f[0].chunk_id.as_deref(), Some(CHUNK));
     }
 }

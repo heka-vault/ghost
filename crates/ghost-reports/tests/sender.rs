@@ -20,6 +20,7 @@ fn ctx() -> Context {
         session_type: "x11".into(),
         arch: "x86_64".into(),
         installed_as: "deb".into(),
+        page_chunks: None,
     }
 }
 
@@ -291,4 +292,42 @@ async fn hostile_text_never_reaches_the_wire() {
     ] {
         assert!(!wire.contains(never), "{never} reached the wire: {wire}");
     }
+}
+
+#[tokio::test]
+async fn a_page_error_goes_with_frames_posthog_resolves_against_the_uploaded_map() {
+    let s = stub(200).await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = reporter(dir.path(), Some("k"), &s.uri());
+    let id = "1b7a3c6e-2f1d-5e8a-9b0c-4d3e2f1a0b9c";
+    r.set_page_chunks(
+        ghost_reports::chunks::PageChunks::parse(
+            format!(r#"{{"assets/index-AbC12.js": "{id}"}}"#).as_bytes(),
+        )
+        .unwrap(),
+    );
+    r.report(&What::Page(ghost_reports::PageError {
+        page: "main".into(),
+        source: ghost_reports::PageSource::Boundary,
+        error_type: "TypeError".into(),
+        message: "x is undefined".into(),
+        stack: "Ft@tauri://localhost/assets/index-AbC12.js:1:52011\n\
+                xe@tauri://localhost/assets/index-AbC12.js:1:9030"
+            .into(),
+    }));
+    assert_eq!(r.send_pending().await, 1);
+    let sent = bodies(&s).await;
+    let frames = sent[0]["properties"]["$exception_list"][0]["stacktrace"]["frames"]
+        .as_array()
+        .unwrap()
+        .clone();
+    assert_eq!(frames.len(), 2);
+    for f in &frames {
+        assert_eq!(f["platform"], "web:javascript");
+        assert_eq!(f["chunk_id"], id);
+        assert_eq!(f["filename"], "assets/index-AbC12.js");
+        assert!(f["lineno"].is_u64() && f["colno"].is_u64());
+    }
+    // The failing frame last, as posthog-js orders them.
+    assert_eq!(frames[1]["function"], "Ft");
 }

@@ -238,6 +238,9 @@ pub struct Context {
     pub arch: String,
     /// `deb`, `appimage` or `checkout`.
     pub installed_as: String,
+    /// The page scripts' chunk ids, from the bundle's manifest: a release build's only.
+    #[serde(skip)]
+    pub page_chunks: Option<crate::chunks::PageChunks>,
 }
 
 impl Context {
@@ -256,6 +259,7 @@ impl Context {
                 std::env::current_exe().ok().as_deref(),
             )
             .to_string(),
+            page_chunks: None,
         }
     }
 }
@@ -320,7 +324,7 @@ struct Exception {
     facts: BTreeMap<String, String>,
 }
 
-fn exception(what: &What, scrub: &Scrubber) -> Exception {
+fn exception(what: &What, ctx: &Context, scrub: &Scrubber) -> Exception {
     match what {
         What::Panic {
             message,
@@ -355,13 +359,14 @@ fn exception(what: &What, scrub: &Scrubber) -> Exception {
             if frames.is_empty() && !file.is_empty() {
                 frames.push(Frame {
                     platform: "custom".into(),
-                    lang: "rust".into(),
+                    lang: Some("rust".into()),
                     function: "?".into(),
                     filename: Some(scrub.text(&file, scrub::FRAME_CHARS)),
                     lineno: *line,
                     colno: *col,
                     in_app: own,
-                    resolved: true,
+                    resolved: Some(true),
+                    chunk_id: None,
                 });
             }
             let mut facts = BTreeMap::new();
@@ -408,7 +413,7 @@ fn exception(what: &What, scrub: &Scrubber) -> Exception {
                 error_type: p.error_type.clone(),
                 value,
                 handled: p.source == PageSource::Boundary,
-                frames: frames::javascript(&p.stack, scrub),
+                frames: frames::javascript(&p.stack, scrub, ctx.page_chunks.as_ref()),
                 facts,
             }
         }
@@ -449,7 +454,7 @@ pub fn build(
     at: DateTime<Utc>,
     scrub: &Scrubber,
 ) -> Built {
-    let e = exception(what, scrub);
+    let e = exception(what, ctx, scrub);
     let top = e
         .frames
         .iter()
@@ -521,6 +526,7 @@ mod tests {
             session_type: "wayland".into(),
             arch: "x86_64".into(),
             installed_as: "deb".into(),
+            page_chunks: None,
         }
     }
 

@@ -396,6 +396,8 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             crate::reports::report_page_error
         ])
         .setup(|app| {
+            // ADR 0067: the floating room's page scripts and their chunk ids.
+            crate::reports::load_page_chunks(app.handle());
             // The window's own capability: the daemon bridge, its events and the commands
             // above, nothing else of Tauri's.
             app.add_capability(
