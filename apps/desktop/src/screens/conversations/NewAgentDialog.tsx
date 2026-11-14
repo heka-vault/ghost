@@ -6,6 +6,8 @@
  */
 import { type AgentLook, lookOf, lookText } from "@ghost/ui";
 import { LookPicker, slugOf } from "./LookPicker";
+// Its own styles: the first run opens this dialog without loading the Agents screen.
+import "./conversations.css";
 import type { ConversationDetail, ConversationView } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
 import { useEffect, useRef, useState } from "react";
