@@ -31,7 +31,9 @@ Say this in your own words, then ask whether to go ahead. Do nothing else until 
 - It acts through the apps they connect (GitHub, a calendar, …): by default it does what they
   ask and says what it did; Settings › Permissions sets what it must ask about first.
 - It keeps conversation transcripts and an audit log of every change on this computer, under
-  `~/.local/share/ghost`; nothing is uploaded by Ghost.
+  `~/.local/share/ghost`; none of it is uploaded by Ghost.
+- When something in Ghost breaks, it sends an error report: what failed and where in its
+  code, never what they said or typed. On by default; Settings › General turns it off.
 - It is early software, Linux only, built at one desk.
 - The download is about 180 MB (the .deb; 240 MB for the AppImage), and its ears and voice are
   2.9 GB more, downloaded once. Installed it takes about 4 GB of disk.
