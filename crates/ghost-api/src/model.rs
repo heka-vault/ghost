@@ -166,6 +166,7 @@ pub fn providers_view() -> Vec<ModelProviderView> {
             password_optional: p.password_optional,
             sign_in: p.sign_in,
             local: p.local,
+            program: p.program,
             default_model: (!p.default_model.is_empty()).then(|| p.default_model.to_string()),
         })
         .collect()
@@ -276,7 +277,7 @@ async fn model_list(
     let conn = ModelConnection::from_env(&env);
     let spec = conn.spec();
     let default = (!spec.default_model.is_empty()).then(|| spec.default_model.to_string());
-    if conn.base_url.is_empty() {
+    if conn.base_url.is_empty() && !spec.program {
         return Ok(Json(ModelListView {
             models: Vec::new(),
             default,

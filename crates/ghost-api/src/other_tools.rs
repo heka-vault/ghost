@@ -136,6 +136,57 @@ pub struct FoundModelView {
     pub models: Vec<String>,
 }
 
+/// Where the operator's Claude Code stands as Ghost's model (ADR 0069).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ClaudeCodeState {
+    /// Signed in with a Claude plan: Ghost can run it, and replies count against the plan.
+    Plan,
+    /// Signed in with an API key: Ghost can run it, and replies are billed to the key.
+    ApiKey,
+    /// Installed and not signed in: the operator signs in with its own command.
+    SignedOut,
+    /// A version without a switch Ghost needs: Ghost won't run it.
+    Unsupported,
+}
+
+/// The operator's Claude Code, as a model Ghost can run (ADR 0069). Absent when it isn't
+/// installed: the option is not shown.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct ClaudeCodeView {
+    pub state: ClaudeCodeState,
+    /// As the program says it, `2.1.325`.
+    #[schema(required)]
+    pub version: Option<String>,
+    /// What to tell the operator, in a sentence: how it is signed in, or what to do.
+    pub line: String,
+    /// A version Ghost was not measured with, said once.
+    #[schema(required)]
+    pub note: Option<String>,
+}
+
+pub fn claude_code_view(found: &ghost_core::other_tools::program::Found) -> ClaudeCodeView {
+    use ghost_core::other_tools::program::SignIn;
+    let state = if !found.missing.is_empty() {
+        ClaudeCodeState::Unsupported
+    } else {
+        match found.sign_in {
+            SignIn::SignedOut => ClaudeCodeState::SignedOut,
+            SignIn::Plan(_) => ClaudeCodeState::Plan,
+            SignIn::ApiKey => ClaudeCodeState::ApiKey,
+        }
+    };
+    ClaudeCodeView {
+        state,
+        version: found.version.clone(),
+        line: found
+            .problem()
+            .or_else(|| found.sign_in_line())
+            .unwrap_or_default(),
+        note: found.version_note(),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct OtherToolsView {
     /// "Cursor and Claude Code are set up on this computer.", or None.
@@ -143,7 +194,11 @@ pub struct OtherToolsView {
     pub line: Option<String>,
     pub tools: Vec<OtherToolView>,
     pub models: Vec<FoundModelView>,
-    /// Tools here whose own sign-in Ghost may not use (Claude Code, Codex).
+    /// The operator's Claude Code as a model Ghost can run (ADR 0069); None when it isn't
+    /// installed.
+    #[schema(required)]
+    pub claude_code: Option<ClaudeCodeView>,
+    /// Tools here whose own sign-in Ghost may not use (Codex).
     pub own_sign_in: Vec<String>,
 }
 
@@ -357,7 +412,9 @@ async fn view(deps: &Deps) -> ApiResult<OtherToolsView> {
             models: Vec::new(),
         });
     }
+    let claude_code = p.claude_code().await.map(|f| claude_code_view(&f));
     Ok(OtherToolsView {
+        claude_code,
         line: noticed_line(&found),
         tools: found
             .iter()

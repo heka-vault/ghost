@@ -930,6 +930,49 @@
         ],
         "type": "object"
       },
+      "ClaudeCodeState": {
+        "description": "Where the operator's Claude Code stands as Ghost's model (ADR 0069).",
+        "enum": [
+          "plan",
+          "api_key",
+          "signed_out",
+          "unsupported"
+        ],
+        "type": "string"
+      },
+      "ClaudeCodeView": {
+        "description": "The operator's Claude Code, as a model Ghost can run (ADR 0069). Absent when it isn't\ninstalled: the option is not shown.",
+        "properties": {
+          "line": {
+            "description": "What to tell the operator, in a sentence: how it is signed in, or what to do.",
+            "type": "string"
+          },
+          "note": {
+            "description": "A version Ghost was not measured with, said once.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "$ref": "#/components/schemas/ClaudeCodeState"
+          },
+          "version": {
+            "description": "As the program says it, `2.1.325`.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "state",
+          "version",
+          "line",
+          "note"
+        ],
+        "type": "object"
+      },
       "ClientCreate": {
         "properties": {
           "command": {
@@ -3354,6 +3397,10 @@
           "password_optional": {
             "type": "boolean"
           },
+          "program": {
+            "description": "A program on this computer Ghost runs (ADR 0069: Claude Code): no address, no\npassword.",
+            "type": "boolean"
+          },
           "protocol": {
             "enum": [
               "anthropic",
@@ -3377,7 +3424,8 @@
           "base_url",
           "password_optional",
           "sign_in",
-          "local"
+          "local",
+          "program"
         ],
         "type": "object"
       },
@@ -3657,6 +3705,17 @@
       },
       "OtherToolsView": {
         "properties": {
+          "claude_code": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ClaudeCodeView",
+                "description": "The operator's Claude Code as a model Ghost can run (ADR 0069); None when it isn't\ninstalled."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "line": {
             "description": "\"Cursor and Claude Code are set up on this computer.\", or None.",
             "type": [
@@ -3671,7 +3730,7 @@
             "type": "array"
           },
           "own_sign_in": {
-            "description": "Tools here whose own sign-in Ghost may not use (Claude Code, Codex).",
+            "description": "Tools here whose own sign-in Ghost may not use (Codex).",
             "items": {
               "type": "string"
             },
@@ -3688,6 +3747,7 @@
           "line",
           "tools",
           "models",
+          "claude_code",
           "own_sign_in"
         ],
         "type": "object"

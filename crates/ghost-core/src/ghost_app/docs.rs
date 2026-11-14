@@ -738,8 +738,19 @@ mod tests {
                 .any(|h| h.heading.to_lowercase().contains("schedule")),
             "{hits:?}"
         );
+        // "Connect Claude Code" has two answers since ADR 0069: letting it use Ghost, and
+        // running it as Ghost's model. Both are in the three an agent reads.
         let hits = top("how do I connect Claude Code?");
-        assert_eq!(hits[0].document, "connect-ghost", "{hits:?}");
+        assert!(
+            hits.iter().any(|h| h.document == "connect-ghost"),
+            "{hits:?}"
+        );
+        let hits = top("can Ghost use my Claude Code as its model?");
+        assert!(
+            hits.iter()
+                .any(|h| h.document == "readme" && h.heading == "Connect a model"),
+            "{hits:?}"
+        );
         let hits = top("why did you ask me before closing that issue?");
         assert!(
             hits.iter()

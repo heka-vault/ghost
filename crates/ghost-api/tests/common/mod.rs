@@ -995,6 +995,8 @@ pub struct FakeOtherTools {
     pub local: Mutex<HashMap<String, String>>,
     pub ran: Mutex<Vec<Vec<String>>>,
     pub fail_runs: Mutex<Option<String>>,
+    /// What the operator's Claude Code says of itself (ADR 0069); None: not installed.
+    pub claude: Mutex<Option<ghost_core::other_tools::program::Found>>,
 }
 
 impl FakeOtherTools {
@@ -1006,6 +1008,7 @@ impl FakeOtherTools {
             local: Mutex::default(),
             ran: Mutex::default(),
             fail_runs: Mutex::default(),
+            claude: Mutex::default(),
         }
     }
 
@@ -1026,6 +1029,10 @@ impl ghost_api::deps::OtherToolsPort for FakeOtherTools {
 
     async fn get_local(&self, url: &str) -> Option<String> {
         self.local.lock().unwrap().get(url).cloned()
+    }
+
+    async fn claude_code(&self) -> Option<ghost_core::other_tools::program::Found> {
+        self.claude.lock().unwrap().clone()
     }
 
     async fn run(&self, argv: &[String]) -> Result<(), String> {

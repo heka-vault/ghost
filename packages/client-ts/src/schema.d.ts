@@ -2444,6 +2444,24 @@ export interface components {
             required: boolean;
             secret: boolean;
         };
+        /**
+         * @description Where the operator's Claude Code stands as Ghost's model (ADR 0069).
+         * @enum {string}
+         */
+        ClaudeCodeState: "plan" | "api_key" | "signed_out" | "unsupported";
+        /**
+         * @description The operator's Claude Code, as a model Ghost can run (ADR 0069). Absent when it isn't
+         *     installed: the option is not shown.
+         */
+        ClaudeCodeView: {
+            /** @description What to tell the operator, in a sentence: how it is signed in, or what to do. */
+            line: string;
+            /** @description A version Ghost was not measured with, said once. */
+            note: string | null;
+            state: components["schemas"]["ClaudeCodeState"];
+            /** @description As the program says it, `2.1.325`. */
+            version: string | null;
+        };
         ClientCreate: {
             /**
              * @description For a tool that can only start a command: Ghost keeps the token in a private file
@@ -3228,6 +3246,11 @@ export interface components {
             /** @description The Password's name it uses by default. */
             password?: string | null;
             password_optional: boolean;
+            /**
+             * @description A program on this computer Ghost runs (ADR 0069: Claude Code): no address, no
+             *     password.
+             */
+            program: boolean;
             /** @enum {string} */
             protocol: "anthropic" | "openai";
             /** @description OpenRouter: signing in gives the key. */
@@ -3300,10 +3323,11 @@ export interface components {
             tools: components["schemas"]["OtherToolsView"];
         };
         OtherToolsView: {
+            claude_code: components["schemas"]["ClaudeCodeView"] | null;
             /** @description "Cursor and Claude Code are set up on this computer.", or None. */
             line: string | null;
             models: components["schemas"]["FoundModelView"][];
-            /** @description Tools here whose own sign-in Ghost may not use (Claude Code, Codex). */
+            /** @description Tools here whose own sign-in Ghost may not use (Codex). */
             own_sign_in: string[];
             tools: components["schemas"]["OtherToolView"][];
         };
@@ -4574,6 +4598,8 @@ export type SchemaCatalogOption = components['schemas']['CatalogOption'];
 export type SchemaCatalogPage = components['schemas']['CatalogPage'];
 export type SchemaCatalogPublisher = components['schemas']['CatalogPublisher'];
 export type SchemaCatalogSetting = components['schemas']['CatalogSetting'];
+export type SchemaClaudeCodeState = components['schemas']['ClaudeCodeState'];
+export type SchemaClaudeCodeView = components['schemas']['ClaudeCodeView'];
 export type SchemaClientCreate = components['schemas']['ClientCreate'];
 export type SchemaClientCreated = components['schemas']['ClientCreated'];
 export type SchemaClientsView = components['schemas']['ClientsView'];

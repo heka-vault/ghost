@@ -476,6 +476,19 @@ fn a_sign_in_file_is_never_opened() {
         assert!(read::read_bounded(&h.root, &h.root.join(f), FILE_CAP, &mut opened).is_err());
     }
     assert!(opened.is_empty());
+    // ADR 0069: Claude Code as Ghost's model is asked, never read. Detecting it runs its
+    // own commands and opens no file of its own: none of the program module's code reads.
+    let program = include_str!("program.rs");
+    let code = program.split("#[cfg(test)]").next().unwrap();
+    for reads in [
+        "fs::read",
+        "File::open",
+        "read_bounded",
+        "read_to_string",
+        ".credentials",
+    ] {
+        assert!(!code.contains(reads), "program.rs: {reads}");
+    }
 }
 
 fn cursor_found(h: &Home) -> ToolFound {
