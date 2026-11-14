@@ -1,0 +1,98 @@
+---
+/**
+ * "Give this to your agent": the prompt a person pastes into the coding agent they already have
+ * (Claude Code, Codex, Cursor), which then reads /agents.md (docs/agent-setup.md) and sets Ghost
+ * up with them. The prompt is one file (src/agent-prompt.txt), the same words as the README's
+ * (tools/tests/test_agent_setup.py holds them together). It sits under the hero, never above it:
+ * the float stays the lead.
+ *
+ * The prompt is drawn as Ghost's line at rest with the words under it: a thin cyan line of light
+ * (Ghost waiting), the text in the mono face on the night ground, no card and no gradient. Copy
+ * is a plain button with no library; it says "Copied" in place and to a screen reader, and falls
+ * back to selecting the text where the clipboard is refused. Nothing is fetched.
+ */
+import prompt from "../agent-prompt.txt?raw";
+
+interface Props {
+  deb: string;
+  appimage: string;
+}
+const { deb, appimage } = Astro.props;
+const words = prompt.trim();
+---
+
+<section id="agent" class="part agent" aria-labelledby="agent-title">
+  <p class="kicker"><span class="kicker__dot kicker__dot--green"></span>Have a coding agent?</p>
+  <h2 id="agent-title" class="say">Give this to your agent.</h2>
+  <p class="part__lede">
+    Paste it into Claude Code, Codex, Cursor or any agent on your Linux machine. It reads Ghost's setup guide, tells you
+    what Ghost will do on this computer, and asks before it installs anything.
+  </p>
+  <figure class="agent__prompt" data-agent-prompt>
+    <div class="agent__line" aria-hidden="true"><span></span></div>
+    <blockquote class="agent__words" id="agent-words">{words}</blockquote>
+    <figcaption class="agent__bar">
+      <button type="button" class="btn btn--go agent__copy" data-copy aria-describedby="agent-words">
+        <span data-copy-label>Copy the prompt</span>
+      </button>
+      <span class="agent__said" data-copy-said role="status" aria-live="polite"></span>
+      <a class="agent__guide" href="/agents.md">Read the guide it follows</a>
+    </figcaption>
+  </figure>
+  <p class="part__fine agent__fine">
+    It checks your computer, downloads the latest release and checks its fingerprint, asks you to run the one install
+    command yourself, fetches Ghost's ears and voice, and connects itself to Ghost so the two can work together. It never
+    handles your keys or passwords: you type those into Ghost.
+  </p>
+  <p class="agent__none">
+    <b>No agent?</b> Download the <a href={deb}>.deb</a> for Ubuntu 24.04 and 26.04 or the <a href={appimage}>AppImage</a>{" "}
+    for other distributions, then open Ghost: <a href="#install">install</a> has the three steps.
+  </p>
+</section>
+
+<script>
+  const root = document.querySelector<HTMLElement>("[data-agent-prompt]");
+  const button = root?.querySelector<HTMLButtonElement>("[data-copy]");
+  const label = root?.querySelector<HTMLElement>("[data-copy-label]");
+  const said = root?.querySelector<HTMLElement>("[data-copy-said]");
+  const words = root?.querySelector<HTMLElement>(".agent__words");
+  let reset = 0;
+
+  function select() {
+    if (!words) return;
+    const range = document.createRange();
+    range.selectNodeContents(words);
+    const sel = getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+  }
+  function tell(text: string, done: boolean) {
+    if (label) label.textContent = done ? "Copied" : "Copy the prompt";
+    if (said) said.textContent = text;
+    root?.toggleAttribute("data-copied", done);
+    window.clearTimeout(reset);
+    reset = window.setTimeout(() => {
+      if (label) label.textContent = "Copy the prompt";
+      if (said) said.textContent = "";
+      root?.removeAttribute("data-copied");
+    }, 2400);
+  }
+  button?.addEventListener("click", async () => {
+    const text = words?.textContent?.trim() ?? "";
+    try {
+      await navigator.clipboard.writeText(text);
+      tell("Copied. Paste it into your agent.", true);
+    } catch {
+      // No clipboard here (an old browser, a page that isn't secure): the words selected instead.
+      select();
+      const ok = (() => {
+        try {
+          return document.execCommand("copy");
+        } catch {
+          return false;
+        }
+      })();
+      tell(ok ? "Copied. Paste it into your agent." : "Selected: press Ctrl+C to copy.", ok);
+    }
+  });
+</script>

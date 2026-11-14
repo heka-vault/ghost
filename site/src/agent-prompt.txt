@@ -1,0 +1,1 @@
+Read https://heyghost.app/agents.md in full before you do anything, then set up Ghost on this computer by following it. Before you install anything, tell me what Ghost will do on this computer and wait for my yes. Ask me before any step that needs my password, and never ask me to paste a key or password into this chat.

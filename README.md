@@ -81,6 +81,22 @@ see [What's rough](#whats-rough). Linux only today.
 
 ## Install
 
+### Get started with your agent
+
+Already use Claude Code, Codex, Cursor or another coding agent on this machine? Paste this into it:
+
+```text
+Read https://heyghost.app/agents.md in full before you do anything, then set up Ghost on this computer by following it. Before you install anything, tell me what Ghost will do on this computer and wait for my yes. Ask me before any step that needs my password, and never ask me to paste a key or password into this chat.
+```
+
+It follows [docs/agent-setup.md](docs/agent-setup.md) (served as
+<https://heyghost.app/agents.md>): it tells you what Ghost will do here and waits for your
+yes, checks the computer, downloads the latest release and checks its SHA-256, asks you to run
+the one `sudo apt install` yourself, fetches Ghost's ears and voice, and connects itself to
+Ghost as an outside tool. It never handles your keys: you type those into Ghost.
+
+### By hand
+
 On Ubuntu 24.04 or 26.04 (x86-64), from the [latest release](https://github.com/heka-vault/ghost/releases/latest):
 
 1. **Download** `heka-ghost-desktop_<version>_amd64.deb` (or the `.AppImage`, below).
@@ -371,6 +387,7 @@ Contributing, filing an issue and what to put in it: [CONTRIBUTING.md](CONTRIBUT
 | Doc | What |
 |---|---|
 | [docs/architecture.md](docs/architecture.md) | The design: components, how a conversation flows, how changes stay safe |
+| [docs/agent-setup.md](docs/agent-setup.md) | The setup guide a coding agent follows (heyghost.app/agents.md) |
 | [docs/apps.md](docs/apps.md) | Connecting apps: the catalog, sign-in, keys, local packages |
 | [docs/folder.md](docs/folder.md), [docs/skills.md](docs/skills.md) | Ghost's folder: rules, agents, watches, skills |
 | [docs/tools.md](docs/tools.md) | Every tool Ghost's agents have, and its default |

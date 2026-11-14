@@ -1,13 +1,15 @@
 ---
 /**
  * heyghost.app. One page, in the order the float, what Ghost does, privacy, the desktop app,
- * install, where it stands. The float's own language carries the page: a beam of light runs down
+ * install, where it stands, with "give this to your agent" (the prompt for a coding agent, which
+ * follows /agents.md) straight under the hero. The float's own language carries the page: a beam of light runs down
  * it, each part starts where a place would light up, and Wisp's states (listening, reaching,
  * speaking, waiting for a yes) are the pictures. Every claim is one the README or CLAUDE.md's
  * rules make; when the product changes what it promises, change this page in the same pull
  * request. The version is the repository's (package.json), never typed here.
  */
 import Base from "../layouts/Base.astro";
+import AgentStart from "../components/AgentStart.astro";
 import Hero from "../components/Hero.astro";
 import Wordmark from "../components/Wordmark.astro";
 import { version } from "../../../package.json";
@@ -21,6 +23,10 @@ import watching from "../../../docs/screenshots/watching.webp?url";
 
 const REPO = "https://github.com/heka-vault/ghost";
 const DOWNLOAD = `${REPO}/releases/latest`;
+// The files themselves, by the repository's version: the release is tagged at that version
+// (docs/releasing.md), so these name the latest release's .deb and AppImage.
+const DEB = `${DOWNLOAD}/download/heka-ghost-desktop_${version}_amd64.deb`;
+const APPIMAGE = `${DOWNLOAD}/download/heka-ghost-desktop_${version}_amd64.AppImage`;
 const doc = (path: string) => `${REPO}/blob/main/${path}`;
 
 const states = [
@@ -114,6 +120,8 @@ const rough = [
     </Hero>
 
     <div class="spine">
+      <AgentStart deb={DEB} appimage={APPIMAGE} />
+
       <section id="float" class="part" aria-labelledby="float-title">
         <p class="kicker"><span class="kicker__dot kicker__dot--cyan"></span>The float</p>
         <h2 id="float-title" class="say">The window stays closed.</h2>
@@ -205,7 +213,7 @@ const rough = [
         </p>
         <p class="install__go">
           <a class="btn btn--go btn--big" href={DOWNLOAD}>Download Ghost {version}</a>
-          <span>.deb for Ubuntu 24.04 and 26.04 · AppImage for the rest · x86-64</span>
+          <span><a href={DEB}>.deb</a> for Ubuntu 24.04 and 26.04 · <a href={APPIMAGE}>AppImage</a> for the rest · x86-64</span>
         </p>
         <ol class="steps">
           <li>
