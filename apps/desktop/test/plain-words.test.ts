@@ -22,7 +22,10 @@ vi.hoisted(() => {
   g.window ??= { location: { search: "", hash: "" } };
 });
 
+import { liveRow, rowOf, STAGES } from "@ghost/ui";
+
 import { CATALOG } from "../src/design/mock/fixtures/apps";
+import { seededTimings } from "../src/design/mock/live";
 import { schedules, watching } from "../src/design/mock/fixtures/folder";
 import { ROUTES } from "../src/design/mock/fixtures/policy";
 import settingsFixture from "../src/design/mock/fixtures/settings";
@@ -122,6 +125,16 @@ describe("the everyday pages say things in the operator's words", () => {
         expect(offenders(words), `${e.title}: ${words}`).toEqual([]);
         expect(words).not.toContain(p.where);
       }
+    }
+  });
+
+  it("keeps Developer's timing overlay, which shows on Today and the conversation when switched on, to the same words", () => {
+    // ADR 0073 as amended: numbers, stage labels and the model's name only.
+    const rows = [...seededTimings("s1").map(rowOf), liveRow([{ kind: "you_stopped", session_id: "s1", at: new Date().toISOString() }], null)!];
+    const heads = ["s", ...STAGES.map(([, l]) => l), "model"].join(" ");
+    for (const r of rows) {
+      const text = [heads, r.live ? "now" : `#${r.turn}`, ...STAGES.map(([k]) => r.cells[k]), r.model, r.cut ? "cut" : ""].join(" ");
+      expect(offenders(text), text).toEqual([]);
     }
   });
 
