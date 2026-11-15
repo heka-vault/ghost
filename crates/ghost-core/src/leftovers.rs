@@ -456,7 +456,9 @@ pub fn inventory(p: &Places, look: &dyn Look) -> Vec<Item> {
         Removal::Paths,
     ));
 
-    // (d) The app's own storage.
+    // (d) The app's own storage. The window's localStorage (`localstorage/` under the app's
+    // data folder) is where its remembered choices live, the `ghost.room.*` keys the app clears
+    // at start since #150 among them: the folder goes whole, so no key is named here.
     let mut storage = vec![
         p.data_home.join(APP_ID),
         p.cache_home.join(APP_ID),

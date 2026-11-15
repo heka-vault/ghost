@@ -133,3 +133,114 @@ fn every_file_the_daemon_writes_is_in_the_inventory_and_uninstall_takes_it_away(
     let left: Vec<PathBuf> = files(&home);
     assert_eq!(left, before, "{said}");
 }
+
+fn alive(pid: u32) -> bool {
+    std::fs::read_to_string(format!("/proc/{pid}/status")).is_ok_and(|s| {
+        !s.lines()
+            .any(|l| l.starts_with("State:") && l.contains('Z'))
+    })
+}
+
+fn start_daemon(home: &Path) -> std::process::Child {
+    std::fs::create_dir_all(home.join("rt")).unwrap();
+    let mut child = ghostd(home)
+        .arg("run")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_secs(60) {
+        if ghostd(home)
+            .arg("status")
+            .output()
+            .unwrap()
+            .status
+            .success()
+        {
+            return child;
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    panic!("the daemon in {} never answered", home.display());
+}
+
+#[test]
+fn uninstall_stops_only_the_ghost_whose_data_it_removes_and_refuses_one_it_cannot_place() {
+    // Two Ghosts on one account, each in its own home. Removing the first stops the first
+    // and leaves the second running with its folders.
+    let tmp = tempfile::tempdir().unwrap();
+    let (one, two) = (tmp.path().join("one"), tmp.path().join("two"));
+    let mut a = start_daemon(&one);
+    let mut b = start_daemon(&two);
+    let out = ghostd(&one)
+        .args(["uninstall", "--all", "--yes"])
+        .output()
+        .unwrap();
+    let said = String::from_utf8_lossy(&out.stdout).into_owned();
+    let a_exited = a.try_wait().unwrap().is_some() || {
+        std::thread::sleep(Duration::from_secs(1));
+        a.try_wait().unwrap().is_some()
+    };
+    assert!(a_exited, "the first Ghost was not stopped: {said}");
+    assert!(alive(b.id()), "the second Ghost was signalled: {said}");
+    assert!(
+        ghostd(&two)
+            .arg("status")
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    assert!(two.join(".local/share/ghost/ghost.db").exists());
+    assert!(!one.join(".local/share/ghost").exists(), "{said}");
+
+    // A process named ghostd whose environment names no folder: Ghost can't tell whose it
+    // is, so it refuses, signals nothing and removes nothing.
+    let bin = tmp.path().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    // A script, so the process is named ghostd; it waits on a FIFO with bash's own `read`.
+    let fifo = bin.join("wait");
+    assert!(
+        Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap()
+            .success()
+    );
+    std::fs::write(
+        bin.join("ghostd"),
+        format!("#!/bin/bash\nread -t 60 <> {}\n", fifo.display()),
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(bin.join("ghostd"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    let mut stranger = Command::new(bin.join("ghostd"))
+        .env_clear()
+        .spawn()
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+    let out = ghostd(&two)
+        .args(["uninstall", "--all", "--yes"])
+        .output()
+        .unwrap();
+    let said = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(!out.status.success(), "{said}");
+    assert!(said.contains("can't tell whose Ghost process"), "{said}");
+    assert!(said.contains(&stranger.id().to_string()), "{said}");
+    assert!(
+        alive(stranger.id()) && alive(b.id()),
+        "something was signalled: {said}"
+    );
+    assert!(two.join(".local/share/ghost/ghost.db").exists(), "{said}");
+
+    let _ = stranger.kill();
+    let _ = stranger.wait();
+    let _ = nix::sys::signal::kill(
+        nix::unistd::Pid::from_raw(b.id() as i32),
+        nix::sys::signal::Signal::SIGTERM,
+    );
+    let _ = b.wait();
+}

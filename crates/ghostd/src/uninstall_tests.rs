@@ -243,7 +243,23 @@ fn only_the_ghost_whose_data_is_removed_is_stopped() {
         Some(PathBuf::from("/tmp/test-data"))
     );
     assert_eq!(data_dir_of(&env(&["PATH=/usr/bin"])), None);
-    // This test process is not a Ghost; nothing on this machine uses a fresh temp folder.
+    // Whose: the folder being removed, another's, or not known (never guessed).
+    let data = Path::new("/home/p/.local/share/ghost");
+    assert_eq!(whose(&env(&["HOME=/home/p"]), data), Whose::Ours);
+    assert_eq!(whose(&env(&["HOME=/home/q"]), data), Whose::Theirs);
+    assert_eq!(
+        whose(&env(&["HOME=/home/p", "GHOST_DATA_DIR=/tmp/t"]), data),
+        Whose::Theirs
+    );
+    assert_eq!(whose(&env(&["PATH=/usr/bin"]), data), Whose::Unknown);
+    assert_eq!(whose(b"", data), Whose::Unknown);
+    // The same folder spelled through a link is the same folder.
     let tmp = tempfile::tempdir().unwrap();
-    assert!(ghost_processes(tmp.path(), &[]).is_empty());
+    let real = tmp.path().join("real");
+    std::fs::create_dir_all(&real).unwrap();
+    std::os::unix::fs::symlink(&real, tmp.path().join("link")).unwrap();
+    let spelled = format!("GHOST_DATA_DIR={}", tmp.path().join("link").display());
+    assert_eq!(whose(&env(&[spelled.as_str()]), &real), Whose::Ours);
+    // Nothing on this machine uses a fresh temp folder.
+    assert!(ghost_processes(tmp.path(), &[]).0.is_empty());
 }

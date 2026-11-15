@@ -36,8 +36,10 @@ and asks per kind, No by default, the person's data and passwords last, each aft
 warning; `--dry-run` only lists; `--all` asks once (`--yes` not at all); `--keep-data` takes
 all but the data and the vault. It stops this Ghost first (its service, the app, which stops
 the daemon it carries and the floating room, then any `ghostd` left), only processes whose own
-environment gives them the data folder being removed, and refuses with a sentence if one will
-not stop. It needs no root and never runs `apt`: it ends with the one line the person runs
+environment gives them the data folder being removed (another Ghost on the same account, with
+folders of its own, is never signalled); a Ghost process whose environment it can't read or
+that names no folder makes it refuse before anything is signalled, since it never guesses; and
+it refuses with a sentence if one will not stop. It needs no root and never runs `apt`: it ends with the one line the person runs
 (`sudo apt remove heka-ghost-desktop`, or the AppImage to delete). It removes only paths the
 list names, under the person's home or runtime folder, never the folder itself, never through
 a link out of them (a link is removed as a link), refuses an empty or `/` home, and is

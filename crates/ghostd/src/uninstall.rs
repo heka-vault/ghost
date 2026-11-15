@@ -326,56 +326,94 @@ pub fn data_dir_of(environ: &[u8]) -> Option<PathBuf> {
     data.or_else(|| home.map(|h| h.join(".local/share/ghost")))
 }
 
-/// This user's Ghost processes whose data folder is `data` (the one about to be removed), but
-/// `skip`: the app (`heka-ghost-desktop`, whose name the kernel keeps as `heka-ghost-desk`)
-/// and every `ghostd`. Another Ghost on the same account with folders of its own (a test's, a
-/// second home) is not this one and is left running. A zombie is gone.
-pub fn ghost_processes(data: &Path, skip: &[i32]) -> Vec<Proc> {
+/// Whose a Ghost process is, from its own environment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Whose {
+    /// Its data folder is the one being removed.
+    Ours,
+    /// Another Ghost on this account, with folders of its own (a test's, a second home).
+    Theirs,
+    /// Its environment can't be read or names no data folder: Ghost can't tell.
+    Unknown,
+}
+
+fn same_folder(a: &Path, b: &Path) -> bool {
+    let real = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    a == b || real(a) == real(b)
+}
+
+/// From a process's `/proc/<pid>/environ` (empty when it could not be read).
+pub fn whose(environ: &[u8], data: &Path) -> Whose {
+    match data_dir_of(environ) {
+        None => Whose::Unknown,
+        Some(d) if same_folder(&d, data) => Whose::Ours,
+        Some(_) => Whose::Theirs,
+    }
+}
+
+/// One of this user's processes, when it is a Ghost (`heka-ghost-desktop`, whose name the
+/// kernel keeps as `heka-ghost-desk`, or a `ghostd`) and still alive (a zombie is gone):
+/// whether it is the app, and whose it is.
+fn ghost_process(pid: i32, data: &Path, me: Option<u32>) -> Option<(bool, Whose)> {
+    let dir = PathBuf::from(format!("/proc/{pid}"));
+    if std::fs::metadata(&dir).map(|m| m.uid()).ok() != me {
+        return None;
+    }
+    let comm = std::fs::read_to_string(dir.join("comm")).ok()?;
+    let app = match comm.trim() {
+        "heka-ghost-desk" => true,
+        "ghostd" => false,
+        _ => return None,
+    };
+    let status = std::fs::read_to_string(dir.join("status")).unwrap_or_default();
+    if status
+        .lines()
+        .any(|l| l.starts_with("State:") && l.contains('Z'))
+    {
+        return None;
+    }
+    let environ = std::fs::read(dir.join("environ")).unwrap_or_default();
+    Some((app, whose(&environ, data)))
+}
+
+/// This user's Ghost processes but `skip`, as (the ones whose data folder is `data`, the ones
+/// Ghost can't place). Another Ghost on the same account with folders of its own is in
+/// neither, and is never signalled.
+pub fn ghost_processes(data: &Path, skip: &[i32]) -> (Vec<Proc>, Vec<i32>) {
     let me = std::fs::metadata("/proc/self").map(|m| m.uid()).ok();
-    let mut out = Vec::new();
+    let (mut ours, mut unknown) = (Vec::new(), Vec::new());
     for e in std::fs::read_dir("/proc").into_iter().flatten().flatten() {
         let Some(pid) = e.file_name().to_str().and_then(|n| n.parse::<i32>().ok()) else {
             continue;
         };
-        if skip.contains(&pid) || std::fs::metadata(e.path()).map(|m| m.uid()).ok() != me {
+        if skip.contains(&pid) {
             continue;
         }
-        let comm = std::fs::read_to_string(e.path().join("comm")).unwrap_or_default();
-        let app = match comm.trim() {
-            "heka-ghost-desk" => true,
-            "ghostd" => false,
-            _ => continue,
-        };
-        let status = std::fs::read_to_string(e.path().join("status")).unwrap_or_default();
-        if status
-            .lines()
-            .any(|l| l.starts_with("State:") && l.contains('Z'))
-        {
-            continue;
+        match ghost_process(pid, data, me) {
+            Some((app, Whose::Ours)) => ours.push(Proc { pid, app }),
+            Some((_, Whose::Unknown)) => unknown.push(pid),
+            _ => {}
         }
-        let environ = std::fs::read(e.path().join("environ")).unwrap_or_default();
-        if data_dir_of(&environ).as_deref() != Some(data) {
-            continue;
-        }
-        out.push(Proc { pid, app });
     }
-    out
+    (ours, unknown)
 }
 
-fn term(pid: i32) {
-    let _ = nix::sys::signal::kill(
-        nix::unistd::Pid::from_raw(pid),
-        nix::sys::signal::Signal::SIGTERM,
-    );
+/// SIGTERM to `pid`, only if it is still a Ghost whose data folder is `data` (read again just
+/// before, so a process id the kernel gave to someone else is never signalled).
+fn term(pid: i32, data: &Path) {
+    let me = std::fs::metadata("/proc/self").map(|m| m.uid()).ok();
+    if matches!(ghost_process(pid, data, me), Some((_, Whose::Ours))) {
+        let _ = nix::sys::signal::kill(
+            nix::unistd::Pid::from_raw(pid),
+            nix::sys::signal::Signal::SIGTERM,
+        );
+    }
 }
 
-fn wait_gone(data: &Path, skip: &[i32], app_only: bool, within: Duration) -> Vec<Proc> {
+fn wait_gone(data: &Path, skip: &[i32], within: Duration) -> Vec<Proc> {
     let start = Instant::now();
     loop {
-        let left: Vec<Proc> = ghost_processes(data, skip)
-            .into_iter()
-            .filter(|p| !app_only || p.app)
-            .collect();
+        let (left, _) = ghost_processes(data, skip);
         if left.is_empty() || start.elapsed() >= within {
             return left;
         }
@@ -384,7 +422,10 @@ fn wait_gone(data: &Path, skip: &[i32], app_only: bool, within: Duration) -> Vec
 }
 
 /// Stop Ghost: its own service if it runs one, the app (which stops the daemon it carries
-/// and the floating room, ADR 0038), then any `ghostd` left. Err with a sentence when
+/// and the floating room, ADR 0038), then any `ghostd` left, only ever processes whose own
+/// environment gives them `data`, the folder being removed. A Ghost process Ghost can't place
+/// (its environment unreadable, or naming no folder) refuses the whole removal before
+/// anything is signalled: Ghost never guesses. Err with a sentence when it refuses or when
 /// something would not stop.
 pub fn stop_ghost(
     data: &Path,
@@ -392,30 +433,39 @@ pub fn stop_ghost(
     skip: &[i32],
     out: &mut dyn Write,
 ) -> Result<(), String> {
+    let (found, unknown) = ghost_processes(data, skip);
+    if !unknown.is_empty() {
+        let pids: Vec<String> = unknown.iter().map(|p| p.to_string()).collect();
+        return Err(format!(
+            "Ghost can't tell whose Ghost process {} is (its environment doesn't say which \
+             folders it uses), so nothing was stopped or removed. Quit it, then run ghostd \
+             uninstall again.",
+            pids.join(", ")
+        ));
+    }
     if ghost_api::deps::unit_active(leftovers::DAEMON_UNIT) {
         let _ = writeln!(out, "Stopping Ghost's service…");
         let _ = hands.systemctl(&["stop", leftovers::DAEMON_UNIT]);
     }
-    let found = ghost_processes(data, skip);
     if found.is_empty() {
         return Ok(());
     }
     if found.iter().any(|p| p.app) {
         let _ = writeln!(out, "Quitting the Ghost app…");
         for p in found.iter().filter(|p| p.app) {
-            term(p.pid);
+            term(p.pid, data);
         }
         // The app's Quit stops its daemon within 20 s (ADR 0038).
-        wait_gone(data, skip, false, Duration::from_secs(25));
+        wait_gone(data, skip, Duration::from_secs(25));
     }
-    let left = ghost_processes(data, skip);
+    let (left, _) = ghost_processes(data, skip);
     if !left.is_empty() {
         let _ = writeln!(out, "Stopping Ghost…");
         for p in &left {
-            term(p.pid);
+            term(p.pid, data);
         }
     }
-    let left = wait_gone(data, skip, false, Duration::from_secs(10));
+    let left = wait_gone(data, skip, Duration::from_secs(10));
     if left.is_empty() {
         return Ok(());
     }
