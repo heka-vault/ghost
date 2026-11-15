@@ -2,7 +2,8 @@
  * The rail: the desk posture's one way around (docs/design-system.md, The two postures). Ghost
  * at the top, alive (Wisp in the voice phase, the way to the conversation), then Today,
  * Watching and Apps with their labels under them, then the agents themselves (each its mark
- * and name, with its live state) and + to hire one, then the room, the microphone and Settings.
+ * and name, with its live state) and + to hire one, then the floating room's switch, the
+ * microphone and Settings.
  * Choosing an agent opens the conversation with it; its settings are under Settings › Agents
  * (the owner, 2026-11-12).
  *
@@ -10,16 +11,16 @@
  * the label and the count: “Today, 2 need you”.
  */
 import { useGhost } from "@ghost/ui";
-import { AudioWaveform, Blocks, CircleArrowUp, Eye, FlaskConical, MonitorUp, Plus, Settings2, Sun } from "lucide-react";
+import { AudioWaveform, Blocks, CircleArrowUp, Eye, FlaskConical, Plus, Settings2, Sun } from "lucide-react";
 import { type ReactNode, Suspense, lazy, useRef, useState } from "react";
 
 import { useDesign } from "../design/context";
-import { GhostChip, IconButton, LineGlyph, Tooltip, cx, formatShortcut, liveLabel, useLive, versionLine } from "../ui";
+import { GhostChip, IconButton, LineGlyph, Tooltip, cx, liveLabel, useLive, versionLine } from "../ui";
 import { type RailAgent, railAgents } from "./railAgents";
 import { ListeningSwitch, useListeningShortcut } from "./ListeningSwitch";
 import { notListening, notListeningSub, sessionWords, typedSession } from "./listening";
 import { markStateOf, moodOf } from "./mood";
-import { usePostureControl } from "./PostureContext";
+import { FloatingSwitch } from "./FloatingSwitch";
 import { hrefFor, navigate, usePath } from "./router";
 import { navMatch } from "./routes";
 import { nameOf, useToday } from "./today";
@@ -53,7 +54,6 @@ export function Rail() {
   const { status } = useGhost();
   const { connection, phase } = useLive();
   const today = useToday();
-  const posture = usePostureControl();
   useListeningShortcut();
   const [hover, setHover] = useState(false);
 
@@ -191,7 +191,7 @@ export function Rail() {
           </li>
         </ul>
         <div className="rail__controls">
-          <IconButton label={`Room (${formatShortcut("mod+.")})`} tooltipSide="right" icon={<MonitorUp />} onClick={() => posture.hold("room")} className="rail__room" />
+          <FloatingSwitch />
           {showSwitch && <ListeningSwitch rail />}
         </div>
         {design && DevMenu && (

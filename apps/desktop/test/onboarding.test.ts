@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { EMPTY, type Facts, firstSentence, MEET, micHealthyOf, parseSaved, inputName, pathToMoment, progressOf, requiredAt, routeAfter, STEPS, taskNumber, TASKS, timeLeft, wakeHelp } from "../src/screens/onboarding/state";
+import { answeredHere, EMPTY, type Facts, firstSentence, MEET, micHealthyOf, parseSaved, inputName, pathToMoment, progressOf, requiredAt, routeAfter, STEPS, taskNumber, TASKS, timeLeft, wakeHelp } from "../src/screens/onboarding/state";
 import { offerOnce } from "../src/app/floating";
 import { exchangeOf } from "../src/screens/onboarding/watch";
 
@@ -219,5 +219,26 @@ describe("the floating room's first-run offer (ADR 0059 as amended 2026-11-14)",
 describe("the microphone's name", () => {
   it("calls a sound card on the board the built-in microphone", () => {
     expect(inputName("alsa_input.pci-0000_00_1f.3.analog-stereo")).toBe("the built-in microphone");
+  });
+});
+
+describe("answeredHere: the moment in this window (the room view removed, 2026-11-14)", () => {
+  const ok = { support: { kind: "xwayland" }, settings: { on: true }, capture: "no" as const, sharing: "none" as const };
+  it("says nothing when Ghost floated, or nothing is known", () => {
+    expect(answeredHere(ok)).toBeNull();
+    expect(answeredHere(null)).toBeNull();
+  });
+  it("says why a desktop that can't float kept it here, in the shell's own words", () => {
+    expect(answeredHere({ ...ok, support: { kind: "no", why: "The floating room needs XWayland, and this desktop isn't running it." } })).toBe(
+      "Ghost answered here. On this desktop it can’t float over your work: the floating room needs XWayland, and this desktop isn't running it.",
+    );
+    expect(answeredHere({ ...ok, support: { kind: "no" } })).toBe("Ghost answered here. On this desktop it can’t float over your work.");
+  });
+  it("says a share kept it here, and never sends anyone to a room view", () => {
+    const shared = answeredHere({ ...ok, capture: "yes", sharing: "hidden" });
+    expect(shared).toBe("Ghost answered here, not over your work, because your screen is being shared.");
+    expect(answeredHere({ ...ok, capture: "yes", sharing: undefined })).toBe(shared);
+    expect(answeredHere({ ...ok, capture: "yes", sharing: "shown" })).toBeNull();
+    for (const s of [shared, answeredHere({ ...ok, settings: { on: false } })]) expect(s).not.toMatch(/room/i);
   });
 });

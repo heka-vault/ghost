@@ -1,5 +1,5 @@
 /**
- * The waiting list's words and checks (ADR 0029, ADR 0051), shared by Today, the room and the
+ * The waiting list's words and checks (ADR 0029, ADR 0051), shared by Today and the
  * tray: where an item came from, when a question stops waiting, whether an answer may be sent,
  * and what an action's answer means. Moved here from the retired What needs you screen.
  */

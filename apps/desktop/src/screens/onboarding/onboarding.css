@@ -160,6 +160,14 @@
 }
 @keyframes onb-moment-ring { from { opacity: 0.9; transform: scale(0.9); } to { opacity: 0; transform: scale(1.6); } }
 /* Where the moment happens, and its switch, under the title. */
+/* The moment in this window (WindowMoment): Ghost's state and its first line as it is spoken. */
+.onb-here { display: flex; flex-direction: column; align-items: center; gap: var(--space-3); max-width: 36rem; margin: var(--space-2) auto; text-align: center; }
+.onb-here__state { margin: 0; font-size: var(--text-md); font-weight: var(--weight-medium); color: var(--phase-listening); }
+.onb-here__state.is-thinking { color: var(--phase-thinking); }
+.onb-here__state.is-speaking { color: var(--phase-speaking); }
+.onb-here__state.is-waiting { color: var(--warn); }
+.onb-here__reply { margin: 0; font-size: var(--text-2xl); line-height: var(--leading-2xl); font-weight: var(--weight-medium); color: var(--text-1); overflow-wrap: anywhere; }
+.onb-here__unsaid { color: var(--text-3); }
 .onb-float { display: flex; flex-direction: column; align-items: center; gap: var(--space-2); margin: var(--space-2) 0; color: var(--text-1); }
 .onb-try__bar { width: 100%; max-width: var(--field-control-width); margin: var(--space-2) 0; }
 .onb-try__type { margin-top: var(--space-2); }

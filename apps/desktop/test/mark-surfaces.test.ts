@@ -17,7 +17,7 @@ const html = (el: ReturnType<typeof createElement>) => renderToStaticMarkup(el);
 const live = (el: ReturnType<typeof createElement>) =>
   html(createElement(GhostProvider, { client: {} as Parameters<typeof GhostProvider>[0]["client"], children: el }));
 
-describe("Ghost's own glyph in a list, a header and the room view", () => {
+describe("Ghost's own glyph in a list, a header and the conversation", () => {
   it("is the lit tile, not the accent's hue", () => {
     for (const size of ["sm", "md", "lg", "xl"] as const) {
       const out = html(createElement(LineGlyph, { slug: "ghost", name: "Ghost", size }));
@@ -26,7 +26,7 @@ describe("Ghost's own glyph in a list, a header and the room view", () => {
     }
   });
 
-  it("puts the session's and the room view's Wisp on the night in every state, lit in the state's colour", () => {
+  it("puts the session's Wisp on the night in every state, lit in the state's colour", () => {
     for (const state of ["speaking", "you", "working", "hold", "listening", "ending", "phone", "offline"] as const) {
       const out = live(createElement(Presence, { state, slug: "ghost", size: 120 }));
       expect(out).toContain("presence--ghost");

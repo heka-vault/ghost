@@ -4,7 +4,7 @@
  * The thread stays at its end while the operator is there, and lets go only when they scroll
  * up themselves: a wheel or touch moving up, a key (PageUp, ArrowUp, Home, Shift+Space) or a
  * drag on the scrollbar, then a scroll up within `INTENT_MS`. A scroll up that nobody asked
- * for never lets go: the room view scrolling the panel to its top, the browser clamping or
+ * for never lets go: the browser clamping or
  * anchoring the scroll as content above shrinks, a smooth scroll cut short. Reaching the end
  * pins again; a new session, the operator's own words and a change waiting for their okay
  * always follow. Pure, so it is tested without a browser.
