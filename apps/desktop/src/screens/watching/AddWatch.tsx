@@ -88,7 +88,7 @@ export function AddWatchDialog({ open, onClose, agents }: { open: boolean; onClo
       dismissible={!busy}
       size="md"
       title="Add a watch"
-      description="Ghost reads one of an app’s lists on its own and tells you what’s new. It sets the watch up and asks for your okay first."
+      description="Ghost reads one of an app’s lists on its own and tells you what’s new. It sets the watch up and asks for your yes first."
       footer={
         <>
           <Button variant="ghost" onClick={onClose} disabled={busy}>

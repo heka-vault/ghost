@@ -5,7 +5,7 @@
  * already has (`ghost_schedule_manage`, `ghost_watch_manage`, ADR 0047, ADR 0052) through the
  * gate, which asks where the operator's permissions or ADR 0052's defaults say so. Nothing here
  * writes a schedule or a watch, chooses one, or reads the words: the window sends them and shows
- * what came back. A change waiting for a yes is the one `PendingChange` card, whose Confirm calls
+ * what came back. A change waiting for a yes is the one `PendingChange` card, whose Yes calls
  * `client.confirm()` and nothing else (ADR 0013). Ghost's reply is shown in place, and the list
  * is read again each time one arrives.
  */
@@ -154,13 +154,13 @@ export function AskGhost({ onReply }: { onReply: () => void }) {
               disabled={!online}
               onConfirm={() => void client.confirm()}
               onCancel={() => void client.cancel()}
-              // ADR 0070: the same decision made to stick, behind More choices; the click is the
+              target={pending.target}
+              // ADR 0070: the same decision made to stick, on the card; the click is the
               // operator's own and calls `decideAlways` and nothing else.
               always={pending.always}
               onAlways={(choice) => {
-                const scope = pending.always?.scope ?? "this tool";
                 client.decideAlways(pending.id, choice).then(
-                  () => toast(alwaysDone(choice, scope)),
+                  () => toast(alwaysDone(choice, pending.always)),
                   (e) => setError(errorText(e)),
                 );
               }}

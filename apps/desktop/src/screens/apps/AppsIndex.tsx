@@ -84,7 +84,7 @@ export function AppsIndex() {
     <Page
       width="default"
       title="Apps"
-      description="What Ghost connects to. It uses everything an app offers and tells you what it changed. Block a tool or have Ghost ask first on the app’s page, or for everything on Permissions."
+      description="What Ghost connects to. It uses everything an app offers and tells you what it changed. Set a tool to Never or Ask first on the app’s page, or for everything on Permissions."
       actions={
         <Button variant="secondary" href={hrefFor("/settings/permissions")} leadingIcon={<ShieldCheck />}>
           Permissions

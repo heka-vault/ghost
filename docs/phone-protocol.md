@@ -167,7 +167,7 @@ four routes above that list `id` in their body take one. `/waiting/ack` and `/wa
 moving the time it comes back. `/seen` and `/ring` are keyed by their `alert_id` and `ring_id`: a second
 one answers `{ok: false}`.
 
-The phone answers a change with plain Yes and No only. Making a decision stick as a rule ("Yes, and don't ask again", ADR 0070) is the desktop's alone for now: there is no phone route for it, and a pending change's `always` field, when the status carries one, is for the desktop's card and is not offered on the phone.
+The phone answers a change with plain Yes and No only. Making a decision stick as a rule (Always or Never on the desktop's card, ADR 0070) is the desktop's alone for now: there is no phone route for it, and a pending change's `always` field, when the status carries one, is for the desktop's card and is not offered on the phone.
 
 A `POST /offer` without `pc_id` starts a session; with the live session's `pc_id` it renegotiates. A
 second `POST /offer` without `pc_id` while the phone's own session is still running gets 409 `busy` too:

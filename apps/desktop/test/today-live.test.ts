@@ -53,11 +53,17 @@ describe("withoutLive: nothing shows twice on Today", () => {
     answer: [item("question:q1", { question: q("question:q1", "open", "1") }), item("question:q2", { question: q("question:q2", "open", "2") })],
     know: [item("watch:x")],
   };
-  it("leaves out the change waiting in the session and the question the strip offers", () => {
+  it("leaves out the change waiting in the session, which the strip shows", () => {
     const out = withoutLive(needs, { id: "c1" }, { key: "question:q2" });
     expect(out.decide.map((i) => i.key)).toEqual(["gate:2"]);
-    expect(out.answer.map((i) => i.key)).toEqual(["question:q1"]);
+    // The strip shows the change, not the question: the question stays in Answer, or it would be nowhere.
+    expect(out.answer.map((i) => i.key)).toEqual(["question:q1", "question:q2"]);
     expect(out.know).toBe(needs.know);
+  });
+  it("leaves out the question the strip offers when no change waits", () => {
+    const out = withoutLive(needs, null, { key: "question:q2" });
+    expect(out.decide.map((i) => i.key)).toEqual(["gate:1", "gate:2"]);
+    expect(out.answer.map((i) => i.key)).toEqual(["question:q1"]);
   });
   it("changes nothing outside a session", () => {
     expect(withoutLive(needs, null, null)).toBe(needs);

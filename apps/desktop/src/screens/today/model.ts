@@ -6,6 +6,7 @@
  * Every line here is text from the operator's own Ghost, but titles, answers and summaries can
  * carry an outside system's words: they are shown as text, never as markup.
  */
+import { plainSummary } from "../../ui/always";
 import type { AppView, AuditEntry, ModelCheckView, QuestionView, ScheduleRunInfo, WaitingItemView } from "@ghost/client-ts";
 
 // ---------------------------------------------------------------- what needs you
@@ -137,10 +138,13 @@ export function runAnswer(r: ScheduleRunInfo): string | null {
 
 /** Why a run started, in a few words: its schedule, a watch, or the operator. */
 export function runReason(r: ScheduleRunInfo): string {
-  if (r.source.startsWith("watch:")) return `for the ${r.source.slice(6)} watch`;
+  if (r.source.startsWith("watch:")) return "for a watch";
   if (r.source === "run_now") return "when asked";
   return "on its schedule";
 }
+
+/** A change's summary as a row says it: what was done first, the target behind the row (`plainSummary`). */
+export const plainChange = plainSummary;
 
 /** The agent behind an audit entry: the conversation it was made in, Ghost when none. */
 function auditAgent(a: AuditEntry): string {
@@ -164,7 +168,8 @@ export function momentsOf(r: DayRecords, day: Date): Moment[] {
   for (const a of r.audit) {
     if (a.status === "pending" || !inDay(a.created_at, b)) continue;
     const tone: MomentTone = a.status === "executed" ? "ok" : a.status === "failed" ? "failed" : "quiet";
-    out.push({ id: `c-${a.id}`, kind: "change", at: a.created_at, agent: auditAgent(a), title: a.summary, tone, mono: `${a.source}.${a.operation}`, detail: tone === "quiet" ? changeAside(a.status) : null });
+    const plain = plainChange(a.summary);
+    out.push({ id: `c-${a.id}`, kind: "change", at: a.created_at, agent: auditAgent(a), title: plain.what, tone, mono: [plain.on, `${a.source}.${a.operation}`].filter(Boolean).join(" · "), detail: tone === "quiet" ? changeAside(a.status) : null });
   }
   for (const run of r.runs) {
     const at = run.started_at ?? run.scheduled_for;

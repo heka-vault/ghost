@@ -19,7 +19,8 @@ import { loadDay, useToday } from "../../app/today";
 import { useDesign } from "../../design/context";
 import { Button, IconButton, Notice, Page, Skeleton, errorText, useLive, useSetupPromptHere } from "../../ui";
 import { appsDownOf, type DayCounts, type Moment, cluster, countsOf, dayLabel, headline, isSameDay, momentsOf, shiftDay, SLOW_FIRST_WORD_MS } from "./model";
-import { Now } from "./Needs";
+import { liveNeeds } from "./live";
+import { Now, WorkingNow } from "./Needs";
 import { Instruments } from "./Signal";
 import { TalkBar, useLiveSession } from "./TalkBar";
 import { Timeline } from "./Timeline";
@@ -39,7 +40,9 @@ export default function TodayScreen(_: RouteProps) {
   const isToday = isSameDay(day, new Date());
   const past = usePastDay(isToday ? null : day, client);
   const moments: Moment[] = isToday ? today.moments : past.moments;
-  const counts: DayCounts = isToday ? today.counts : countsOf({ decide: [], answer: [], know: [] }, past.moments);
+  // Counted once: the session's own change is in the count even before the waiting list has it.
+  const needs = liveNeeds(today.needs, live.pending);
+  const counts: DayCounts = isToday ? { ...today.counts, decide: needs.decide.length, answer: needs.answer.length } : countsOf({ decide: [], answer: [], know: [] }, past.moments);
   const h = headline(counts, isToday, {
     failedChanges: today.counts.failedChanges,
     failedCalls: today.tally.failed,
@@ -113,6 +116,9 @@ export default function TodayScreen(_: RouteProps) {
             <AlertTriangle size={14} aria-hidden /> {h.problems.join(" · ")}
           </p>
         )}
+
+        {/* What is working right now: never one step away (2026-11-14). */}
+        {isToday && <WorkingNow />}
 
         {/* The instruments, one step away, once there is something true to say: a run, a change, a call or an app. */}
         {isToday && (working > 0 || counts.runs + counts.changes > 0 || today.reach.apps > 0 || today.tally.calls > 0) && <Instruments forceOpen={forceOpen} />}
