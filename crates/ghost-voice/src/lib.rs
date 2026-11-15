@@ -37,6 +37,7 @@ pub mod perf;
 pub mod pipeline;
 pub mod prompt;
 pub mod realtime;
+pub mod room;
 pub mod rtvi;
 pub mod speaking;
 pub mod spoken;

@@ -442,6 +442,8 @@ pub type Reach = Arc<dyn Fn(&Profile) -> Vec<ToolSource> + Send + Sync>;
 
 /// The waiting list's key for the realtime voice's note (ADR 0063).
 pub const REALTIME_NOTE_KEY: &str = "voice:realtime";
+/// How recent the passive segment must be to be the one that woke the session (ADR 0071).
+pub(crate) const WAKE_LEVEL_FOR: Duration = Duration::from_secs(10);
 
 pub struct Daemon {
     pub cfg: Mutex<GhostdSettings>,
@@ -512,6 +514,8 @@ pub struct Daemon {
     pub mic: Arc<Mic>,
     /// What the microphone path is and how it is doing (ADR 0064).
     pub(crate) mic_health: Arc<Mutex<crate::microphone::Health>>,
+    /// The last passive segment read with words, as its level (ADR 0071).
+    wake_level: Arc<Mutex<Option<(Instant, f64)>>>,
     /// The plan and when it was made: the facts are read again after `PLAN_FOR`.
     mic_plan: Mutex<Option<(Instant, crate::microphone::Plan)>>,
 }
@@ -589,6 +593,7 @@ impl Daemon {
             log_mirror: LogMirror::default(),
             mic: Arc::new(Mic::new()),
             mic_health: Arc::new(Mutex::new(crate::microphone::Health::default())),
+            wake_level: Arc::new(Mutex::new(None)),
             mic_plan: Mutex::new(None),
         }
     }
@@ -1129,12 +1134,29 @@ impl Daemon {
 
     // --- the wake ------------------------------------------------------------------------
 
-    fn stt_factory(models: &Arc<Models>) -> SttFactory {
+    fn stt_factory(&self, models: &Arc<Models>) -> SttFactory {
         let stt = models.stt.clone();
+        // The level of each passive segment read with words, the last one only, as a
+        // number in memory (ADR 0071): the one that woke Ghost tells the session how loud
+        // the person is. Never the words or the audio.
+        let heard = self.wake_level.clone();
         Arc::new(move |params| {
-            Box::new(ParakeetStt::new(stt.clone(), None, params, 0.0))
+            let heard = heard.clone();
+            let on_level: ghost_voice::stt::OnLevel = Arc::new(move |db| {
+                *lock(&heard) = Some((Instant::now(), db));
+            });
+            Box::new(ParakeetStt::new(stt.clone(), None, params, 0.0).with_on_level(Some(on_level)))
                 as Box<dyn ghost_voice::frames::Stage>
         })
+    }
+
+    /// The person's level from the segment that woke Ghost (ADR 0071): the last passive
+    /// segment read with words, taken once, if it ended within `WAKE_LEVEL_FOR`.
+    pub(crate) fn take_wake_level(&self) -> Option<f64> {
+        lock(&self.wake_level)
+            .take()
+            .filter(|(at, _)| at.elapsed() <= WAKE_LEVEL_FOR)
+            .map(|(_, db)| db)
     }
 
     /// The passive pipeline's input (ADR 0064): the wake's device from the plan, read
@@ -1204,6 +1226,7 @@ impl Daemon {
                 match problem {
                     crate::microphone::Problem::Dropping { .. } => "dropping",
                     crate::microphone::Problem::Deaf { .. } => "deaf",
+                    crate::microphone::Problem::Noisy => "noisy",
                 },
             ),
         );
@@ -1361,7 +1384,7 @@ impl Daemon {
         );
         let listener = Arc::new(WakeListener::new(
             self.voice(),
-            Self::stt_factory(models),
+            self.stt_factory(models),
             phrases,
             self.passive_media(),
             cfg.wake_fuzzy,
@@ -1482,7 +1505,7 @@ impl Daemon {
         };
         let listener = Arc::new(WakeListener::new(
             voice,
-            Self::stt_factory(models),
+            self.stt_factory(models),
             detector_phrases(),
             self.passive_media(),
             cfg.wake_fuzzy,

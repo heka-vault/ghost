@@ -472,6 +472,7 @@ fn world_setup(setup: Setup) -> World {
                 })
             }),
             on_read: None,
+            on_too_loud: None,
         },
         wake_phrases: None,
         wake_fuzzy: 0.0,

@@ -75,6 +75,10 @@ count "dropped while Ghost speaks (E2)" 'while Ghost speaks'
 count "barge-ins (E1)" 'barge-in on interim'
 count "echo warm-up drops after the wake (G1)" "inside the canceller's warm-up"
 count "heard nothing in a loud segment (H)" 'heard nothing in a'
+count "room: segments let go (I1)" 'room: let go a'
+count "room: quiet segments taken for the name (I4)" 'room: a quiet segment calls Ghost'
+count "room: the person stopped under the room (I2)" 'room: the person stopped under the room'
+count "room: too loud for this microphone (I5)" 'room: too loud for this microphone'
 count "wake hits under the threshold, checked" 'under 0.60: Parakeet checks it'
 count "  of which not confirmed (final)" 'wake: not confirmed$'
 echo "what the check read on turned-down hits:"
