@@ -33,6 +33,7 @@ pub mod passwords;
 pub mod permission_choices;
 pub mod permissions;
 pub mod policy;
+pub mod policy_file;
 pub mod provenance;
 pub mod questions;
 pub mod reach;

@@ -4550,6 +4550,13 @@
       "PolicyUpdate": {
         "description": "Either the raw TOML, or the routes rendered into it (the permissions have their own\nroute, `PUT /permissions`).",
         "properties": {
+          "base": {
+            "description": "The file as the editor opened it (ADR 0070). With `text`: when the file has changed\nsince (a rule set from a decision, another window), the save is refused with a 409\nrather than writing over that change.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "routes": {
             "oneOf": [
               {

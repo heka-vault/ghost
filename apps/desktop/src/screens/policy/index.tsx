@@ -272,7 +272,8 @@ export default function PermissionsScreen(_: RouteProps) {
     setSaveError(null);
     const before = policy;
     try {
-      const r = await client.updatePolicy({ text });
+      // `base`: the file as opened, so a rule set meanwhile (a card's “don’t ask again”) is never written over (ADR 0070).
+      const r = await client.updatePolicy({ text, base: before.text });
       adopt(r.policy);
       client.sources().then(setSources).catch(() => {});
       toast({

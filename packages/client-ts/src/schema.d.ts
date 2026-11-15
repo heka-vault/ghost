@@ -3669,6 +3669,12 @@ export interface components {
          *     route, `PUT /permissions`).
          */
         PolicyUpdate: {
+            /**
+             * @description The file as the editor opened it (ADR 0070). With `text`: when the file has changed
+             *     since (a rule set from a decision, another window), the save is refused with a 409
+             *     rather than writing over that change.
+             */
+            base?: string | null;
             routes?: components["schemas"]["RoutesView"] | null;
             text?: string | null;
         };

@@ -1311,16 +1311,12 @@ fn routes_table(v: &RoutesView) -> toml::Table {
     t
 }
 
-fn write_policy(deps: &Deps, text: &str) -> ApiResult<()> {
-    if let Some(parent) = deps.policy_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| ApiError::internal(e.to_string()))?;
-    }
-    let text = if text.ends_with('\n') {
+fn with_newline(text: &str) -> String {
+    if text.ends_with('\n') {
         text.to_string()
     } else {
         format!("{text}\n")
-    };
-    std::fs::write(&deps.policy_path, text).map_err(|e| ApiError::internal(e.to_string()))
+    }
 }
 
 #[utoipa::path(get, path = "/policy", operation_id = "get_policy_policy_get", tag = "policy", summary = "Get Policy",
@@ -1337,31 +1333,46 @@ async fn put_policy(
     State(deps): State<SharedDeps>,
     Body(update): Body<PolicyUpdate>,
 ) -> ApiResult<Json<PolicyResult>> {
-    let text = match update.text {
-        Some(text) => {
-            // never a file that won't read
-            AutonomyPolicy::parse(&text, "request")
-                .map_err(|e| ApiError::unprocessable(e.to_string()))?;
-            text
-        }
-        None => {
-            let current = policy_view(&deps)?;
-            let Some(routes) = update.routes else {
-                return Ok(Json(PolicyResult {
-                    policy: current,
-                    applied: false,
-                }));
-            };
-            let table = routes_table(&routes);
-            let parsed = RoutePolicy::parse(Some(&table), "routes")
-                .map_err(|e| ApiError::unprocessable(e.to_string()))?;
-            // The routes editor doesn't know the rest of the file: only [routes] changes,
-            // and everything else stays as written, comments included.
-            write_routes(&current.text, &parsed.to_toml())
-                .map_err(|e| ApiError::unprocessable(e.to_string()))?
-        }
-    };
-    write_policy(&deps, &text)?;
+    // The one lock every writer of policy.toml takes (ADR 0070), with the file read again
+    // under it: a whole-file save made from an older copy is refused, and the routes editor
+    // rewrites [routes] in the file as it is now.
+    let wrote = ghost_core::policy_file::edit(
+        &deps.policy_path,
+        |current, _| -> ApiResult<Option<String>> {
+            match &update.text {
+                Some(text) => {
+                    // never a file that won't read
+                    AutonomyPolicy::parse(text, "request")
+                        .map_err(|e| ApiError::unprocessable(e.to_string()))?;
+                    if update.base.as_ref().is_some_and(|base| base != current) {
+                        return Err(ApiError::conflict(
+                            "The file changed since you opened it (a rule was set meanwhile). Nothing was saved: reload it and make your edit again.",
+                        ));
+                    }
+                    Ok(Some(with_newline(text)))
+                }
+                None => {
+                    let Some(routes) = &update.routes else {
+                        return Ok(None);
+                    };
+                    let table = routes_table(routes);
+                    let parsed = RoutePolicy::parse(Some(&table), "routes")
+                        .map_err(|e| ApiError::unprocessable(e.to_string()))?;
+                    // The routes editor doesn't know the rest of the file: only [routes] changes,
+                    // and everything else stays as written, comments included.
+                    write_routes(current, &parsed.to_toml())
+                        .map(|t| Some(with_newline(&t)))
+                        .map_err(|e| ApiError::unprocessable(e.to_string()))
+                }
+            }
+        },
+    )?;
+    if wrote.is_none() {
+        return Ok(Json(PolicyResult {
+            policy: policy_view(&deps)?,
+            applied: false,
+        }));
+    }
     deps.control
         .reload_policy()
         .map_err(|e| ApiError::internal(e.to_string()))?;

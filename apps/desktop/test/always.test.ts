@@ -107,3 +107,16 @@ describe("the mock daemon's sticky decisions", () => {
     expect(await daemon("passive").handle("GET", "/permissions/choices", q, null)).toEqual([]);
   });
 });
+
+describe("the TOML view never writes over a rule set meanwhile", () => {
+  it("refuses a save made from an older copy of the file", async () => {
+    const q = new URLSearchParams();
+    const s = scenarioByName("always");
+    const d = new MockDaemon(s, composeFixtures(s), {});
+    const opened = ((await d.handle("GET", "/policy", q, null)) as PolicyView).text;
+    const change = ((await d.handle("GET", "/waiting", q, null)) as WaitingView).items.find((i) => i.change)!.change!;
+    await d.handle("POST", `/proposals/${change.id}/always`, q, { choice: "block" });
+    await expect(d.handle("PUT", "/policy", q, { text: opened, base: opened })).rejects.toThrow(/changed since you opened it/);
+    expect(((await d.handle("GET", "/policy", q, null)) as PolicyView).permissions.block).toContain("github.close");
+  });
+});

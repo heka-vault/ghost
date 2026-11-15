@@ -1723,6 +1723,11 @@ pub struct PolicyView {
 pub struct PolicyUpdate {
     #[serde(default)]
     pub text: Option<String>,
+    /// The file as the editor opened it (ADR 0070). With `text`: when the file has changed
+    /// since (a rule set from a decision, another window), the save is refused with a 409
+    /// rather than writing over that change.
+    #[serde(default)]
+    pub base: Option<String>,
     #[serde(default)]
     pub routes: Option<RoutesView>,
 }

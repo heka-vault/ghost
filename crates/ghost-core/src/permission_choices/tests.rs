@@ -174,6 +174,7 @@ fn the_first_write_backs_the_file_up_once_and_keeps_its_mode() {
     let names: Vec<String> = fs::read_dir(dir.path())
         .unwrap()
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|n| !n.ends_with(".lock"))
         .collect();
     assert_eq!(names.len(), 2, "{names:?}");
 }
@@ -440,6 +441,8 @@ fn the_writer_is_reached_only_from_the_control_apis_operator_routes() {
         "ghost-api/tests/permission_choices.rs",
         "ghost-core/src/permission_choices.rs",
         "ghost-core/src/permission_choices/tests.rs",
+        // The lock's own tests interleave this writer with the older ones.
+        "ghost-core/src/policy_file.rs",
     ];
     for c in &callers {
         assert!(allowed.contains(&c.as_str()), "{c} reaches the rule writer");

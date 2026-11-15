@@ -20,12 +20,12 @@
 //! order, spacing, other tables. It refuses a file that does not read, refuses an edit
 //! whose result reads as anything but the same permissions with that one rule more (or
 //! less), backs the file up before its first write, and writes atomically (a temporary
-//! file beside it, synced, renamed over it, with the original's mode).
+//! file beside it, synced, renamed over it, with the original's mode). It takes the one lock
+//! every writer of the file takes (`policy_file`) and reads the file again under it.
 
 use std::fs;
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::sync::{LazyLock, Mutex};
+use std::sync::LazyLock;
 
 use chrono::{DateTime, Utc};
 use regex::Regex;
@@ -234,9 +234,6 @@ pub fn offer(
 
 // --- the writer ------------------------------------------------------------------------------
 
-/// One writer at a time in this process: read, edit and rename are one step.
-static WRITING: Mutex<()> = Mutex::new(());
-
 fn refused(s: impl Into<String>) -> ChoiceError {
     ChoiceError::Refused(s.into())
 }
@@ -247,11 +244,13 @@ fn io(path: &Path, e: impl std::fmt::Display) -> ChoiceError {
 
 /// The file's text, "" when it is not there yet.
 fn read(path: &Path) -> Result<(String, bool), ChoiceError> {
-    match fs::read_to_string(path) {
-        Ok(t) => Ok((t, true)),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok((String::new(), false)),
-        Err(e) => Err(io(path, e)),
-    }
+    crate::policy_file::read(path).map_err(|e| io(path, e))
+}
+
+/// The one lock every writer of policy.toml takes (`policy_file`), held from the read to
+/// the write, so this writer always edits the file as it is now.
+fn lock(path: &Path) -> Result<crate::policy_file::Locked, ChoiceError> {
+    crate::policy_file::lock(path).map_err(|e| io(path, e))
 }
 
 fn parse(text: &str, path: &Path) -> Result<(AutonomyPolicy, toml_edit::Document), ChoiceError> {
@@ -310,31 +309,9 @@ fn back_up(path: &Path, existed: bool) -> Result<(), ChoiceError> {
     Ok(())
 }
 
-/// Write `text` over `path` all at once: a temporary file beside it, synced, renamed.
+/// Write `text` over `path` all at once (`policy_file::replace`), holding the lock.
 fn replace(path: &Path, text: &str) -> Result<(), ChoiceError> {
-    let dir = path.parent().filter(|d| !d.as_os_str().is_empty());
-    if let Some(dir) = dir {
-        fs::create_dir_all(dir).map_err(|e| io(dir, e))?;
-    }
-    let mode = fs::metadata(path).ok().map(|m| m.permissions());
-    let name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let tmp = path.with_file_name(format!(".{name}.{}.tmp", std::process::id()));
-    let result = (|| {
-        let mut f = fs::File::create(&tmp).map_err(|e| io(&tmp, e))?;
-        f.write_all(text.as_bytes()).map_err(|e| io(&tmp, e))?;
-        f.sync_all().map_err(|e| io(&tmp, e))?;
-        if let Some(mode) = &mode {
-            fs::set_permissions(&tmp, mode.clone()).map_err(|e| io(&tmp, e))?;
-        }
-        fs::rename(&tmp, path).map_err(|e| io(path, e))
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(&tmp);
-    }
-    result
+    crate::policy_file::replace(path, text).map_err(|e| io(path, e))
 }
 
 fn permissions_table(
@@ -374,9 +351,26 @@ fn index_of(array: &toml_edit::Array, rule: &Rule) -> Option<usize> {
 /// Add `rule` to `choice`'s list in the file at `path`. A rule already in that list is not
 /// added twice (`already`). Everything outside the one array stays byte for byte.
 pub fn add_rule(path: &Path, choice: Choice, rule: &Rule) -> Result<Written, ChoiceError> {
-    let _one = WRITING.lock().unwrap_or_else(|e| e.into_inner());
+    add_rule_checked(path, choice, rule, None)
+}
+
+/// `add_rule`, with the allow refused under the same lock when a more careful rule of the
+/// file as it is now would overrule it for this call (`offer`): no other writer can slip an
+/// `ask` rule in between the check and the write.
+fn add_rule_checked(
+    path: &Path,
+    choice: Choice,
+    rule: &Rule,
+    call: Option<(&str, &str, &Map<String, Value>)>,
+) -> Result<Written, ChoiceError> {
+    let _held = lock(path)?;
     let (text, existed) = read(path)?;
     let (before, mut doc) = parse(&text, path)?;
+    if let (Choice::Allow, Some((source, operation, args))) = (choice, call)
+        && offer(&before.permissions, source, operation, args).is_some_and(|o| !o.allow)
+    {
+        return Err(refused(HELD));
+    }
     if before.permissions.list(choice.list()).contains(rule) {
         return Ok(Written {
             already: true,
@@ -451,7 +445,7 @@ pub fn remove_rule(
     rule: &Rule,
     written: Written,
 ) -> Result<bool, ChoiceError> {
-    let _one = WRITING.lock().unwrap_or_else(|e| e.into_inner());
+    let _held = lock(path)?;
     let (text, existed) = read(path)?;
     if !existed {
         return Ok(false);
@@ -512,14 +506,7 @@ pub fn set_from_decision(
     let rule = rule_for(source, operation).ok_or_else(|| {
         refused("Ghost can’t name this tool in a rule, so it can’t remember this choice. Decide it with Yes or No.")
     })?;
-    let (text, _) = read(path)?;
-    let (policy, _) = parse(&text, path)?;
-    if choice == Choice::Allow
-        && offer(&policy.permissions, source, operation, args).is_some_and(|o| !o.allow)
-    {
-        return Err(refused(HELD));
-    }
-    let written = add_rule(path, choice, &rule)?;
+    let written = add_rule_checked(path, choice, &rule, Some((source, operation, args)))?;
     let scope = scope_words(source, operation);
     let row = store.add_permission_choice(&NewChoice {
         rule: rule.to_string(),

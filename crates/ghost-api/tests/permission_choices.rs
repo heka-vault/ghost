@@ -256,3 +256,52 @@ async fn the_request_cannot_name_the_rule() {
     assert!(r.status == 422 || !file(&w).contains("\"*\""));
     assert!(!file(&w).contains("\"*\""));
 }
+
+#[tokio::test]
+async fn the_three_writers_never_lose_each_others_rules() {
+    // ADR 0070: PUT /permissions, PUT /policy and a decision made to stick share one lock and
+    // read the file again under it. Interleaved, both changes land or one is cleanly refused.
+    let w = World::new();
+    set_policy(&w, "# mine\n[permissions]\nmode = \"ask\"\n");
+    let c = w.client();
+    let sub = pend(&w.gate, "s1").await;
+    let opened = c.get("/policy").await["text"].as_str().unwrap().to_string();
+    let always_path = format!("/proposals/{}/always", sub.proposal.id);
+    let (a, b) = tokio::join!(
+        c.post(&always_path, Some(json!({"choice": "allow"}))),
+        c.put(
+            "/permissions",
+            json!({"set": {"rule": "gmail.delete_*", "level": "block"}}),
+        ),
+    );
+    assert_eq!(a.status, 200, "{}", a.detail());
+    assert_eq!(b.status, 200, "{}", b.detail());
+    let p = AutonomyPolicy::load(&w.policy_path).unwrap();
+    let texts = |l: &[ghost_core::permissions::Rule]| -> Vec<String> {
+        l.iter().map(ToString::to_string).collect()
+    };
+    assert!(texts(&p.permissions.allow).contains(&"fake.nuke".to_string()));
+    assert!(texts(&p.permissions.block).contains(&"gmail.delete_*".to_string()));
+
+    // The TOML view saving from the copy it opened before those writes is refused, not
+    // written over them.
+    let stale = c
+        .put("/policy", json!({"text": opened, "base": opened}))
+        .await;
+    assert_eq!(stale.status, 409);
+    assert!(stale.detail().contains("changed since you opened it"));
+    let now = file(&w);
+    assert!(
+        now.contains("fake.nuke") && now.contains("gmail.delete_*"),
+        "{now}"
+    );
+    // Saved from the file as it is now, it goes through.
+    let fresh = c
+        .put(
+            "/policy",
+            json!({"text": format!("{now}# noted\n"), "base": now}),
+        )
+        .await;
+    assert_eq!(fresh.status, 200, "{}", fresh.detail());
+    assert!(file(&w).contains("fake.nuke"));
+}

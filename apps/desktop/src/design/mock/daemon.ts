@@ -2005,6 +2005,8 @@ export class MockDaemon {
       if (u.text != null) {
         // As the daemon does: the file is read before it is written, and refused when it can't be.
         const permissions = readPolicyText(u.text, this.policy.path);
+        // ADR 0070: a save made from an older copy of the file is refused, never written over a rule set meanwhile.
+        if (u.base != null && u.base !== this.policy.text) throw new HttpError(409, "The file changed since you opened it (a rule was set meanwhile). Nothing was saved: reload it and make your edit again.");
         this.policy = { ...this.policy, text: u.text, exists: true, permissions };
         this.appsChanged(null);
       } else if (u.routes) {
