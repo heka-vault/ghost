@@ -11,8 +11,9 @@ on screen while the patch around Wisp, which did change, was redrawn dark: a dar
 behind Wisp as it left. A keyframe every two to four frames redraws the whole frame often
 enough that nothing stale builds up; ImageMagick, ffmpeg and sharp don't expose that, and
 Pillow's binding of the same libwebp does (`kmin`, `kmax`). At quality 60 the file is about
-the size it was (4.5 MB on 2026-11-14 against 3.8 MB, for a capture with more real frames). The frame times are kept whole: 30 a
-second is 33 or 34 ms each, not ImageMagick's 3 centiseconds, which ran the loop 10% fast.
+the size it was (4.5 MB on 2026-11-14 against 3.8 MB, for a capture with more real frames).
+The frame times are kept whole: 30 a second is 33 or 34 ms each, not ImageMagick's 3
+centiseconds, which ran the loop 10% fast.
 """
 
 from __future__ import annotations
