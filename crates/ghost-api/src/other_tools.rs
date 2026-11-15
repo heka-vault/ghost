@@ -134,6 +134,14 @@ pub struct FoundModelView {
     pub how: String,
     /// What a local server lists; empty for a key.
     pub models: Vec<String>,
+    /// For a key in the environment Ghost was started in: its variable, which Ghost uses
+    /// only once it is chosen (`GHOST_LLM_FROM_ENV`, #137). The name, never a value.
+    #[serde(default)]
+    pub variable: Option<String>,
+    /// That variable is chosen for Ghost already.
+    #[serde(default)]
+    #[schema(required)]
+    pub chosen: bool,
 }
 
 /// Where the operator's Claude Code stands as Ghost's model (ADR 0069).
@@ -400,16 +408,28 @@ async fn view(deps: &Deps) -> ApiResult<OtherToolsView> {
                 title: s.title.into(),
                 how,
                 models: names,
+                variable: None,
+                chosen: false,
             });
         }
     }
+    let withheld = deps.withheld();
     for (var, provider) in keys_present(&deps.started_env) {
         let title = ghost_core::connection::provider(provider).map_or(provider, |p| p.title);
+        let chosen = !withheld.contains(var);
         models.push(FoundModelView {
             provider: provider.into(),
             title: title.into(),
-            how: format!("{var} is set in the environment Ghost was started in."),
+            how: if chosen {
+                format!("{var} is set in the environment Ghost was started in, and Ghost uses it.")
+            } else {
+                format!(
+                    "{var} is set in the environment Ghost was started in. Ghost uses it only if you choose it: another tool or a shell put it there, and replies are billed to it."
+                )
+            },
             models: Vec::new(),
+            variable: Some(var.to_string()),
+            chosen,
         });
     }
     let claude_code = p.claude_code().await.map(|f| claude_code_view(&f));

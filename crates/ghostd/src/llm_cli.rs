@@ -78,6 +78,44 @@ pub fn report(check: &Value) -> Vec<String> {
     out
 }
 
+/// Where the connection's key and address come from, when it is the environment Ghost was
+/// started in (#137): names from `GET /model`, never a value.
+pub fn environment_report(model: &Value) -> Vec<String> {
+    let names = |k: &str| -> Vec<String> {
+        model[k]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect()
+    };
+    let mut out = Vec::new();
+    let used = names("from_environment");
+    if !used.is_empty() {
+        out.push(format!(
+            "From the environment Ghost was started in: {}",
+            crate::environment_keys::and_list(&used)
+        ));
+    }
+    let kept = names("kept_from_before");
+    if !kept.is_empty() {
+        out.push(format!(
+            "  kept from before the update, not chosen: {} (choose on Settings › Model)",
+            crate::environment_keys::and_list(&kept)
+        ));
+    }
+    let offered = names("offered");
+    if !offered.is_empty() {
+        out.push(format!(
+            "Set in the environment Ghost was started in and not used: {} (nobody chose {} for \
+             Ghost; GHOST_LLM_FROM_ENV)",
+            crate::environment_keys::and_list(&offered),
+            if offered.len() == 1 { "it" } else { "them" }
+        ));
+    }
+    out
+}
+
 /// The realtime voice's check (ADR 0063), as lines for a terminal.
 pub fn realtime_report(check: &Value) -> Vec<String> {
     let mut out = vec![format!(
@@ -167,6 +205,15 @@ pub async fn llm_cli(
         for line in report(&check) {
             let _ = writeln!(out, "{line}");
         }
+        if let Ok(model) = client.model().await {
+            let lines = environment_report(&model);
+            if !lines.is_empty() {
+                let _ = writeln!(out);
+            }
+            for line in lines {
+                let _ = writeln!(out, "{line}");
+            }
+        }
         if let Some(v) = &voice {
             let _ = writeln!(out);
             for line in realtime_report(v) {
@@ -185,6 +232,23 @@ pub async fn llm_cli(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn where_the_key_comes_from_is_said_by_name() {
+        let lines = environment_report(&json!({
+            "from_environment": ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"],
+            "kept_from_before": ["ANTHROPIC_AUTH_TOKEN"],
+            "offered": ["OPENAI_API_KEY"]
+        }))
+        .join("\n");
+        assert!(
+            lines.contains("ANTHROPIC_AUTH_TOKEN and ANTHROPIC_BASE_URL"),
+            "{lines}"
+        );
+        assert!(lines.contains("kept from before the update"), "{lines}");
+        assert!(lines.contains("OPENAI_API_KEY (nobody chose it"), "{lines}");
+        assert!(environment_report(&json!({})).is_empty());
+    }
 
     #[test]
     fn the_realtime_check_reads_in_plain_words() {
