@@ -337,10 +337,10 @@ fn replace(path: &Path, text: &str) -> Result<(), ChoiceError> {
     result
 }
 
-fn permissions_table<'a>(
-    doc: &'a mut toml_edit::Document,
+fn permissions_table(
+    doc: &mut toml_edit::Document,
     create: bool,
-) -> Result<Option<(&'a mut toml_edit::Table, bool)>, ChoiceError> {
+) -> Result<Option<(&mut toml_edit::Table, bool)>, ChoiceError> {
     let created = !doc.contains_key("permissions");
     if created {
         if !create {
