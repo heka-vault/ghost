@@ -202,7 +202,7 @@ export function Timeline({ moments, agents, isToday, head }: { moments: Moment[]
 
 function Row({ m, index, focused, open, onToggle, onFocus, agents }: { m: Moment; index: number; focused: boolean; open: boolean; onToggle: () => void; onFocus: (i: number) => void; agents: ConversationView[] }) {
   const who = m.agent ? nameOf(agents, m.agent) : null;
-  const opens = !!(m.children?.length || (m.detail && m.detail.length > 0));
+  const opens = !!(m.children?.length || (m.detail && m.detail.length > 0) || m.mono || m.link);
   const sentence = rowSentence(m, who);
   return (
     <li className={cx("tl-row", `is-${m.kind}`, `tone-${m.tone}`, open && "is-open")}>
@@ -266,6 +266,12 @@ function Row({ m, index, focused, open, onToggle, onFocus, agents }: { m: Moment
   );
 }
 
+/** How an answer came, in words: “by desktop” → “on the desktop”. */
+function answeredVia(mono: string | null | undefined): string {
+  const via = mono?.replace(/^by /, "") ?? "";
+  return ({ desktop: "on the desktop", phone: "on your phone", voice: "by voice" } as Record<string, string>)[via] ?? "";
+}
+
 /** A moment as a sentence: who, what they did, and a quiet meta part. */
 export function rowSentence(m: Moment, who: string | null): { verb: string; what: string; meta: string } {
   switch (m.kind) {
@@ -278,13 +284,14 @@ export function rowSentence(m: Moment, who: string | null): { verb: string; what
       const verb = m.tone === "failed" ? "couldn’t finish" : m.tone === "running" ? "is running" : "ran";
       return { verb, what: m.title, meta: [m.mono, length, calls].filter(Boolean).join(" · ") };
     }
+    // The watch's or the tool's own name is behind the row's disclosure (`mono`), never in the line.
     case "watch":
-      return { verb: "", what: m.title, meta: m.mono ?? "" };
+      return { verb: "", what: m.title, meta: m.mono?.startsWith("webhook") ? "from a webhook" : "a watch found it" };
     case "question":
       return { verb: who ? "asked:" : `${m.mono ?? "Someone"} asked:`, what: m.title, meta: m.tone === "running" ? "waiting for you" : "" };
     case "answer":
-      return { verb: "", what: m.title, meta: m.mono ?? "" };
+      return { verb: "", what: m.title, meta: answeredVia(m.mono) };
     default:
-      return { verb: who ? "said" : "", what: m.title, meta: m.mono ?? "" };
+      return { verb: who ? "said" : "", what: m.title, meta: m.mono?.startsWith("outside tool") ? "from an outside tool" : m.mono?.startsWith("app") ? "from an app" : "" };
   }
 }

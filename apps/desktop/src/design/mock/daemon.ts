@@ -1614,8 +1614,18 @@ export class MockDaemon {
 
   // ------------------------------------------------------------------ waiting (ADR 0029)
   private waitingView() {
-    const count = this.waitingItems.filter((i) => i.state === "new" || i.state === "delivered").length;
-    return { items: this.waitingItems.map((i) => (i.change ? { ...i, change: this.withOffer(i.change) } : i)), count };
+    // As the daemon does: every change waiting for a yes (`change:<id>`, ADR 0030) and every open
+    // question (`question:<id>`, ADR 0051) is an item, the live session's own included.
+    const at = new Date().toISOString();
+    const extra: WaitingItemView[] = [];
+    if (this.pending && !this.waitingItems.some((i) => i.change?.id === this.pending!.id))
+      extra.push({ key: `change:${this.pending.id}`, source: "gate", title: `Waiting for your yes: ${this.pending.summary}`, state: "new", first_seen: at, changed_at: at, age_secs: 0, change: this.pending });
+    for (const q of this.questions)
+      if (q.kind === "question" && q.state === "open" && !this.waitingItems.some((i) => i.key === q.key || i.question?.key === q.key))
+        extra.push({ key: q.key, source: q.source, title: q.question, state: "new", first_seen: q.asked_at, changed_at: q.asked_at, age_secs: 0, question: q });
+    const all = [...extra, ...this.waitingItems];
+    const count = all.filter((i) => i.state === "new" || i.state === "delivered").length;
+    return { items: all.map((i) => (i.change ? { ...i, change: this.withOffer(i.change) } : i)), count };
   }
   private markWaiting(key: string, patch: Partial<WaitingItemView>): boolean {
     const i = this.waitingItems.findIndex((x) => x.key === key);

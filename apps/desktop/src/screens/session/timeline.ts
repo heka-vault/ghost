@@ -98,7 +98,9 @@ export function activityItems(activity: readonly Activity[], turns: readonly Tur
     if (a.kind === "call" || a.kind === "result" || a.kind === "handover") {
       const s = slot(a.at);
       // A result belongs with its call even when a reply was recorded in between.
-      if (work && (work.slot === s || a.kind === "result")) work.acts.push(a);
+      // A group never spans two sessions: an agent's page reads every session's activity at once.
+      const same = work && work.acts[0].session_id === a.session_id;
+      if (work && same && (work.slot === s || a.kind === "result")) work.acts.push(a);
       else {
         flush();
         work = { slot: s, acts: [a] };
@@ -179,6 +181,57 @@ export function gapText(secs: number): string {
 }
 
 /** “4 min”, “1 h 2 min”, “under a minute”: how long a session ran. */
+/**
+ * How long something took, for a row's meta: “0.4 s”, “12 s”, “3 min 5 s”, “2 h 4 min”,
+ * “1 day 3 h”. Never a bare count of seconds past a minute.
+ */
+export function durationWords(secs: number): string {
+  const s = Math.max(0, secs);
+  if (s < 10) return `${s.toFixed(1)} s`;
+  if (s < 60) return `${Math.round(s)} s`;
+  const total = Math.round(s);
+  if (total < 3600) {
+    const m = Math.floor(total / 60);
+    const r = total % 60;
+    return r ? `${m} min ${r} s` : `${m} min`;
+  }
+  const mins = Math.round(total / 60);
+  if (mins < 24 * 60) {
+    const h = Math.floor(mins / 60);
+    const r = mins % 60;
+    return r ? `${h} h ${r} min` : `${h} h`;
+  }
+  const hours = Math.round(mins / 60);
+  const d = Math.floor(hours / 24);
+  const r = hours % 24;
+  return `${d} ${d === 1 ? "day" : "days"}${r ? ` ${r} h` : ""}`;
+}
+
+/**
+ * How long a run of calls kept Ghost working: the time covered by the calls themselves, from
+ * each call's start to its result, overlapping calls counted once. Not the span from the first
+ * moment of the group to the last result, which on an agent's page can cross sessions and days
+ * (a group of calls kept with no turn between them read “125680 s”). A call still running
+ * counts up to `now`; one with no result kept counts nothing.
+ */
+export function workSeconds(calls: readonly { startedAt: string; endedAt: string | null }[], now: number = Date.now()): number {
+  const spans = calls
+    .map((c) => [Date.parse(c.startedAt), c.endedAt ? Date.parse(c.endedAt) : now] as const)
+    .filter(([a, b]) => Number.isFinite(a) && Number.isFinite(b) && b >= a)
+    .sort((x, y) => x[0] - y[0]);
+  let total = 0;
+  let open: [number, number] | null = null;
+  for (const [a, b] of spans) {
+    if (open && a <= open[1]) open[1] = Math.max(open[1], b);
+    else {
+      if (open) total += open[1] - open[0];
+      open = [a, b];
+    }
+  }
+  if (open) total += open[1] - open[0];
+  return total / 1000;
+}
+
 export function lengthText(secs: number): string {
   if (secs < 60) return "under a minute";
   const m = Math.round(secs / 60);

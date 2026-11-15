@@ -60,10 +60,11 @@ export function Instruments({ forceOpen }: { forceOpen?: boolean }) {
         <ChevronRight size={14} className="today-instruments__chev" aria-hidden />
         <span className="today-instruments__name">How much Ghost did</span>
         {!open && <span className="today-instruments__line">{quietLine(today.tally, today.counts.changes)}</span>}
-        {!open && (rate > 0 || working > 0) && (
+        {/* What is at work has its own row at the top of Today; this says only how lively it is. */}
+        {!open && rate > 0 && (
           <span className="today-instruments__live t-num">
             <span className="today-figure__live" aria-hidden />
-            {working > 0 ? `${working} at work now` : `${rate} ${rate === 1 ? "call" : "calls"} in the last minute`}
+            {`${rate} ${rate === 1 ? "call" : "calls"} in the last minute`}
           </span>
         )}
       </button>

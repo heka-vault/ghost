@@ -830,51 +830,53 @@ a.g-btn, a.g-icon-btn, a.g-btn:hover, a.g-icon-btn:hover { text-decoration: none
 @media (prefers-reduced-motion: reduce) { .g-wave-pill { animation: none; } }
 
 /* ===================================================================== PendingChange */
-/* A change waiting for the operator's okay. Opaque (warn mixed into the canvas, not a
-   translucent tint) because it usually sits in a dock with the transcript scrolling under it. */
+/* A change waiting for the operator's yes. Opaque (warn mixed into the canvas, not a
+   translucent tint) because it usually sits in a dock with the transcript scrolling under it.
+   One shape everywhere (2026-11-14): the sentence, Yes and No, the sticky choices as a quiet
+   line under a hairline, Details holding the rest. */
 .g-pending {
   display: flex; flex-direction: column; gap: var(--space-1_5); min-width: 0;
   padding: var(--space-4) var(--space-5);
   border: 1px solid var(--warn-border); border-radius: var(--radius-lg);
   background: color-mix(in srgb, var(--warn) 8%, var(--bg-canvas));
 }
-.g-pending__overline { display: flex; align-items: baseline; gap: var(--space-3); min-width: 0; font-size: var(--text-sm); line-height: var(--leading-sm); }
-.g-pending__state { flex: none; color: var(--warn); font-weight: var(--weight-medium); }
-.g-pending__clock { display: inline-block; min-width: 3.2ch; }
-.g-pending.is-urgent .g-pending__clock { color: var(--danger); font-weight: var(--weight-semibold); }
-.g-pending__operation { flex: 1 1 auto; min-width: 0; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-3); }
+.g-pending__state { color: var(--text-3); font-size: var(--text-sm); line-height: var(--leading-sm); font-weight: var(--weight-medium); }
+.g-pending__tag { color: var(--text-2); font-weight: var(--weight-regular); }
 .g-pending__summary { font-size: var(--text-lg); line-height: var(--leading-lg); font-weight: var(--weight-medium); color: var(--text-1); overflow-wrap: anywhere; }
-.g-pending__rationale { color: var(--text-2); overflow-wrap: anywhere; }
-.g-pending__actions { display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-2); }
-/* ADR 0070: the sticky choice, behind a quiet disclosure at the end of the actions row. */
-.g-pending__toggle { margin-left: auto; display: inline-flex; align-items: center; gap: var(--space-1); padding: var(--space-1) var(--space-1_5); border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-2); font: inherit; font-size: var(--text-sm); line-height: var(--leading-sm); cursor: pointer; }
-.g-pending__toggle:hover:not(:disabled) { color: var(--text-1); background: var(--bg-hover); }
+.g-pending__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-top: var(--space-2); }
+.g-pending__aside { display: inline-flex; align-items: baseline; gap: var(--space-3); color: var(--text-2); font-size: var(--text-sm); line-height: var(--leading-sm); }
+.g-pending__clock { color: var(--warn); font-weight: var(--weight-medium); }
+.g-pending.is-urgent .g-pending__clock { color: var(--danger); font-weight: var(--weight-semibold); }
+/* Details: a quiet text button at the end of the answers. */
+/* Details is a native disclosure under the card's answers; its summary is a quiet text button. */
+.g-pending__more { display: flex; flex-direction: column; }
+.g-pending__more > summary { list-style: none; }
+.g-pending__more > summary::-webkit-details-marker { display: none; }
+.g-pending__toggle { align-self: flex-start; margin-left: calc(-1 * var(--space-1_5)); display: inline-flex; align-items: center; gap: var(--space-1); padding: var(--space-1) var(--space-1_5); border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-2); font: inherit; font-size: var(--text-sm); line-height: var(--leading-sm); cursor: pointer; }
+.g-pending__toggle:hover { color: var(--text-1); background: var(--bg-hover); }
 .g-pending__toggle:focus-visible { outline: var(--focus-outline); outline-offset: var(--focus-offset); }
-.g-pending__toggle:disabled { color: var(--text-3); cursor: default; }
 .g-pending__chevron { transition: transform var(--duration-fast) ease; }
-.g-pending__chevron.is-open { transform: rotate(180deg); }
+.g-pending__more[open] .g-pending__chevron { transform: rotate(180deg); }
 @media (prefers-reduced-motion: reduce) { .g-pending__chevron { transition: none; } }
-.g-pending__always { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding-top: var(--space-2); border-top: 1px solid var(--border); }
-.g-pending__always .g-btn { max-width: 100%; white-space: normal; text-align: left; height: auto; min-height: var(--control-sm); }
-.g-pending__held { color: var(--text-2); font-size: var(--text-sm); line-height: var(--leading-sm); flex: 1 1 16rem; }
+/* ADR 0070: the sticky choice, on the card, quieter than the answers. */
+.g-pending__always { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); padding-top: var(--space-2); border-top: 1px solid var(--border-subtle); }
+.g-pending__label { color: var(--text-2); font-size: var(--text-sm); line-height: var(--leading-sm); margin-right: var(--space-1); overflow-wrap: anywhere; }
+.g-pending__held { color: var(--text-3); font-size: var(--text-sm); line-height: var(--leading-sm); }
+.g-pending__details { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--space-1) var(--space-4); margin: 0; padding-top: var(--space-2); border-top: 1px solid var(--border-subtle); font-size: var(--text-sm); line-height: var(--leading-sm); }
+.g-pending__details > div { display: contents; }
+.g-pending__details dt { color: var(--text-3); }
+.g-pending__details dd { margin: 0; color: var(--text-2); overflow-wrap: anywhere; }
+.g-pending__details dd.t-mono { font-size: var(--text-xs); }
 .g-pending--compact { padding: var(--space-3); gap: var(--space-1); border-radius: var(--radius-md); }
 .g-pending--compact .g-pending__summary { font-size: var(--text-md); line-height: var(--leading-md); }
-.g-pending--compact .g-pending__rationale { font-size: var(--text-sm); line-height: var(--leading-sm); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.g-pending--compact .g-pending__actions { margin-top: var(--space-1_5); }
-.g-pending__operation--line { text-align: left; white-space: normal; overflow: visible; overflow-wrap: anywhere; line-height: var(--leading-xs); }
-/* Touch (the phone): 16/24 summary, the operation on its own line, two-line rationale, then
-   Confirm and Cancel as two 56px pills 12px apart. Cancel stays unbordered, so "leave it"
-   never looks like the bordered "hang up". */
+.g-pending--compact .g-pending__actions { margin-top: var(--space-1); gap: var(--space-2) var(--space-3); }
+.g-pending--compact .g-pending__always { padding-top: var(--space-1); }
+/* Touch (the phone): 16/24 sentence, then Yes and No as two 56px pills 12px apart. */
 .g-pending--touch { gap: var(--space-1); padding: var(--space-4); border-radius: var(--radius-xl); }
-.g-pending--touch .g-pending__overline { font-size: var(--text-md); line-height: var(--leading-md); }
 .g-pending--touch .g-pending__summary { margin-top: var(--space-1); font-size: var(--text-xl); line-height: var(--leading-xl); display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
-.g-pending--touch .g-pending__operation--line { font-size: var(--text-sm); line-height: var(--leading-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.g-pending--touch .g-pending__rationale { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .g-pending--touch .g-pending__actions { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); margin-top: var(--space-3); }
 .g-pending--touch .g-pending__actions .g-btn { height: var(--touch-target); border-radius: var(--radius-full); font-size: var(--text-xl); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-tight); }
-.g-pending--touch .g-pending__actions .g-btn--ghost { color: var(--text-1); }
 .g-pending.is-expired { border-color: var(--border); background: var(--bg-surface); }
-.g-pending.is-expired .g-pending__state { color: var(--text-3); }
 .g-pending.is-expired .g-pending__summary { color: var(--text-2); }
 
 /* =========================================================================== SaveBar */

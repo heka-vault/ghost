@@ -542,45 +542,52 @@ function PendingSpecimens() {
   const props = {
     summary: "Close ghost-mock/app#151 as a duplicate of #148, with a comment linking the two.",
     rationale: "You said 151 is the same bug as 148. Closing is set to ask first in your policy.",
-    operation: "github_issues.close",
-    onConfirm: () => toast({ title: "Confirm pressed", description: "In the app this calls client.confirm() and nothing else." }),
-    onCancel: () => toast({ title: "Cancel pressed" }),
+    operation: "github.issues_close",
+    onConfirm: () => toast({ title: "Yes pressed", description: "In the app this calls client.confirm() and nothing else." }),
+    onCancel: () => toast({ title: "No pressed" }),
     now: t0,
   };
+  const sticky = { onAlways: (c: string) => toast({ title: `${c} pressed`, description: "In the app this calls client.decideAlways(id, choice) and nothing else." }) };
   return (
     <>
-      <Spec label="Fresh" column>
-        <PendingChange {...props} expiresAt={at(42)} />
+      <Spec label="Fresh: the sentence, Yes and No, Always and Never for this action, Details" column>
+        <PendingChange {...props} expiresAt={at(600)} always={{ rule: "github.issues_close", scope: "", allow: true }} {...sticky} />
+      </Spec>
+      <Spec label="In a voice session: “or say it”; the clock only in the last minute" column>
+        <PendingChange {...props} expiresAt={at(42)} sayable always={{ rule: "github.issues_close", scope: "", allow: true }} {...sticky} />
+      </Spec>
+      <Spec label="Details open: the tool, the target, your rule and the time" column>
+        <PendingChange {...props} expiresAt={at(600)} target="ghost-mock/app#151" always={{ rule: "github.issues_close", scope: "", allow: true }} {...sticky} detailsOpen />
       </Spec>
       <Spec label="Under 10 seconds: the clock turns danger; one announcement at 10" column>
-        <PendingChange {...props} expiresAt={at(8)} />
+        <PendingChange {...props} expiresAt={at(8)} sayable />
       </Spec>
-      <Spec label="Busy, after Confirm" column>
+      <Spec label="Busy, after Yes" column>
         <PendingChange {...props} expiresAt={at(37)} busy="confirm" />
       </Spec>
-      <Spec label="Expired: both buttons off until the daemon clears it" column>
+      <Spec label="Too late: both answers off until the daemon clears it" column>
         <PendingChange {...props} expiresAt={at(0)} />
       </Spec>
-      <Spec label="More choices, open: the decision made to stick (ADR 0070), never the default" column>
-        <PendingChange {...props} expiresAt={at(42)} always={{ rule: "github_issues.close", scope: "“close” in github_issues", allow: true }} onAlways={(c) => toast({ title: `${c} pressed`, description: "In the app this calls client.decideAlways(id, choice) and nothing else." })} alwaysOpen />
+      <Spec label="A careful rule of yours asks every time: said instead of Always" column>
+        <PendingChange {...props} expiresAt={at(600)} always={{ rule: "github.issues_close", scope: "", allow: false, held: "Your rules ask for this every time: change that in Permissions." }} {...sticky} />
       </Spec>
-      <Spec label="More choices, a careful rule of yours asks every time: said instead of “don’t ask again”" column>
-        <PendingChange {...props} expiresAt={at(42)} always={{ rule: "github_issues.close", scope: "“close” in github_issues", allow: false, held: "Your rules ask for this every time: change that in Permissions." }} onAlways={(c) => toast({ title: `${c} pressed` })} alwaysOpen />
+      <Spec label="A tool’s name that doesn’t read as an action: its own words, quoted" column>
+        <PendingChange {...props} expiresAt={at(600)} always={{ rule: "mobbin.v2_xq_handler", scope: "", allow: true }} {...sticky} />
       </Spec>
-      <Spec label="Compact, 320 wide (tray)" column>
+      <Spec label="Compact, 320 wide (the live strip, the tray)" column>
         <div className="gal-pending-compact">
-          <PendingChange {...props} expiresAt={at(42)} compact />
+          <PendingChange {...props} expiresAt={at(42)} sayable compact />
           <PendingChange {...props} rationale={null} expiresAt={at(0)} compact />
         </div>
       </Spec>
-      <Spec label="Touch, 358 wide (the phone): 16/24 summary, two 56px buttons" column>
+      <Spec label="Touch, 358 wide (the phone): 16/24 sentence, two 56px buttons" column>
         <div className="gal-pending-touch">
           <PendingChange {...props} expiresAt={at(42)} touch />
           <PendingChange {...props} expiresAt={at(6)} busy="confirm" touch />
         </div>
       </Spec>
       <p className="t-small t-3">
-        In development every PendingChange checks on load that, whenever its Confirm is on screen, its summary is fully on screen too: not under the compact bar, the dock or the panel’s edge. See it in the <a href={scenarioHref("pending", "/")}>Waiting for okay</a> and <a href={scenarioHref("expiring", "/")}>Expiring</a> scenarios.
+        In development every PendingChange checks on load that, whenever its Yes is on screen, its sentence is fully on screen too: not under the compact bar, the dock or the panel’s edge. See it in the <a href={scenarioHref("pending", "/")}>Waiting for okay</a> and <a href={scenarioHref("expiring", "/")}>Expiring</a> scenarios.
       </p>
     </>
   );

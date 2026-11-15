@@ -6,6 +6,7 @@
 import type { QuestionView, WaitingItemView } from "@ghost/client-ts";
 
 import { agentName } from "../../ui";
+import { appWords } from "../../ui/always";
 import { toolTitle } from "../settings/tools";
 
 /**
@@ -16,8 +17,9 @@ import { toolTitle } from "../settings/tools";
  */
 export function sourceLabel(item: WaitingItemView): string {
   const [kind, rest] = item.source.includes(":") ? item.source.split(/:(.*)/s, 2) : [item.source, ""];
-  if (kind === "watch") return `Watch ${rest}`;
-  if (kind === "hook") return `Webhook ${rest}`;
+  // A watch's or a webhook's own name is an identifier: the row says what it is, not its key.
+  if (kind === "watch") return "A watch";
+  if (kind === "hook") return "A webhook";
   if (kind === "gate") return "A change";
   const q = item.question && item.question.kind === "question" ? item.question : null;
   if (kind === "client") return q ? `Asked by ${q.asked_by}, an outside tool` : `From ${toolTitle(rest)}, an outside tool`;
@@ -28,20 +30,22 @@ export function sourceLabel(item: WaitingItemView): string {
     const after = item.key.startsWith(`${item.source}:`) ? item.key.slice(item.source.length + 1) : "";
     if (after.startsWith("schedule:")) return `${who}’s scheduled run`;
     if (after.startsWith("act:")) return `${who}’s run for a watch`;
-    return `Agent ${who}`;
+    return who;
   }
-  if (kind === "app") return `App ${rest}`;
+  if (kind === "app") return appWords(rest);
   return "Ghost";
 }
 
-/** When an open question stops waiting, in a few words: "expires in 3 h", "expires in 20 min". */
-export function expiresIn(q: QuestionView, now: number = Date.now()): string {
+/**
+ * When an open question stops waiting, in a few words, only when that is soon: “expires in 20
+ * min” under an hour, “expiring now” at the end, and nothing (null) before that, since a day's
+ * wait is not something to act on.
+ */
+export function expiresIn(q: QuestionView, now: number = Date.now()): string | null {
   const mins = Math.round((new Date(q.expires_at).getTime() - now) / 60000);
   if (mins <= 0) return "expiring now";
   if (mins < 60) return `expires in ${mins} min`;
-  const hours = Math.round(mins / 60);
-  if (hours < 48) return `expires in ${hours} h`;
-  return `expires in ${Math.round(hours / 24)} days`;
+  return null;
 }
 
 /** Whether a typed answer may be sent: any words, unless only the choices will do. */

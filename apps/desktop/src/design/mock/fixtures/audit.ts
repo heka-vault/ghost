@@ -141,11 +141,11 @@ const OPS: Op[] = [
 /** Conversation writes, with steps as ghost_core::conversations describes them (the operator's text quoted as Python's repr did, kept word for word by the port). */
 const CONV_OPS: { op: string; autonomy: string; target: string; summary: string; steps: string[] }[] = [
   ...["Stripe renewal is due November 3.", "Marta signs off on anything over 5,000.", "Close the books by the 5th; Priya needs the export the day before."].map((note) => ({
-    op: "remember", autonomy: "announce", target: "conversation:accounting", summary: `On the Accounting line: pinned “${note}”`, steps: [`remember: ${note}`],
+    op: "remember", autonomy: "announce", target: "conversation:accounting", summary: `On accounting: pinned “${note}”`, steps: [`remember: ${note}`],
   })),
-  { op: "set_voice", autonomy: "announce", target: "conversation:legal", summary: "On the Legal line: voice set to British female: Emma, speed 0.95.", steps: ["voice bf_emma at 0.95x"] },
-  { op: "set_persona", autonomy: "confirm", target: "conversation:standup", summary: "On the Standup line: persona set, in your words.", steps: ["persona: 'Keep it to three bullets. Blockers first, then what shipped.'"] },
-  { op: "create", autonomy: "announce", target: "conversation:standup", summary: "Started a new line: Standup.", steps: ["start conversation 'Standup'"] },
+  { op: "set_voice", autonomy: "announce", target: "conversation:legal", summary: "On legal: voice set to British female: Emma, speed 0.95.", steps: ["voice bf_emma at 0.95x"] },
+  { op: "set_persona", autonomy: "confirm", target: "conversation:standup", summary: "On standup: persona set, in your words.", steps: ["persona: 'Keep it to three bullets. Blockers first, then what shipped.'"] },
+  { op: "create", autonomy: "announce", target: "conversation:standup", summary: "Hired a new agent: Standup.", steps: ["start conversation 'Standup'"] },
 ];
 
 const CLASSIFIERS = ["jev", "jev", "regex", "ui"];
@@ -267,7 +267,7 @@ export default function audit(s: Scenario): AuditEntry[] {
       cancelled(71, "reopen", "ghost-mock/app#163", "On ghost-mock/app#163: reopened the issue.", "operator cancelled"),
       cancelled(96, "close", "ghost-mock/infra#91", "On ghost-mock/infra#91: closed the issue, with a comment: “Both packages removed in the 2026-10 base image.”", "switched conversation"),
       cancelled(133, "close", "ghost-mock/app#174", "On ghost-mock/app#174: closed the issue, with a comment: “Fixed in 4.11.2.”", "cancelled from the desktop app"),
-      cancelled(170, "set_persona", "conversation:standup", "On the Standup line: persona set, in your words.", "went to sleep", undefined, "conversations"),
+      cancelled(170, "set_persona", "conversation:standup", "On standup: persona set, in your words.", "went to sleep", undefined, "conversations"),
     );
   }
   // A wait the gate never closed: stored "pending" with only its prepared event, from a day

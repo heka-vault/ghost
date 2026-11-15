@@ -26,7 +26,7 @@ import { type ReactNode, useEffect, useMemo, useState } from "react";
 
 import { Button, formatDateTime, formatTime, IconButton, LineGlyph, cx } from "../../ui";
 import type { Saying } from "./live";
-import { type Announced, cutReplies, gapText, lengthText } from "./timeline";
+import { type Announced, cutReplies, durationWords, gapText, lengthText, workSeconds } from "./timeline";
 import type { Decision, Item, LineInfo } from "./transcript";
 import { shapeOf } from "./result";
 
@@ -303,8 +303,8 @@ function WorkRow({ item, changes }: { item: Extract<Item, { kind: "work" }>; cha
   const running = item.calls.some((c) => !c.endedAt);
   const now = useTicking(running);
   const apps = [...new Set(item.calls.map((c) => c.app ?? "an app"))].map(appTitle);
-  const end = running ? now : item.calls.reduce((m, c) => (c.endedAt && c.endedAt > m ? c.endedAt : m), item.at);
-  const secs = secondsBetween(item.at, end);
+  const secs = workSeconds(item.calls, Date.parse(now));
+  const timed = running || !!item.handover || item.calls.some((c) => c.endedAt && c.endedAt !== c.startedAt);
   const n = item.calls.length;
   const what = n === 0 ? "Handed to the main model" : `${running ? "Using" : "Used"} ${list(apps)}`;
   return (
@@ -312,8 +312,9 @@ function WorkRow({ item, changes }: { item: Extract<Item, { kind: "work" }>; cha
       <button type="button" className="thread-work" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
         <span className={cx("thread-work__what", running && "is-running")}>{what}</span>
         <span className="thread-work__meta">
-          {n > 0 && <>{n === 1 ? "1 call" : `${n} calls`} · </>}
-          {seconds(secs)}
+          {n > 0 && <>{n === 1 ? "1 call" : `${n} calls`}</>}
+          {/* A call the store kept as a turn has no timing: say nothing rather than “0.0 s”. */}
+          {timed && <>{n > 0 && " · "}{durationWords(secs)}</>}
         </span>
         <ChevronRight className="thread-work__chev" aria-hidden />
       </button>
@@ -325,7 +326,7 @@ function WorkRow({ item, changes }: { item: Extract<Item, { kind: "work" }>; cha
                 <Dot />
               </span>
               <span className="thread-call__name">The fast model handed this turn to the main one</span>
-              <span className="thread-call__time">{seconds(item.handover.secs)}</span>
+              <span className="thread-call__time">{durationWords(item.handover.secs)}</span>
             </li>
           )}
           {item.calls.map((c) => (
@@ -372,7 +373,7 @@ function CallRow({ call: c, change }: { call: Call; change: Announced | null }) 
           <span className="thread-call__app">{appTitle(c.app ?? "app")}</span> {c.tool}
           <span className="thread-call__id t-mono">{c.name}</span>
         </span>
-        <span className="thread-call__time">{c.endedAt ? seconds(secondsBetween(c.startedAt, c.endedAt)) : "running"}</span>
+        <span className="thread-call__time">{c.endedAt ? durationWords(secondsBetween(c.startedAt, c.endedAt)) : "running"}</span>
       </button>
       {open && (
         <div id={id} className="thread-result">
@@ -592,10 +593,6 @@ function useTicking(on: boolean): string {
 
 function sameDay(iso: string): boolean {
   return new Date(iso).toDateString() === new Date().toDateString();
-}
-
-function seconds(s: number): string {
-  return s < 10 ? `${s.toFixed(1)} s` : `${Math.round(s)} s`;
 }
 
 /** An app's name as a title: `github` → “GitHub”, `t3` → “T3”, `google_calendar` → “Google calendar”. */

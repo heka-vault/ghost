@@ -34,6 +34,11 @@ import { deviceWords, plainDeviceText, reachSentence } from "../src/screens/sett
 import { OnItsOwnList } from "../src/screens/watching/List";
 import { problemOf } from "../src/screens/watching/problems";
 import { doingsOf, placeProblems, sentenceOf } from "../src/screens/watching/sentence";
+import auditFixture from "../src/design/mock/fixtures/audit";
+import waitingFixture from "../src/design/mock/fixtures/waiting";
+import { momentsOf } from "../src/screens/today/model";
+import { rowSentence } from "../src/screens/today/Timeline";
+import { PendingChange } from "../src/ui/PendingChange";
 
 /** What may never show on an everyday page, outside the developer page and Details. */
 export const FORBIDDEN: { what: string; re: RegExp }[] = [
@@ -149,5 +154,61 @@ describe("the everyday pages say things in the operator's words", () => {
     expect(sound).not.toMatch(/detail=\{?"?(GHOST_|FUZZY)/);
     const phrases = readFileSync(new URL("../src/screens/settings/WakePhrases.tsx", import.meta.url), "utf8");
     expect(phrases).not.toMatch(/detail=\{WAKE_KEY\}/);
+  });
+});
+
+describe("the card that asks for a yes, and Today's rows, in the same words (ADR 0070 as amended)", () => {
+  // Rendered as everywhere in the window, Details closed: the tool's id and the target are behind it.
+  const card = (props: Partial<Parameters<typeof PendingChange>[0]> = {}) =>
+    renderToStaticMarkup(
+      createElement(PendingChange, {
+        summary: "On ghost-mock/app#17: close the issue, with a comment.",
+        target: "ghost-mock/app#17",
+        operation: "github.issues_close",
+        rationale: "You asked to close it once the fix shipped.",
+        expiresAt: new Date(Date.UTC(2026, 10, 14, 21, 37)).toISOString(),
+        now: Date.UTC(2026, 10, 14, 21, 36, 30),
+        sayable: true,
+        always: { rule: "github.issues_close", scope: "", allow: true },
+        onAlways: noop,
+        onConfirm: noop,
+        onCancel: noop,
+        ...props,
+      }),
+    );
+
+  it("has no tool id, repo path or 24-hour time on its face, and keeps them under Details", () => {
+    const html = card();
+    expect(offenders(visibleText(html))).toEqual([]);
+    // Someone's own words count too on the face: the target is not in the sentence.
+    const face = html.replace(/<details[\s\S]*?<\/details>/g, " ").replace(/<[^>]+>/g, " ");
+    expect(face).toContain("Close the issue, with a comment.");
+    expect(face).not.toMatch(/ghost-mock\/app#17|github\.issues_close/);
+    expect(face).toMatch(/Yes[\s\S]*No[\s\S]*or say it/);
+    expect(face).toContain("Close issues in GitHub");
+    // Under Details, closed: the tool's id, the whole target, the level in the standing-rule words.
+    const details = /<details[^>]*>([\s\S]*?)<\/details>/.exec(html)?.[1] ?? "";
+    expect(details).toContain("github.issues_close");
+    expect(details).toContain("ghost-mock/app#17");
+    expect(details).toContain("Ask first");
+  });
+
+  it("names the target's short name on the face only when more than one change is on screen", () => {
+    const face = (html: string) => visibleText(html.replace(/<details[\s\S]*?<\/details>/g, " "));
+    expect(face(card({ showTarget: true }))).toContain("app#17");
+    expect(offenders(face(card({ showTarget: true })))).toEqual([]);
+    expect(face(card())).not.toContain("app#17");
+  });
+
+  it("says Today's rows without a target, tool id or watch name", () => {
+    const busy = scenarioByName("busy");
+    const day = new Date();
+    const moments = momentsOf({ audit: auditFixture(busy), runs: [], waiting: waitingFixture(busy), questions: [] }, day);
+    expect(moments.length).toBeGreaterThan(0);
+    for (const m of moments) {
+      const s = rowSentence(m, null);
+      expect(offenders(`${s.verb} ${s.what} ${s.meta}`), m.title).toEqual([]);
+      expect(`${s.what} ${s.meta}`).not.toMatch(/ghost-mock\/|^On /);
+    }
   });
 });

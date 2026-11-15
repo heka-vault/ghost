@@ -53,7 +53,7 @@ export { scrollIntoPanel, scrollPanelToTop } from "./scroll";
 export { LiveContext, LiveStatus, liveLabel, useLive, useSetupPromptHere } from "./live";
 export type { ConnectionState, LiveState } from "./live";
 export { PendingChange } from "./PendingChange";
-export { ALWAYS_TOGGLE, ALWAYS_WHERE, alwaysDone, alwaysWords } from "./always";
+export { ALWAYS_WHERE, NO, SAY_IT, YES, actionWords, alwaysDone, alwaysWords, decidedWords, faceOf } from "./always";
 export type { PendingChangeProps } from "./PendingChange";
 export { SaveBar, useCopy } from "./SaveBar";
 export type { SaveBarProps, SaveBarVariant } from "./SaveBar";

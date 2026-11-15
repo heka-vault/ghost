@@ -38,7 +38,10 @@ describe("a question on the waiting list (ADR 0051)", () => {
     expect(sourceLabel(item(question({ asked_by: "Claude Code", source: "client:claude-code" })))).toBe("Asked by Claude Code, an outside tool");
     expect(sourceLabel(item(question({ in_run: true })))).toBe("Asked by Ledger in a scheduled run");
     const now = new Date("2026-11-11T10:00:00Z").getTime();
-    expect(expiresIn(q, now)).toBe("expires in 3 h");
+    // A wait of hours is nothing to act on: the expiry is said only in its last hour.
+    expect(expiresIn(q, now)).toBeNull();
+    expect(expiresIn(question({ expires_at: "2026-11-12T09:00:00Z" }), now)).toBeNull();
+    expect(expiresIn(question({ expires_at: "2026-11-11T10:59:00Z" }), now)).toBe("expires in 59 min");
     expect(expiresIn(question({ expires_at: "2026-11-11T10:20:00Z" }), now)).toBe("expires in 20 min");
     expect(expiresIn(question({ expires_at: "2026-11-11T09:00:00Z" }), now)).toBe("expiring now");
   });
@@ -67,7 +70,10 @@ describe("where an item on the waiting list came from", () => {
     expect(sourceLabel(plain("agent:ledger", "agent:ledger:schedule:abc123"))).toBe("Ledger’s scheduled run");
     expect(sourceLabel(plain("agent:ledger", "agent:ledger:schedule:abc123:failed"))).toBe("Ledger’s scheduled run");
     expect(sourceLabel(plain("agent:ledger", "agent:ledger:act:0a1b2c3d4e5f"))).toBe("Ledger’s run for a watch");
-    expect(sourceLabel(plain("agent:ledger", "agent:ledger:refund-17"))).toBe("Agent Ledger");
-    expect(sourceLabel(plain("watch:ci", "ci:main"))).toBe("Watch ci");
+    expect(sourceLabel(plain("agent:ledger", "agent:ledger:refund-17"))).toBe("Ledger");
+    // A watch's or a webhook's own name is an identifier, never in the row's words.
+    expect(sourceLabel(plain("watch:ci", "ci:main"))).toBe("A watch");
+    expect(sourceLabel(plain("hook:jobs", "jobs:backup"))).toBe("A webhook");
+    expect(sourceLabel(plain("app:github", "app:github:x"))).toBe("GitHub");
   });
 });

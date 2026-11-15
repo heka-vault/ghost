@@ -112,3 +112,47 @@ next call follow the new rule with no restart
   interleave either. Each re-reads the file under the lock before it edits, so two writes never
   lose a rule: both land, or the second is cleanly refused. A choice whose rule was taken out by
   hand is shown as no longer in the file.
+
+## Amended 2026-11-14: one card, one set of words
+
+A review of the desktop found the yes asked in two shapes: the floating card, about 14 words
+with Yes and No, and the window's card, about 46 words with Confirm and Cancel, the tool's id
+on its face, a mm:ss timer that read like a time of day, "Waiting for your okay", and the
+sticky choice two clicks away behind "More choices", worded “for “close” in github”. The
+window's card is now the floating card's shape, with this decision's two choices on it:
+
+- **The face**: the sentence of what will happen (the gate's summary), **Yes** and **No**,
+  "or say it" where a voice session is live, and at most 25 words in all (`faceOf` in
+  `apps/desktop/src/ui/always.ts`, tested): a long summary is cut at a word and given whole
+  under Details. The clock shows only in the wait's last minute (“0:42 left”).
+- **The sticky choice is on the card**, not behind a disclosure: a quiet line under a hairline,
+  the action in words, then **Always allow** and **Never allow** (“Close issues in GitHub ·
+  Always allow · Never allow”). The words are built deterministically from the rule the daemon offers (`app.tool`):
+  the tool's name split into words, read as a verb and what it acts on when it starts or ends
+  with a known verb (`issues_close` → “close issues”, `issue_write` → “change issues”), and
+  otherwise its own words quoted (“close” in GitHub) or “this action”; the app by its key, with
+  a short list of brand spellings (`github` → GitHub). Never the app's description or catalog
+  title, never the summary or rationale. A hostile name reads as at most three of its own words
+  in quotes. Enter never chooses Always or Never (`ignoreEnter`): a click or Space does, and
+  neither is ever focused first or the default. When a more careful rule of the operator's
+  would still ask, the line says “Your rules ask every time” in place of Always, the whole
+  reason under Details, and the daemon still refuses the allow. The toast still says once where
+  to change it.
+- **Details** holds what was on the face before: the tool's id, the target, the level (“Your
+  rule: Ask first”), the reason Ghost gave and when the wait ends.
+- **One set of words**: a card answers **Yes** and **No** everywhere (the window, the floating
+  card, the phone prototype, the tray); a standing rule is **Allow**, **Ask first**, **Never**
+  (and **Allow quietly**) on Permissions, an app's page and in the glossary. "Okay", "Confirm",
+  "Cancel" and "Block" are gone where they meant the same. A question's **Decline** stays: it
+  declines to answer an agent's question, which is not a no to a change.
+- Who may set a rule is unchanged: the operator's click in their own desktop session only. The
+  floating card stays Yes and No with "or say it" (ADR 0059), sharing the sentence and the
+  button words; the phone keeps plain Yes and No.
+
+Also on 2026-11-14, after merging with the plain-words pass: the buttons read **Always allow**
+and **Never allow**, matching Permissions' "Never let Ghost …" row. The card's sentence leads
+with what will happen, without its target, as Today's rows do ("Close the issue.", not "On
+ghost-mock/app#17: close the issue."); the whole target is under Details. When more than one
+change waits on the same screen, each card adds its target's short name ("Close the issue. ·
+app#17"), so two cards can always be told apart. Details is a native disclosure, so the
+plain-words guard reads a closed one as off the face, as it does elsewhere.

@@ -35,6 +35,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { postureOf } from "../app/posture";
 import { useSaying, useSessionQuestions } from "../screens/session/live";
 import { Mascot } from "../ui/Mascot";
+import { NO, SAY_IT, YES, faceOf, plainSummary } from "../ui/always";
 import { createField, type Field, type FieldInputs } from "./field";
 import { layoutOf, type Layout } from "./layout";
 import { litOf, namesText, type Place, reachOf, returnOf, sizeOf, thisTurn } from "./reach";
@@ -600,15 +601,15 @@ export function FloatingRoom({ stage = false }: { stage?: boolean } = {}) {
         <div className="flt-card" style={{ left: layout.card.x, top: layout.card.y, width: layout.card.w, maxHeight: layout.card.h }}>
           {scene === "okay" && pending ? (
             <div className="flt-ask flt-ask--okay" role="alertdialog" aria-label={`Waiting for your yes: ${pending.summary}`}>
-              <p className="flt-ask__q">{pending.summary}?</p>
+              <p className="flt-ask__q">{faceOf(plainSummary(pending.summary).what, { sayable: true, details: false }).summary}</p>
               <div className="flt-ask__acts">
                 <button type="button" data-hit className="flt-word flt-word--yes" disabled={busy} onClick={() => void decide(pending, true)}>
-                  Yes
+                  {YES}
                 </button>
                 <button type="button" data-hit className="flt-word" disabled={busy} onClick={() => void decide(pending, false)}>
-                  No
+                  {NO}
                 </button>
-                <span className="flt-ask__or">or say it</span>
+                <span className="flt-ask__or">{SAY_IT}</span>
               </div>
             </div>
           ) : question ? (
@@ -620,7 +621,7 @@ export function FloatingRoom({ stage = false }: { stage?: boolean } = {}) {
                     {c}
                   </button>
                 ))}
-                <span className="flt-ask__or">{question.choices.length ? "or say it" : "Answer by voice, or in Ghost"}</span>
+                <span className="flt-ask__or">{question.choices.length ? SAY_IT : "Answer by voice, or in Ghost"}</span>
               </div>
             </div>
           ) : null}
