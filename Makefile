@@ -142,7 +142,7 @@ desktop: ## the desktop app only (Tauri window, hot reload), against whichever d
 desktop-web: ## the same UI in a browser at http://localhost:1420; ?mock=busy and other scenarios need no daemon
 	@pnpm dev:desktop
 
-screenshots: ## the README's screenshots and the floating room's from the mock UI (make desktop-web running; Chrome, ImageMagick, Node 22+): make screenshots [SHOTS="home apps"]
+screenshots: ## the README's screenshots and the floating view's from the mock UI (make desktop-web running; Chrome, ImageMagick, Node 22+): make screenshots [SHOTS="home session"]
 	@scripts/screenshots.sh $(SHOTS)
 
 marks: ## the desktop's icons, tray icons and favicons, the phone's launcher icon, adaptive layers, splash and status-bar icon, the site's icons and social card, the README's header and the avatar, from packages/ui/src/mark.ts (Chrome, ImageMagick, Node 22.15+); every variant: node packages/ui/scripts/marks.mjs all <dir>

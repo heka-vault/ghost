@@ -24,15 +24,12 @@ command -v magick >/dev/null || command -v convert >/dev/null || { echo "screens
 curl -fsS -o /dev/null "$URL/" || { echo "screenshots: nothing answers at $URL; run make desktop-web first" >&2; exit 1; }
 
 # name | scenario | route | how long the story runs before the shot (ms of virtual time)
+# Only what the README and the site show (README.md, site/src/pages/index.astro); a picture
+# nothing links to goes stale and is left out (2026-11-14).
 SHOTS=(
   "home|passive|/|4000"
   "session|thread|/session|9000"
-  "session-pending|pending|/session|4000"
-  "agents|passive|/agents|4000"
-  "apps|busy|/apps|4000"
   "watching|passive|/on-its-own|4000"
-  "model|passive|/settings/model|4000"
-  "welcome|firstrun|/welcome|4000"
 )
 
 FLOATING=(floating-hero floating-speaking floating-yes floating-question floating-loop)
