@@ -30,7 +30,7 @@ SHOTS=(
   "session-pending|pending|/session|4000"
   "agents|passive|/settings/agents|4000"
   "apps|busy|/apps|4000"
-  "watching|passive|/watching|4000"
+  "watching|passive|/on-its-own|4000"
   "model|passive|/settings/model|4000"
   "welcome|firstrun|/welcome|4000"
 )

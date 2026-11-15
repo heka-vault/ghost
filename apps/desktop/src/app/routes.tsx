@@ -7,12 +7,10 @@
  */
 import {
   Activity,
-  AudioWaveform,
   BellRing,
   Blocks,
   BookOpen,
   Cpu,
-  Eye,
   Ghost,
   Inbox,
   Info,
@@ -21,6 +19,7 @@ import {
   type LucideIcon,
   PanelTop,
   PlugZap,
+  Repeat,
   ScrollText,
   Settings,
   Settings2,
@@ -120,16 +119,18 @@ export const ROUTES: RouteDef[] = [
     component: lazy(() => import("../screens/conversations")),
   },
   {
+    // On its own: everything Ghost does without being asked, one list, made by asking Ghost (the
+    // owner's simplification, 2026-11-14). It was Watching (#/watching), and #/departments before
+    // ADR 0035; both redirect here. The code keeps the owner's name, watching.
     id: "watching",
-    // #/departments was this slot before ADR 0035; it, and anything under it, lands on #/watching.
-    patterns: ["/watching", "/departments/:slug?/:more?"],
-    path: "/watching",
+    patterns: ["/on-its-own"],
+    path: "/on-its-own",
     owner: "watching",
-    title: "Watching",
+    title: "On its own",
     kind: "screen",
     chrome: "app",
     needsDaemon: true,
-    nav: { label: "Watching", icon: Eye, group: "main" },
+    nav: { label: "On its own", icon: Repeat, group: "main" },
     component: lazy(() => import("../screens/watching")),
   },
   {
@@ -196,7 +197,9 @@ export const ROUTES: RouteDef[] = [
     component: lazy(() => import("../screens/audit")),
   },
   {
-    // The Hearing test (ADR 0042): record takes, check each, score how well Ghost hears.
+    // The Hearing test (ADR 0042): record takes, check each, score how well Ghost hears. A full
+    // screen of its own, off the rail since 2026-11-14: Settings › Sound (“Test what Ghost hears”),
+    // the microphone's note there, Wake takes and the first run lead here.
     id: "hear",
     patterns: ["/hear/:tab?/:id?"],
     path: "/hear",
@@ -205,7 +208,6 @@ export const ROUTES: RouteDef[] = [
     kind: "screen",
     chrome: "app",
     needsDaemon: true,
-    nav: { label: "Hearing test", icon: AudioWaveform, group: "main" },
     accept: (p) => !p.tab || (["sessions", "runs", "plan", "wake"].includes(p.tab) && (!p.id || p.tab === "runs")),
     component: lazy(() => import("../screens/hear")),
   },
@@ -398,6 +400,9 @@ export const REDIRECTS: { from: string; to: (p: Record<string, string>) => strin
   { from: "/waiting", to: () => "/" },
   // Apps was a page of Settings until the owner moved it out (2026-11-12).
   { from: "/settings/apps/:name?", to: (p) => (p.name ? `/apps/${encodeURIComponent(p.name)}` : "/apps") },
+  // Watching became On its own (2026-11-14); #/departments was its slot before ADR 0035.
+  { from: "/watching/:rest?", to: () => "/on-its-own" },
+  { from: "/departments/:slug?/:more?", to: () => "/on-its-own" },
   // #/servers and #/policy were these screens' addresses before ADR 0034.
   { from: "/servers", to: () => "/apps" },
   { from: "/skills", to: () => "/settings/developer/skills" },

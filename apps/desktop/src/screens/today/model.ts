@@ -330,27 +330,69 @@ export function countsOf(needs: Needs, moments: Moment[]): DayCounts {
 const plural = (n: number, one: string, many: string) => `${n === 0 ? "no" : n} ${n === 1 ? one : many}`;
 
 /**
- * Today in a sentence, with real counts: the lead is what the operator has to do, the rest is
- * what Ghost did. “2 things need you.” / “Ghost made 8 changes and ran 5 jobs today.”
+ * What is wrong today, for the headline: the instruments are one step away (the simplification
+ * pass, 2026-11-14), so anything they would show as a problem is said here in plain words, open
+ * or closed. Each is a count or a name from the daemon's own records, never an estimate.
  */
-export function headline(c: DayCounts, today = true): { lead: string; rest: string } {
+export interface Trouble {
+  /** Changes the audit records as failed today. */
+  failedChanges: number;
+  /** Calls to apps that failed today (ADR 0060's reach), said only when no change failed. */
+  failedCalls: number;
+  /** Apps that are signed out or failed now, by title. */
+  appsDown: string[];
+  /** The last model check's first word took longer than a spoken reply allows (ADR 0056: 1.5 s). */
+  slowModel: boolean;
+}
+
+export const NO_TROUBLE: Trouble = { failedChanges: 0, failedCalls: 0, appsDown: [], slowModel: false };
+
+/** ADR 0056: a connection is too slow for a spoken reply past 1.5 s to the first word. */
+export const SLOW_FIRST_WORD_MS = 1500;
+
+/** Each problem as a short clause, most consequential first: “a change failed”, “GitHub isn’t connected”. */
+export function troubleWords(t: Trouble): string[] {
+  const out: string[] = [];
+  if (t.failedChanges) out.push(t.failedChanges === 1 ? "a change failed" : `${t.failedChanges} changes failed`);
+  else if (t.failedCalls) out.push(t.failedCalls === 1 ? "a call to an app failed" : `${t.failedCalls} calls to apps failed`);
+  if (t.appsDown.length === 1) out.push(`${t.appsDown[0]} isn’t connected`);
+  else if (t.appsDown.length > 1) out.push(`${t.appsDown.length} apps aren’t connected`);
+  if (t.slowModel) out.push("the model is slow to answer out loud");
+  return out;
+}
+
+/**
+ * Today in a sentence, with real counts, then at most one more (the simplification pass,
+ * 2026-11-14: one briefing sentence, measured against dots' “Nothing urgent, just three things
+ * to look at”). The lead answers “does anything need me?” in a dozen words at most; a problem
+ * is in it when nothing needs a decision. The rest is what Ghost did, one sentence. `problems`
+ * are the ones the lead didn't say, for one plain line under it (never folded into the
+ * sentence, which would stop being one). Deterministic wording from the counts, never a
+ * model's summary.
+ * “2 things need you.” / “Ghost made 8 changes and ran 5 jobs today.”
+ */
+export function headline(c: DayCounts, today = true, trouble: Trouble = NO_TROUBLE): { lead: string; rest: string; problems: string[] } {
   const needs = c.decide + c.answer;
+  const problems = today ? troubleWords(trouble) : [];
+  const leadProblem = needs === 0 && problems.length > 0;
   const lead = !today
     ? c.changes + c.runs === 0
       ? "A quiet day."
       : `${cap(plural(c.changes, "change", "changes"))}, ${plural(c.runs, "run", "runs")}.`
     : needs > 0
       ? `${needs === 1 ? "One thing needs" : `${needs} things need`} you.`
-      : c.know > 0
-        ? `Nothing to decide. ${c.know === 1 ? "One thing" : `${c.know} things`} to know.`
-        : "Nothing needs you.";
+      : leadProblem
+        ? `Nothing to decide, but ${problems[0]}.`
+        : c.know > 0
+          ? `Nothing to decide. ${c.know === 1 ? "One thing" : `${c.know} things`} to know.`
+          : "Nothing needs you.";
+  if (!today) return { lead, rest: "", problems: [] };
   const did: string[] = [];
   if (c.changes) did.push(`made ${plural(c.changes, "change", "changes")}`);
   if (c.runs) did.push(`ran ${plural(c.runs, "job", "jobs")}`);
   if (c.found) did.push(`caught ${plural(c.found, "thing", "things")} on watch`);
-  const when = today ? " today" : "";
-  const rest = !today ? "" : did.length ? `Ghost ${list(did)}${when}.` : "Ghost hasn’t had to do anything yet today.";
-  return { lead, rest };
+  const rest = did.length ? `Ghost ${list(did)} today.` : "Ghost hasn’t had to do anything yet today.";
+  return { lead, rest, problems: (leadProblem ? problems.slice(1) : problems).map(cap) };
 }
 
 function cap(s: string): string {
@@ -375,6 +417,11 @@ export interface Reach {
 export function reachOf(apps: AppView[]): Reach {
   const up = apps.filter((a) => a.state === "connected");
   return { apps: up.length, tools: up.reduce((n, a) => n + a.actions.length, 0), down: apps.filter((a) => a.state === "failed" || a.state === "needs_sign_in").length };
+}
+
+/** The apps that are signed out or failed now, by their titles (what `reachOf` counts as down). */
+export function appsDownOf(apps: AppView[]): string[] {
+  return apps.filter((a) => a.state === "failed" || a.state === "needs_sign_in").map((a) => a.title || a.name);
 }
 
 /**

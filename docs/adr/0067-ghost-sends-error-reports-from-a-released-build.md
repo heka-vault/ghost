@@ -84,8 +84,8 @@ only write events; it is in the release binary by design, and in no file of the 
 line, PR or issue.
 
 **The operator's switch.** On by default in a released build, and said plainly where a
-person sees it: one sentence with Turn off in the first run, under the wake step's wake-takes
-line at the same weight ("Ghost sends an error report when something in it breaks: what failed
+person sees it: one sentence with Turn off in the first run (since 2026-11-14 on *What Ghost
+keeps and sends*, the page right after the wake beat, with a switch; see the note below) ("Ghost sends an error report when something in it breaks: what failed
 and where, never what you say or type."), and Settings › General's Error reports beside
 Updates: "Send error reports", what is sent in one sentence, and What was sent, the last 20
 reports exactly as sent but for the key (kept 0600 in `~/.local/share/ghost/reports/sent/`).
@@ -186,3 +186,14 @@ reaches it and it reads nothing back. The rule names it beside the ntfy route.
   text. Rejected.
 - **Off by default.** The owner's call: on in a released build, said in the first run, one
   switch.
+
+## Amended 2026-11-14
+
+The simplification pass took the error-reports sentence off the first run's wake beat, the
+moment that should be the simplest in the product. It is now on *What Ghost keeps and sends*, a
+short page the first run shows right after the wake beat and before Make it yours, with the same
+sentence and a switch; Done shows it again to anyone who reached it without that page. It is
+still said, with its switch beside it, before the first run ends, and Settings › General is
+unchanged for anyone who skips the first run. A report is about the app breaking, not about the
+wake, so nothing is sent earlier than it was disclosed in any way that the beat's position
+changed: a released build could already report a crash before the wake beat was reached.

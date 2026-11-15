@@ -1,7 +1,7 @@
-import type { AuditEntry, QuestionView, ScheduleRunInfo, WaitingItemView } from "@ghost/client-ts";
+import type { AppView, AuditEntry, QuestionView, ScheduleRunInfo, WaitingItemView } from "@ghost/client-ts";
 import { describe, expect, it } from "vitest";
 
-import { byHour, cluster, countsOf, dayBounds, dayLabel, density, filterMoments, headline, momentsOf, needKind, needsOf, reachOf, replySpeed, runAnswer, shiftDay } from "../src/screens/today/model";
+import { appsDownOf, byHour, cluster, NO_TROUBLE, countsOf, dayBounds, dayLabel, density, filterMoments, headline, momentsOf, needKind, needsOf, reachOf, replySpeed, runAnswer, shiftDay } from "../src/screens/today/model";
 
 // A fixed local day at noon, so every test reads the same hours.
 const DAY = new Date(2026, 10, 12, 15, 0, 0);
@@ -126,16 +126,37 @@ describe("filterMoments", () => {
 describe("headline", () => {
   const zero = { decide: 0, answer: 0, know: 0, changes: 0, failedChanges: 0, runs: 0, modelCalls: 0, toolCalls: 0, found: 0, answered: 0 };
   it("leads with what needs the operator, then what Ghost did, with real counts", () => {
-    expect(headline({ ...zero, decide: 1, answer: 1, changes: 8, runs: 5 })).toEqual({ lead: "2 things need you.", rest: "Ghost made 8 changes and ran 5 jobs today." });
+    expect(headline({ ...zero, decide: 1, answer: 1, changes: 8, runs: 5 })).toEqual({ lead: "2 things need you.", rest: "Ghost made 8 changes and ran 5 jobs today.", problems: [] });
     expect(headline({ ...zero, decide: 1 }).lead).toBe("One thing needs you.");
   });
   it("is honest on a quiet day", () => {
-    expect(headline(zero)).toEqual({ lead: "Nothing needs you.", rest: "Ghost hasn’t had to do anything yet today." });
+    expect(headline(zero)).toEqual({ lead: "Nothing needs you.", rest: "Ghost hasn’t had to do anything yet today.", problems: [] });
     expect(headline({ ...zero, know: 2 }).lead).toBe("Nothing to decide. 2 things to know.");
   });
   it("reads a past day as a record", () => {
     expect(headline({ ...zero, changes: 1, runs: 3 }, false).lead).toBe("1 change, 3 runs.");
     expect(headline(zero, false).lead).toBe("A quiet day.");
+  });
+  // The simplification pass (2026-11-14): the instruments are one step away, so a problem they show is said here.
+  it("says a problem in plain words, in the lead when nothing needs a decision, and stays short", () => {
+    const trouble = { failedChanges: 1, failedCalls: 4, appsDown: ["GitHub"], slowModel: true };
+    const quiet = headline({ ...zero, changes: 8 }, true, trouble);
+    expect(quiet.lead).toBe("Nothing to decide, but a change failed.");
+    expect(quiet.rest).toBe("Ghost made 8 changes today.");
+    expect(quiet.problems).toEqual(["GitHub isn’t connected", "The model is slow to answer out loud"]);
+    const busy = headline({ ...zero, decide: 2 }, true, { ...trouble, appsDown: ["GitHub", "Calendar"] });
+    expect(busy.lead).toBe("2 things need you.");
+    expect(busy.problems).toEqual(["A change failed", "2 apps aren’t connected", "The model is slow to answer out loud"]);
+    // A failed call is said only when no change failed, so one failure isn't said twice.
+    expect(headline(zero, true, { ...NO_TROUBLE, failedCalls: 2 }).lead).toBe("Nothing to decide, but 2 calls to apps failed.");
+    // About twelve words at most in the lead, whatever the trouble.
+    for (const t of [trouble, NO_TROUBLE, { ...NO_TROUBLE, slowModel: true }]) for (const c of [zero, { ...zero, know: 3 }, { ...zero, answer: 12 }]) expect(headline(c, true, t).lead.split(/\s+/).length).toBeLessThanOrEqual(12);
+    // A past day is a record, with no problems of today's.
+    expect(headline(zero, false, trouble).problems).toEqual([]);
+  });
+  it("names the apps that are down by title", () => {
+    const app = (name: string, state: string) => ({ name, title: name.toUpperCase(), state, actions: [] }) as unknown as AppView;
+    expect(appsDownOf([app("gh", "connected"), app("cal", "needs_sign_in"), app("x", "failed")])).toEqual(["CAL", "X"]);
   });
   it("counts from the moments, a cluster's members included", () => {
     const m = cluster(momentsOf({ audit: [change("a", 14, 10), change("b", 14, 5), change("c", 14, 0)], runs: [run("r", 13)], waiting: [], questions: [] }, DAY));

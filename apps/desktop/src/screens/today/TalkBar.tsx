@@ -133,7 +133,7 @@ export function TalkBar({ live }: { live: LiveSession }) {
   };
 
   return (
-    <div className={cx("talk-dock", inSession && "is-live")}>
+    <div className={cx("talk-dock", inSession && "is-live", (live.pending || live.question) && "has-card")}>
       {live.pending ? (
         <PendingChange
           className="talk-live__card"

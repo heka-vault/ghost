@@ -41,7 +41,7 @@
  */
 import type { DevicesView, ModelConnectionView, ModelsView, SettingsView } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
-import { MoreHorizontal, ShieldCheck, Trash2 } from "lucide-react";
+import { AudioWaveform, MoreHorizontal, ShieldCheck, Trash2 } from "lucide-react";
 import {
   type FocusEvent,
   type FormEvent,
@@ -1131,9 +1131,15 @@ export default function SettingsScreen({ params: route }: RouteProps) {
                       tone="warn"
                       title="The microphone isn’t hearing well"
                       action={
-                        <Button size="sm" loading={repairBusy} disabled={!online || !micPath.can_repair} onClick={() => void repairMic()}>
-                          Repair
-                        </Button>
+                        <span className="row gap-3">
+                          {/* The Hearing test is off the rail (2026-11-14): reached from here. */}
+                          <Button size="sm" variant="ghost" href={hrefFor("/hear")}>
+                            Test what Ghost hears
+                          </Button>
+                          <Button size="sm" loading={repairBusy} disabled={!online || !micPath.can_repair} onClick={() => void repairMic()}>
+                            Repair
+                          </Button>
+                        </span>
                       }
                     >
                       {micPath.problem}
@@ -1231,6 +1237,15 @@ export default function SettingsScreen({ params: route }: RouteProps) {
                         />
                       </Field>
                     </Row>
+                    <ListRow
+                      title="Test what Ghost hears"
+                      description="Read a few lines aloud and see what Ghost made of each, how often it woke, and how well it heard: the Hearing test."
+                      trailing={
+                        <Button size="sm" variant="secondary" leadingIcon={<AudioWaveform />} href={hrefFor("/hear")}>
+                          Open the Hearing test
+                        </Button>
+                      }
+                    />
                     <ListRow
                       title="Speakers"
                       description="Ghost uses the system output. Change it in your sound settings."

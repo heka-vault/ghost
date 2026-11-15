@@ -4,14 +4,75 @@
  * figure is a count from the daemon (`GET /reach`, the `reach` events, the runs, the apps, the
  * last model check), never an estimate. Still when nothing is happening; alive while agents
  * work.
+ *
+ * One deliberate step away (the simplification pass, 2026-11-14): Today leads with its one
+ * briefing sentence, and the instruments sit behind `Instruments`, a remembered disclosure,
+ * closed for a new install. Closed, it is one quiet line of the day's totals in words, with no
+ * unit or identifier, and a live pulse while calls come back; open, it is exactly the panel
+ * below. A problem the panel would show is said in the headline either way (`troubleWords`).
  */
 import type { ReachCall } from "@ghost/client-ts";
-import { useEffect, useState } from "react";
+import { ChevronRight } from "lucide-react";
+import { useEffect, useId, useState } from "react";
 
 import { hrefFor } from "../../app/router";
 import { nameOf, useToday } from "../../app/today";
 import { cx, formatTime } from "../../ui";
-import { bytes, count, ms, perMinute, wireOf } from "./telemetry";
+import { bytes, count, ms, perMinute, quietLine, wireOf } from "./telemetry";
+
+/** Where the disclosure's choice is remembered, per window (a convenience, never needed). */
+export const INSTRUMENTS_KEY = "ghost.today.instruments";
+
+function readOpen(): boolean {
+  try {
+    return window.localStorage.getItem(INSTRUMENTS_KEY) === "open";
+  } catch {
+    return false;
+  }
+}
+
+function writeOpen(open: boolean) {
+  try {
+    window.localStorage.setItem(INSTRUMENTS_KEY, open ? "open" : "closed");
+  } catch {
+    /* private mode: it still opens, it just won't be remembered */
+  }
+}
+
+/**
+ * How much Ghost did, one step away: closed, the day in a line of words; open, the instruments.
+ * `?instruments=open` opens it for a screenshot under the mock.
+ */
+export function Instruments({ forceOpen }: { forceOpen?: boolean }) {
+  const today = useToday();
+  const [open, setOpen] = useState(() => forceOpen ?? readOpen());
+  const id = useId();
+  const working = today.working.filter((r) => r.status === "running").length;
+  const now = useNow(open ? 0 : working > 0 || today.calls.length > 0 ? 5_000 : 0);
+  const rate = perMinute(today.calls, now);
+  const toggle = () => {
+    writeOpen(!open);
+    setOpen(!open);
+  };
+  return (
+    <div className={cx("today-instruments", open && "is-open")}>
+      <button type="button" className="today-instruments__toggle" aria-expanded={open} aria-controls={id} onClick={toggle}>
+        <ChevronRight size={14} className="today-instruments__chev" aria-hidden />
+        <span className="today-instruments__name">How much Ghost did</span>
+        {!open && <span className="today-instruments__line">{quietLine(today.tally, today.counts.changes)}</span>}
+        {!open && (rate > 0 || working > 0) && (
+          <span className="today-instruments__live t-num">
+            <span className="today-figure__live" aria-hidden />
+            {working > 0 ? `${working} at work now` : `${rate} ${rate === 1 ? "call" : "calls"} in the last minute`}
+          </span>
+        )}
+      </button>
+      <div id={id} hidden={!open}>
+        {open && <Signal />}
+      </div>
+    </div>
+  );
+}
 
 export function Signal() {
   const today = useToday();
