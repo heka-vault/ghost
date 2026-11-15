@@ -4,7 +4,7 @@
 - **Date:** 2026-11-14
 - **Measured in:** [2026-11-14-noisy-room.md](../benchmarks/2026-11-14-noisy-room.md), with [the room harness](../benchmarks/room-harness.md)
 
-Tested with other people in the room on a laptop's built-in microphone, Ghost took the room for the person: once it had answered, other people's talk opened turns, was answered, interrupted its replies, and the session never ended. The room harness reproduced it: one talker across the room 12 dB under the person, on headphones, gave about twenty turns nobody said to Ghost in one session, and the session did not end.
+Tested with other people in the room on a laptop's built-in microphone, Ghost took the room for the person: once it had answered, other people's talk opened turns, was answered, interrupted its replies, and the session never ended. The room harness reproduced it: one talker across the room 12 dB under the person, on headphones, gave 21 to 35 turns nobody said to Ghost in each session, and none of the sessions ended. Across six rooms and four ratios, 2,116 false turns and 54 of 84 sessions that never ended; with this decision, 894 and 40, and 729 → 65 of the false turns from sound well under the person ([the report](../benchmarks/2026-11-14-noisy-room.md)).
 
 Where they came from, in the order they matter:
 
