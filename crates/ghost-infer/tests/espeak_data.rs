@@ -42,6 +42,7 @@ fn data_espeak_cannot_use_is_an_error_and_the_process_lives_on() {
     let e = Espeak::init(Some(&other))
         .err()
         .expect("an error, not exit(1)");
+    assert_eq!(kind(&e), Some(DataProblem::VersionMismatch), "{e}");
     let e = e.to_string();
     assert!(e.contains(&other.display().to_string()), "{e}");
     assert!(e.contains("espeak-ng "), "{e}");
@@ -49,10 +50,9 @@ fn data_espeak_cannot_use_is_an_error_and_the_process_lives_on() {
     // A folder missing a file espeak reads.
     let partial = t.path().join("partial");
     folder(&partial, &[("phontab", b"x"), ("phondata", b"x")]);
-    let e = Espeak::init(Some(&partial))
-        .err()
-        .expect("an error")
-        .to_string();
+    let e = Espeak::init(Some(&partial)).err().expect("an error");
+    assert_eq!(kind(&e), Some(DataProblem::Missing), "{e}");
+    let e = e.to_string();
     assert!(e.contains(&partial.display().to_string()), "{e}");
     assert!(e.contains("GHOST_ESPEAK_DATA"), "{e}");
 

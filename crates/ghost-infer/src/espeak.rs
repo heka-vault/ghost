@@ -600,7 +600,13 @@ mod tests {
             &t.path().join("usr/lib/x86_64-linux-gnu/espeak-ng-data"),
             None,
         );
-        let c = choose(None, Some(&bundle), &[debian.clone()], &system("1.52.0")).unwrap();
+        let c = choose(
+            None,
+            Some(&bundle),
+            std::slice::from_ref(&debian),
+            &system("1.52.0"),
+        )
+        .unwrap();
         assert_eq!(c.dir.as_deref(), Some(debian.as_path()));
         assert_eq!(c.source, Source::System);
         // The first system folder that has the data, in order.
@@ -647,7 +653,7 @@ mod tests {
         let t = tempfile::tempdir().unwrap();
         let arch = data(&t.path().join("usr/share/espeak-ng-data"), None);
         // No bundle copy at all.
-        let e = choose(None, None, &[arch.clone()], &bundled("1.51"))
+        let e = choose(None, None, std::slice::from_ref(&arch), &bundled("1.51"))
             .unwrap_err()
             .1;
         assert!(e.contains("is the system's") && e.contains(ENV_VAR), "{e}");
