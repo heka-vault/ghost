@@ -52,8 +52,8 @@ const FAILED: Record<Action, string> = {
   send: "Couldn’t send that",
   wake: "Couldn’t wake Ghost",
   sleep: "Couldn’t put Ghost to sleep",
-  confirm: "Couldn’t confirm",
-  cancel: "Couldn’t cancel",
+  confirm: "Couldn’t say yes",
+  cancel: "Couldn’t say no",
 };
 
 export default function SessionScreen(_: RouteProps) {
@@ -282,12 +282,12 @@ export default function SessionScreen(_: RouteProps) {
   const settleAlways = async (choice: AlwaysChoice) => {
     if (!pending) return;
     const { id } = pending;
-    const scope = pending.always?.scope ?? "this tool";
+    const offer = pending.always;
     const refocus = keepFocus();
     own.current = { id, action: choice === "allow" ? "confirm" : "cancel" };
     const r = await run(choice === "allow" ? "confirm" : "cancel", () => client.decideAlways(id, choice));
     if (r.ok) {
-      toast(alwaysDone(choice, scope));
+      toast(alwaysDone(choice, offer));
       refocus();
     } else own.current = null;
   };
@@ -423,7 +423,9 @@ export default function SessionScreen(_: RouteProps) {
                 summary={pending.summary}
                 rationale={pending.rationale}
                 operation={`${pending.source}.${pending.operation}`}
+                target={pending.target}
                 expiresAt={pending.expires_at}
+                sayable={inSession && !typedSession(status)}
                 busy={busy === "confirm" ? "confirm" : busy === "cancel" ? "cancel" : busy !== null}
                 disabled={!online}
                 onConfirm={() => settle("confirm")}

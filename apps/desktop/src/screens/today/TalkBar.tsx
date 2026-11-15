@@ -101,7 +101,7 @@ export function TalkBar({ live }: { live: LiveSession }) {
     try {
       await (action === "confirm" ? client.confirm() : client.cancel());
     } catch (e) {
-      toast({ tone: "danger", title: action === "confirm" ? "Couldn’t confirm" : "Couldn’t cancel", description: errorText(e) });
+      toast({ tone: "danger", title: action === "confirm" ? "Couldn’t say yes" : "Couldn’t say no", description: errorText(e) });
     } finally {
       setBusy(null);
     }
@@ -114,7 +114,7 @@ export function TalkBar({ live }: { live: LiveSession }) {
     setBusy(choice === "allow" ? "confirm" : "cancel");
     try {
       await client.decideAlways(p.id, choice);
-      toast(alwaysDone(choice, p.always?.scope ?? "this tool"));
+      toast(alwaysDone(choice, p.always));
     } catch (e) {
       toast({ tone: "danger", title: "Couldn’t save that choice", description: errorText(e) });
     } finally {
@@ -141,7 +141,9 @@ export function TalkBar({ live }: { live: LiveSession }) {
           summary={live.pending.summary}
           rationale={live.pending.rationale}
           operation={`${live.pending.source}.${live.pending.operation}`}
+          target={live.pending.target}
           expiresAt={live.pending.expires_at}
+          sayable={inSession && !typedSession(status)}
           busy={busy === "confirm" ? "confirm" : busy === "cancel" ? "cancel" : false}
           disabled={!online}
           onConfirm={() => void settle("confirm")}

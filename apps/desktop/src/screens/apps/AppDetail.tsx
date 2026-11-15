@@ -1,7 +1,7 @@
 /**
  * Owner: apps. #/apps/:name: one app (ADR 0034). Whether Ghost is connected to it, and each
  * of its tools with what Ghost may do: a change is Allow (it runs and Ghost says so), Ask
- * first or Block, with Quiet in the row's menu; a read is Allow or Block. A choice moves the
+ * first or Never, with Quiet in the row's menu; a read is Allow or Never. A choice moves the
  * tool's own rule in the operator's permissions (`PUT /permissions`, `set`); choosing what
  * the tool would get without a rule clears it, so the file holds only exceptions. A broader
  * rule that still decides the tool is named under it. Under the tools, its own limits in
@@ -219,7 +219,7 @@ export function AppDetail({ name }: { name: string }) {
             <Field
               layout="inline"
               controlWidth="auto"
-              label={`Block ${title}`}
+              label={`Keep Ghost out of ${title}`}
               detail={name}
               help={wholeBlocked ? `Ghost and its agents can’t see or use anything in ${title} until you turn this off.` : `Turn on to keep Ghost out of ${title} entirely, without disconnecting it.`}
             >
@@ -374,11 +374,11 @@ function NotYet({ title }: { title: string }) {
 const CHANGE_OPTIONS: { value: Level; label: string }[] = [
   { value: "allow", label: "Allow" },
   { value: "ask", label: "Ask first" },
-  { value: "block", label: "Block" },
+  { value: "block", label: "Never" },
 ];
 const READ_OPTIONS: { value: Level; label: string }[] = [
   { value: "allow", label: "Allow" },
-  { value: "block", label: "Block" },
+  { value: "block", label: "Never" },
 ];
 
 /**
@@ -413,11 +413,11 @@ function ActionRow({ app, action: a, perms, saving, disabled, onPick }: { app: A
         )}
         {fromOther && (
           <p className="apps-action__note">
-            {permissionLabel(fromOther.list)} by the rule <span className="t-mono apps-code">{fromOther.rule}</span>
+            Set to {permissionLabel(fromOther.list)} by the rule <span className="t-mono apps-code">{fromOther.rule}</span>
             {fromOther.list === "block" ? ", which wins over anything set here." : "."}
           </p>
         )}
-        {fromMode && <p className="apps-action__note">{perms.mode === "ask" ? "Asks first, as every change does in Ask before changes." : "Blocked, as every change is in Read only."}</p>}
+        {fromMode && <p className="apps-action__note">{perms.mode === "ask" ? "Ask first, as every change in Ask before changes." : "Never, as every change in Read only."}</p>}
         {conditions.length > 0 && (
           <p className="apps-action__note">
             A rule decides some calls:{" "}

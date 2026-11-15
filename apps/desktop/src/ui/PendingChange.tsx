@@ -1,45 +1,49 @@
 import type { AlwaysChoice, AlwaysOffer } from "@ghost/client-ts";
+import { permissionLabel } from "@ghost/ui";
 import { ChevronDown } from "lucide-react";
 import { type RefObject, useEffect, useId, useRef, useState } from "react";
 
-import { ALWAYS_TOGGLE, alwaysWords } from "./always";
+import { DETAILS, NO, SAY_IT, YES, alwaysWords, clockWords, faceOf, ignoreEnter } from "./always";
 import { Button } from "./Button";
 import { cx } from "./cx";
+import { formatTime } from "./format";
 
 export interface PendingChangeProps {
-  /** What Ghost will do, in the gate's words (`pending.summary`). */
+  /** What Ghost will do, in the gate's words (`pending.summary`): the card's one sentence. */
   summary: string;
-  /** Why Ghost proposed it (`pending.rationale`). Optional. */
+  /** Why Ghost proposed it (`pending.rationale`). Behind Details. */
   rationale?: string | null;
-  /** `source.operation`, shown as mono detail (`github_issues.close`). */
+  /** `source.operation` (`github.close`), behind Details in mono. Never on the face. */
   operation?: string;
+  /** What it acts on (`pending.target`), behind Details in mono. */
+  target?: string | null;
   /** ISO time the proposal lapses (`pending.expires_at`). Never `expires_in_secs`: that is a snapshot. */
   expiresAt?: string | null;
-  /** Must call `client.confirm()` and nothing else. The click is confirmation evidence (ADR 0013). */
+  /** Must call `client.confirm()` (or the gate's confirm by id) and nothing else. The click is confirmation evidence (ADR 0013). */
   onConfirm: () => void;
-  /** Must call `client.cancel()`. */
+  /** Must call `client.cancel()` (or the gate's cancel by id). */
   onCancel: () => void;
-  /** `true` disables both buttons; `"confirm"` or `"cancel"` also shows that button's spinner. */
+  /** `true` disables the answers; `"confirm"` or `"cancel"` also shows that button's spinner. */
   busy?: boolean | "confirm" | "cancel";
-  /** Both buttons off, no spinner: Ghost isn’t answering (`useLive().online` is false). */
+  /** Every answer off, no spinner: Ghost isn’t answering (`useLive().online` is false). */
   disabled?: boolean;
-  /** Tighter padding, 13px summary, two-line rationale, small buttons: the tray popover. */
+  /** A voice session is live and this is its change: the face adds “or say it”. */
+  sayable?: boolean;
+  /** Tighter padding, a smaller sentence, small buttons: the live strip and the tray. */
   compact?: boolean;
-  /**
-   * Phone sizes: the summary at 16/24, the operation on its own mono line, the rationale
-   * clamped to two lines, then Confirm and Cancel side by side as 56px full-width buttons.
-   */
+  /** Phone sizes: the sentence at 16/24, then Yes and No side by side as 56px buttons. No sticky choice. */
   touch?: boolean;
   /**
-   * What the daemon offers to make the decision stick (`change.always`, ADR 0070): "Yes, and
-   * don’t ask again" and "No, and never" for this change's own tool, behind "More choices" so
-   * neither is ever the default or reached by Enter alone. Shown only with `onAlways`.
+   * What the daemon offers to make the decision stick (`change.always`, ADR 0070): “Always” and
+   * “Never” for this action, quiet secondary buttons on the card itself, worded from the tool's
+   * name and the app's key (`alwaysWords`). Never the default, and Enter never chooses one.
+   * Shown only with `onAlways`, and never on `touch`.
    */
   always?: AlwaysOffer | null;
   /** Must call `client.decideAlways(id, choice)` and nothing else: the click is the operator's own. */
   onAlways?: (choice: AlwaysChoice) => void;
-  /** Start with the choices shown. Gallery specimens and screenshots only. */
-  alwaysOpen?: boolean;
+  /** Start with Details open. Gallery specimens and screenshots only. */
+  detailsOpen?: boolean;
   /** Pin the clock to this epoch-ms time. Gallery specimens and screenshots only; omit in the app. */
   now?: number;
   className?: string;
@@ -60,37 +64,40 @@ function useSecondsLeft(expiresAt: string | null | undefined, pinned?: number): 
   return left;
 }
 
-const clock = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-
 /**
- * A change waiting for the operator's okay: Ghost's most consequential control. One
- * component for the session, the tray, mobile and the review queue, so there is one
- * countdown and one Confirm.
+ * A change waiting for the operator's yes: Ghost's most consequential control, and one shape
+ * everywhere the window asks (2026-11-14, ADR 0070 as amended): the sentence of what will
+ * happen, Yes and No, “or say it” where a voice session is live, and on the window's own
+ * cards “Always” and “Never” for this action as quiet secondary buttons. At most 25 words on
+ * its face (`faceOf`). The tool, the level, the time and the target are behind Details; the
+ * clock shows on the face only in the wait's last minute.
  *
  * Place it where it can't scroll away from its own buttons: in the session it lives in the
- * Page dock directly above the composer. In development it checks on load that whenever
- * its Confirm is on screen, its summary is fully on screen too (not under the compact page
- * bar, the dock or the panel edge), and logs a console error if not.
+ * Page dock directly above the composer. In development it checks on load that whenever its
+ * Yes is on screen, its sentence is fully on screen too, and logs a console error if not.
  */
-export function PendingChange({ summary, rationale, operation, expiresAt, onConfirm, onCancel, busy = false, disabled = false, compact, touch, always, onAlways, alwaysOpen = false, now, className }: PendingChangeProps) {
+export function PendingChange({ summary, rationale, operation, target, expiresAt, onConfirm, onCancel, busy = false, disabled = false, sayable = false, compact, touch, always, onAlways, detailsOpen = false, now, className }: PendingChangeProps) {
   const left = useSecondsLeft(expiresAt, now);
   const expired = left === 0;
   const urgent = left != null && left > 0 && left <= 10;
+  const clock = clockWords(left);
   const summaryId = useId();
   const root = useRef<HTMLElement>(null);
   const summaryRef = useRef<HTMLParagraphElement>(null);
   const confirmRef = useRef<HTMLButtonElement>(null);
-  const [more, setMore] = useState(alwaysOpen);
-  const moreId = useId();
-  // The sticky choice is the desktop's main cards' only: never the phone's touch card.
+  const [open, setOpen] = useState(detailsOpen);
+  const detailsId = useId();
+  // The sticky choice is the window's own cards' only: never the phone's touch card.
   const sticky = always && onAlways && !touch ? alwaysWords(always) : null;
+  const face = faceOf(summary, { sayable, clock, sticky });
   const off = expired || disabled || !!busy;
+  const size = compact ? "sm" : touch ? "lg" : "md";
 
   // One spoken announcement at 10 seconds and one at expiry; the ticking number stays silent.
   const [said, setSaid] = useState("");
   useEffect(() => {
-    if (expired) setSaid("Expired. Ghost left it alone.");
-    else if (urgent && left === 10) setSaid("10 seconds left to confirm.");
+    if (expired) setSaid("Too late. Ghost left it alone.");
+    else if (urgent && left === 10) setSaid("10 seconds left to answer.");
   }, [expired, urgent, left]);
 
   useVisibilityCheck(root, summaryRef, confirmRef, summary);
@@ -100,67 +107,110 @@ export function PendingChange({ summary, rationale, operation, expiresAt, onConf
       ref={root}
       className={cx("g-pending", compact && "g-pending--compact", touch && "g-pending--touch", expired && "is-expired", urgent && "is-urgent", className)}
       aria-labelledby={summaryId}
-      aria-roledescription="change waiting for your okay"
+      aria-roledescription="change waiting for your yes"
     >
-      <div className="g-pending__overline">
-        <span className="g-pending__state">
-          {expired ? (
-            <>Expired · Ghost left it alone</>
-          ) : (
-            <>
-              Waiting for your okay
-              {left != null && (
-                <>
-                  {" · "}
-                  <span className="g-pending__clock t-num" aria-live="off">{clock(left)}</span>
-                </>
-              )}
-            </>
-          )}
-        </span>
-        {operation && !compact && !touch && <span className="g-pending__operation">{operation}</span>}
-      </div>
-      <p ref={summaryRef} id={summaryId} className="g-pending__summary" data-user-content>{summary}</p>
-      {/* Compact and touch cards are too narrow to share the overline: the id gets its own line, whole. */}
-      {operation && (compact || touch) && <p className="g-pending__operation g-pending__operation--line">{operation}</p>}
-      {rationale && <p className="g-pending__rationale" data-user-content>{rationale}</p>}
+      {expired && <p className="g-pending__state">Too late · Ghost left it alone</p>}
+      <p ref={summaryRef} id={summaryId} className="g-pending__summary" data-user-content aria-label={face.cut ? summary : undefined}>
+        {face.summary}
+      </p>
       <div className="g-pending__actions">
-        <Button ref={confirmRef} variant="primary" size={compact ? "sm" : touch ? "lg" : "md"} fullWidth={touch} disabled={expired || disabled || (!!busy && busy !== "confirm")} loading={busy === "confirm"} onClick={onConfirm}>
-          Confirm
+        <Button ref={confirmRef} variant="primary" size={size} fullWidth={touch} disabled={expired || disabled || (!!busy && busy !== "confirm")} loading={busy === "confirm"} onClick={onConfirm}>
+          {YES}
         </Button>
-        <Button variant="ghost" size={compact ? "sm" : touch ? "lg" : "md"} fullWidth={touch} disabled={expired || disabled || (!!busy && busy !== "cancel")} loading={busy === "cancel"} onClick={onCancel}>
-          Cancel
+        <Button variant="secondary" size={size} fullWidth={touch} disabled={expired || disabled || (!!busy && busy !== "cancel")} loading={busy === "cancel"} onClick={onCancel}>
+          {NO}
         </Button>
-        {sticky && (
-          <button type="button" className="g-pending__toggle" aria-expanded={more} aria-controls={moreId} disabled={expired || disabled} onClick={() => setMore((m) => !m)}>
-            {ALWAYS_TOGGLE}
-            <ChevronDown size={14} aria-hidden className={cx("g-pending__chevron", more && "is-open")} />
+        {(sayable || clock) && !touch && (
+          <span className="g-pending__aside">
+            {sayable && !expired && <span>{SAY_IT}</span>}
+            {clock && (
+              <span className="g-pending__clock t-num" aria-live="off">
+                {clock}
+              </span>
+            )}
+          </span>
+        )}
+        {!touch && (
+          <button type="button" className="g-pending__toggle" aria-expanded={open} aria-controls={detailsId} onClick={() => setOpen((o) => !o)}>
+            {DETAILS}
+            <ChevronDown size={14} aria-hidden className={cx("g-pending__chevron", open && "is-open")} />
           </button>
         )}
       </div>
-      {sticky && more && (
-        <div id={moreId} className="g-pending__always" role="group" aria-label="Make this choice stick">
-          {sticky.yes ? (
-            <Button variant="secondary" size="sm" disabled={off} onClick={() => onAlways!("allow")}>
-              <span data-user-content>{sticky.yes}</span>
+      {sticky && (
+        <div className="g-pending__always" role="group" aria-label="Make this choice stick">
+          <span className="g-pending__label" data-user-content>
+            {sticky.label}
+          </span>
+          {sticky.allow ? (
+            <Button variant="ghost" size="sm" disabled={off} aria-label={sticky.always} onKeyDown={ignoreEnter} onClick={() => onAlways!("allow")}>
+              Always
             </Button>
           ) : (
-            <p className="g-pending__held">{sticky.held}</p>
+            <span className="g-pending__held" title={sticky.heldWhy ?? undefined}>
+              {sticky.held}
+            </span>
           )}
-          <Button variant="danger-ghost" size="sm" disabled={off} onClick={() => onAlways!("block")}>
-            <span data-user-content>{sticky.no}</span>
+          <Button variant="danger-ghost" size="sm" disabled={off} aria-label={sticky.never} onKeyDown={ignoreEnter} onClick={() => onAlways!("block")}>
+            Never
           </Button>
         </div>
       )}
-      <span className="sr-only" role="status">{said}</span>
+      {!touch && open && (
+        <dl id={detailsId} className="g-pending__details">
+          {face.cut && (
+            <div>
+              <dt>All of it</dt>
+              <dd data-user-content>{summary}</dd>
+            </div>
+          )}
+          {rationale && (
+            <div>
+              <dt>Why</dt>
+              <dd data-user-content>{rationale}</dd>
+            </div>
+          )}
+          {operation && (
+            <div>
+              <dt>Tool</dt>
+              <dd className="t-mono">{operation}</dd>
+            </div>
+          )}
+          {target && (
+            <div>
+              <dt>On</dt>
+              <dd className="t-mono">{target}</dd>
+            </div>
+          )}
+          <div>
+            <dt>Your rule</dt>
+            <dd>{permissionLabel("ask")}</dd>
+          </div>
+          {sticky?.heldWhy && (
+            <div>
+              <dt>Always</dt>
+              <dd>{sticky.heldWhy}</dd>
+            </div>
+          )}
+          {expiresAt && !expired && (
+            <div>
+              <dt>Waits until</dt>
+              <dd>{formatTime(expiresAt)}</dd>
+            </div>
+          )}
+        </dl>
+      )}
+      <span className="sr-only" role="status">
+        {said}
+      </span>
     </section>
   );
 }
 
 /**
- * Development only: if Confirm is on screen at load, the summary must be too. Measured
- * against the page panel, the compact bar (opaque once the panel scrolls) and the Page dock
- * (when the card isn't in it). Logs a console error, which shot.mjs reports as a page error.
+ * Development only: if Yes is on screen at load, the sentence must be too. Measured against
+ * the page panel, the compact bar (opaque once the panel scrolls) and the Page dock (when the
+ * card isn't in it). Logs a console error, which shot.mjs reports as a page error.
  */
 function useVisibilityCheck(root: RefObject<HTMLElement | null>, summary: RefObject<HTMLElement | null>, confirm: RefObject<HTMLElement | null>, key: string) {
   useEffect(() => {
@@ -168,7 +218,9 @@ function useVisibilityCheck(root: RefObject<HTMLElement | null>, summary: RefObj
     let cancelled = false;
     const t = window.setTimeout(() => {
       void document.fonts.ready.then(() => {
-        const el = root.current, s = summary.current, c = confirm.current;
+        const el = root.current,
+          s = summary.current,
+          c = confirm.current;
         if (cancelled || !el || !s || !c) return;
         const panel = el.closest<HTMLElement>(".shell__main");
         const p = panel?.getBoundingClientRect() ?? { top: 0, bottom: window.innerHeight };
@@ -179,11 +231,11 @@ function useVisibilityCheck(root: RefObject<HTMLElement | null>, summary: RefObj
         const dock = panel?.querySelector<HTMLElement>(".g-page__dock");
         if (dock && !dock.contains(el)) bottom = Math.min(bottom, dock.getBoundingClientRect().top);
         const cr = c.getBoundingClientRect();
-        if (cr.top < top || cr.bottom > bottom) return; // Confirm isn't on screen: nothing to assert.
+        if (cr.top < top || cr.bottom > bottom) return; // Yes isn't on screen: nothing to assert.
         const sr = s.getBoundingClientRect();
         const ok = sr.top >= top - 0.5 && sr.bottom <= bottom + 0.5;
         el.dataset.visibility = ok ? "ok" : "hidden";
-        if (!ok) console.error(`PendingChange: Confirm is on screen but the summary is not (summary ${Math.round(sr.top)}–${Math.round(sr.bottom)}, visible ${Math.round(top)}–${Math.round(bottom)}).`);
+        if (!ok) console.error(`PendingChange: Yes is on screen but the sentence is not (sentence ${Math.round(sr.top)}–${Math.round(sr.bottom)}, visible ${Math.round(top)}–${Math.round(bottom)}).`);
       });
     }, 700);
     return () => {

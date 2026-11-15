@@ -6,8 +6,8 @@
  * rule that matches wins. Ghost's own operations (agents, rules, skills, outputs) are
  * named by the same rules. The model never sees this screen or the file.
  *
- * At the top, what the operator decided on a change Ghost asked about and made stick ("Yes, and
- * don't ask again", "No, and never", ADR 0070), each in a sentence and removable through the same
+ * At the top, what the operator decided on a change Ghost asked about and made stick (Always or
+ * Never on the card, ADR 0070), each in a sentence and removable through the same
  * writer (`DELETE /permissions/choices/{id}`). Everything else (the mode, Try it, the rules in
  * both forms and the file) sits under Advanced, unchanged in behaviour.
  *
@@ -30,6 +30,7 @@ import {
   Badge,
   Button,
   Card,
+  decidedWords,
   Disclosure,
   Field,
   IconButton,
@@ -49,7 +50,7 @@ import {
 } from "../../ui";
 import { type BarState, SaveBar, useCopy } from "./Bar";
 import { useLeaveGuard } from "./guard";
-import { LISTS, type Level, MODES, type Mode, OWN, decidedLine, decidedMeta, errorLine, ruleApp, ruleWords, sentence } from "./model";
+import { LISTS, type Level, MODES, type Mode, OWN, decidedMeta, errorLine, ruleApp, ruleWords, sentence } from "./model";
 import { TomlEditor } from "./TomlEditor";
 import "./policy.css";
 
@@ -201,7 +202,7 @@ export default function PermissionsScreen({ params }: RouteProps) {
       setChoices((all) => (all ?? []).filter((x) => x.id !== c.id));
       client.policy().then((v) => !dirtyRef.current && adopt(v)).catch(() => {});
       client.sources().then(setSources).catch(() => {});
-      toast({ tone: "ok", title: "Removed", description: `${decidedLine(c.sentence)}: not any more. Ghost follows your other rules for it from its next turn.` });
+      toast({ tone: "ok", title: "Removed", description: `${decidedWords(c.choice, c.rule)}: not any more. Ghost follows your other rules for it from its next turn.` });
     } catch (e) {
       setRuleError(sentence(errorText(e)));
     } finally {
@@ -349,7 +350,7 @@ export default function PermissionsScreen({ params }: RouteProps) {
         </Notice>
       )}
 
-      <Section id="perm-decided" title="What you’ve decided" description="When Ghost asks about a change, “More choices” on the card can make your answer stick. Those answers are here; remove one and Ghost goes back to the rules below.">
+      <Section id="perm-decided" title="What you’ve decided" description="When Ghost asks about a change, Always or Never on the card makes your answer stick. Those answers are here; remove one and Ghost goes back to the rules below.">
         <Decided choices={choices} online={online} setting={setting} onRemove={(c) => void removeChoice(c)} />
       </Section>
 
@@ -505,13 +506,13 @@ function Decided({ choices, online, setting, onRemove }: { choices: PermissionCh
         <div key={c.id} className="policy-rule policy-decided">
           <div className="policy-rule__text">
             <span className="policy-rule__words" data-user-content>
-              {decidedLine(c.sentence)}
+              {decidedWords(c.choice, c.rule)}
             </span>
             <span className="policy-decided__meta t-small t-3">
               {decidedMeta(c)} · <span className="t-mono">{c.rule}</span>
             </span>
           </div>
-          <Button size="sm" variant="ghost" aria-label={`Remove: ${decidedLine(c.sentence)}`} loading={setting === `choice:${c.id}`} disabled={!online || (!!setting && setting !== `choice:${c.id}`)} onClick={() => onRemove(c)}>
+          <Button size="sm" variant="ghost" aria-label={`Remove: ${decidedWords(c.choice, c.rule)}`} loading={setting === `choice:${c.id}`} disabled={!online || (!!setting && setting !== `choice:${c.id}`)} onClick={() => onRemove(c)}>
             Remove
           </Button>
         </div>

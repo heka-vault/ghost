@@ -158,13 +158,13 @@ export function AskGhost({ onReply }: { onReply: () => void }) {
               disabled={!online}
               onConfirm={() => void client.confirm()}
               onCancel={() => void client.cancel()}
-              // ADR 0070: the same decision made to stick, behind More choices; the click is the
+              target={pending.target}
+              // ADR 0070: the same decision made to stick, on the card; the click is the
               // operator's own and calls `decideAlways` and nothing else.
               always={pending.always}
               onAlways={(choice) => {
-                const scope = pending.always?.scope ?? "this tool";
                 client.decideAlways(pending.id, choice).then(
-                  () => toast(alwaysDone(choice, scope)),
+                  () => toast(alwaysDone(choice, pending.always)),
                   (e) => setError(errorText(e)),
                 );
               }}
