@@ -1477,7 +1477,7 @@
         "type": "object"
       },
       "DebugAudioMark": {
-        "description": "Debug mode is on (ADR 0073).",
+        "description": "Debug mode is on (ADR 0074).",
         "properties": {
           "until": {
             "description": "When it turns itself off (RFC 3339); null when Ghost was started with\n`GHOST_DEBUG_AUDIO=1`, on until that process ends.",
@@ -7148,7 +7148,7 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/DebugAudioMark",
-                "description": "Set while debug mode is on (ADR 0073): Ghost is logging what it hears and its audio\ndecisions to its own log on this computer. The desktop shows it, unmistakably."
+                "description": "Set while debug mode is on (ADR 0074): Ghost is logging what it hears and its audio\ndecisions to its own log on this computer. The desktop shows it, unmistakably."
               },
               {
                 "type": "null"
