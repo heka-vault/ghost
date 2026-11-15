@@ -4,12 +4,15 @@
  * and the words over the quiet side (the slot). On a phone, or any screen taller than wide, the
  * float takes the top of the screen, centred, with the words under it.
  *
- * A still of the float is the first paint, and all there is with JavaScript off or reduced
- * motion (with a Play button). Once the page has loaded and gone quiet, and the hero is on
- * screen, the live float page (/float/: the app's own floating view on its mock daemon over the
- * README's desktop) is loaded behind the still, and takes its place the moment Ghost first comes
- * forward. Off screen for two seconds, the frame is emptied, so nothing runs while nobody
- * watches; back on screen, the loop starts again.
+ * A still of the float is the first paint, and all there is with JavaScript off, reduced
+ * motion or Save-Data (with a Play button). Once the page has loaded and gone quiet, and the
+ * hero is on screen, the live float page (/float/: the app's own floating view on the site's
+ * mock over the README's desktop) is loaded behind the still, and takes its place the moment
+ * Ghost first comes forward. After two turns (about 50 s) with nobody touching the hero, Ghost
+ * settles: the scene stops and Wisp waits, lit and still, with Play beside it; pointing at the
+ * hero, a tap, Play, Hear it or coming back to it starts the turn again. Off screen for two
+ * seconds, the frame is emptied, so nothing runs while nobody watches; back on screen, the loop
+ * starts again.
  *
  * Sound only on request: "Hear it" turns it on and off, and nothing of it (the clip, its
  * timeline, the captions) is fetched before the first press. On, the turn starts again from the
@@ -51,17 +54,30 @@ const alt = "Ghost floating beside the work on a desktop at night, a beam out to
   const float = root?.querySelector<HTMLElement>(".hero__float");
   const credit = root?.querySelector<HTMLElement>("[data-credit]");
   const play = root?.querySelector<HTMLButtonElement>("[data-play]");
-  const reduced = matchMedia("(prefers-reduced-motion: reduce)");
+  const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
+  // Save-Data (and the media query where a browser has it) is a still, like reduced motion: no frame unless asked.
+  const saveData = !!(navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData || matchMedia("(prefers-reduced-data: reduce)").matches;
+  const reduced = { get matches() { return reducedMotion.matches || saveData; } };
+  /** Turns played with nobody touching the hero before Ghost settles. */
+  const TURNS = 2;
   const stacked = matchMedia(root?.dataset.stackedQuery ?? "(max-width: 899px)");
   const LIVE_QUIET = "Live: Ghost floating over a made-up session. Nothing sent.";
   const LIVE_SOUND = "Live, with sound: a made-up session, every voice synthetic. Nothing sent.";
+  const RESTING = "Ghost, at rest after a made-up session. Nothing sent.";
 
   let frame: HTMLIFrameElement | null = null;
   let away = 0;
   let chosen = false;
+  /** Turns started since the visitor last touched the hero (`ghost:loop`); the next past TURNS settles. */
+  let turns = 0;
+  let resting = false;
 
   function start() {
     if (!float || frame) return;
+    turns = 0;
+    resting = false;
+    root?.removeAttribute("data-rest");
+    if (play) play.hidden = true;
     frame = document.createElement("iframe");
     frame.className = "hero__frame";
     frame.title = "Ghost floating, playing a made-up session";
@@ -80,8 +96,31 @@ const alt = "Ghost floating beside the work on a desktop at night, a beam out to
   }
   function stop() {
     root?.removeAttribute("data-live");
+    root?.removeAttribute("data-rest");
+    resting = false;
     frame?.remove();
     frame = null;
+  }
+  /** Two turns played: the scene stops in the frame, Wisp waits, Play comes back. */
+  function rest() {
+    if (!frame || resting) return;
+    resting = true;
+    root?.setAttribute("data-rest", "");
+    frame.contentWindow?.postMessage({ ghost: "rest" }, location.origin);
+    sound.hush();
+    if (credit && root?.hasAttribute("data-live")) credit.textContent = RESTING;
+    if (play) play.hidden = false;
+  }
+  /** The visitor is back: the turn again from the wake (the front page counts afresh). */
+  function wake() {
+    turns = 0;
+    if (!frame) return start();
+    if (!resting) return;
+    resting = false;
+    root?.removeAttribute("data-rest");
+    if (play) play.hidden = !(reduced.matches && !chosen);
+    if (credit && root?.hasAttribute("data-live")) credit.textContent = sound.on ? LIVE_SOUND : LIVE_QUIET;
+    frame.contentWindow?.postMessage({ ghost: "restart" }, location.origin);
   }
 
   // ------------------------------------------------------------------ the sound, on request
@@ -112,7 +151,7 @@ const alt = "Ghost floating beside the work on a desktop at night, a beam out to
      * clip by 40 to 90 ms without it; site:sound-check).
      */
     fromTheTop() {
-      if (!this.on || !this.audio || !this.onScreen) return;
+      if (!this.on || !this.audio || !this.onScreen || resting) return;
       this.audio.currentTime = 0.06;
       this.audio.play().catch(() => this.set(false));
     },
@@ -128,6 +167,13 @@ const alt = "Ghost floating beside the work on a desktop at night, a beam out to
         if (caption) caption.hidden = true;
         for (const b of bars) b.style.removeProperty("--l");
       }
+    },
+    /** Ghost settled: the clip waits with it, the button still on, and goes on with the next turn. */
+    hush() {
+      this.audio?.pause();
+      cancelAnimationFrame(this.raf);
+      if (caption) caption.hidden = true;
+      for (const b of bars) b.style.removeProperty("--l");
     },
     /** The press itself: play inside the gesture, as every browser's autoplay rule asks. */
     press() {
@@ -150,8 +196,11 @@ const alt = "Ghost floating beside the work on a desktop at night, a beam out to
         if (hearLabel) hearLabel.textContent = "No sound here";
       });
       // The turn again from the wake, so the visitor hears a whole one; the float says when it starts.
-      if (frame) frame.contentWindow?.postMessage({ ghost: "restart" }, location.origin);
-      else if (this.onScreen && (!reduced.matches || chosen)) start();
+      if (frame && resting) wake();
+      else if (frame) {
+        turns = 0;
+        frame.contentWindow?.postMessage({ ghost: "restart" }, location.origin);
+      } else if (this.onScreen && (!reduced.matches || chosen)) start();
     },
     /** Captions and the button's wave, from the clip's own clock, while it plays. */
     tick() {
@@ -189,7 +238,7 @@ const alt = "Ghost floating beside the work on a desktop at night, a beam out to
       this.onScreen = visible;
       if (!this.on || !this.audio) return;
       if (!visible) this.audio.pause();
-      else if (frame) frame.contentWindow?.postMessage({ ghost: "restart" }, location.origin);
+      else if (frame && !resting) frame.contentWindow?.postMessage({ ghost: "restart" }, location.origin);
       else if (reduced.matches && !chosen) this.fromTheTop();
     },
   };
@@ -198,7 +247,11 @@ const alt = "Ghost floating beside the work on a desktop at night, a beam out to
   addEventListener("message", (e) => {
     if (e.origin !== location.origin || e.source !== frame?.contentWindow) return;
     if (e.data?.ghost === "forward") live();
-    if (e.data?.ghost === "loop") sound.fromTheTop();
+    if (e.data?.ghost === "loop") {
+      // The scene starts its turn: past the second with nobody touching the hero, Ghost settles instead.
+      if (++turns > TURNS) rest();
+      else sound.fromTheTop();
+    }
   });
 
   if (root && float) {
@@ -213,7 +266,8 @@ const alt = "Ghost floating beside the work on a desktop at night, a beam out to
         window.clearTimeout(away);
         sound.seen(e.isIntersecting);
         if (e.isIntersecting) {
-          if (!reduced.matches || chosen) start();
+          if (frame && resting) wake();
+          else if (!reduced.matches || chosen) start();
         } else if (frame) {
           away = window.setTimeout(stop, 2000);
         }
@@ -226,13 +280,19 @@ const alt = "Ghost floating beside the work on a desktop at night, a beam out to
     if (document.readyState === "complete") idle();
     else addEventListener("load", idle, { once: true });
 
-    if (reduced.matches && play) {
-      play.hidden = false;
+    if (play) {
+      play.hidden = !reduced.matches;
       play.addEventListener("click", () => {
         chosen = true;
         play.hidden = true;
-        start();
+        wake();
       });
     }
+    // Pointing at the hero or tapping it wakes a settled Ghost (a button's own click does its own thing).
+    const touched = (e: PointerEvent) => {
+      if (resting && !(e.target instanceof Element && e.target.closest("button, a"))) wake();
+    };
+    root.addEventListener("pointermove", touched, { passive: true });
+    root.addEventListener("pointerdown", touched, { passive: true });
   }
 </script>

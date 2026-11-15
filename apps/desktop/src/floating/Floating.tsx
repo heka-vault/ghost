@@ -338,7 +338,8 @@ export function FloatingRoom({ stage = false }: { stage?: boolean } = {}) {
         L.modelSecs = ms;
         setModelSecs(ms);
       }
-      if (wisp.current) wisp.current.style.setProperty("--flt-pulse", (1 + 0.035 * A.level + 0.02 * A.you).toFixed(4));
+      // The pulse on the element itself: a custom property here re-cascaded through all of Wisp's SVG every frame.
+      if (wisp.current) wisp.current.style.scale = (1 + 0.035 * A.level + 0.02 * A.you).toFixed(4);
       const sinceArrive = performance.now() - moved.current.arrive;
       const shock = L.arriving ? (sinceArrive - WAKE_MS * 0.62) / 700 : -1;
       const scan = L.arriving ? Math.min(1.05, sinceArrive / (WAKE_MS * 0.9)) : -1;
@@ -598,7 +599,8 @@ export function FloatingRoom({ stage = false }: { stage?: boolean } = {}) {
             className="flt-node"
             data-on="1"
             aria-hidden
-            style={{ left: layout.places[i]?.[0], top: layout.places[i]?.[1] }}
+            // Placed by `translate`, not left/top: a place moving as the fan widens is then no layout.
+            style={{ translate: layout.places[i] ? `${layout.places[i][0]}px ${layout.places[i][1]}px` : undefined }}
           >
             <span className="flt-node__name">{p.name}</span>
             {p.word && <span className="flt-node__word">{p.word}</span>}
