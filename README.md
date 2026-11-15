@@ -295,7 +295,7 @@ right there. Its voice, an app, an agent and a first question follow, each optio
    **Settings › Agents › New agent**, where you also pick its shape, colour and voice. It
    appears on the left rail; "transfer me to Ledger" hands the conversation over.
 5. **Make a schedule.** "Every weekday at nine, check what's open in the app repo and tell me",
-   or **Watching › Add schedule**. The run happens with nobody there; its answer lands on
+   or type it on **On its own** (**Set it up by hand** has the form). The run happens with nobody there; its answer lands on
    **Today**. A change it would make that needs your yes waits there instead.
 6. **The floating room.** The first run turns it on when you first say "Hey Ghost";
    **Settings › General › The floating room › Float over the desktop** (or the rail, or the tray) turns it off and on.

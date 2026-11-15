@@ -349,7 +349,7 @@ An agent can work with nobody there. A **schedule** is one job in SQLite (`sched
 time, `every` interval (`30m`, `2h`, `1d`) or a `cron` expression of five fields in a named
 time zone (`croner` over `chrono-tz`; the machine's zone by default). It may have active
 hours, a grace window, limits, skills to start with, an urgency, and a check. The operator
-adds one on the desktop's Watching screen (`/schedules`); an agent told "check the build
+adds one on the desktop's On its own screen (`/schedules`); an agent told "check the build
 every morning at nine" adds its own with `ghost_schedule_manage`, through the gate.
 
 A **run** is one execution (`ghost_voice::headless::HeadlessRunner`): the agent's prompt
