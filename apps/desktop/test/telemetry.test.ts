@@ -1,7 +1,7 @@
 import type { ReachCall, ReachView } from "@ghost/client-ts";
 import { describe, expect, it } from "vitest";
 
-import { bytes, count, perMinute, reachSentence, tallyFor, tallyOf, wireOf } from "../src/screens/today/telemetry";
+import { bytes, count, EMPTY_TALLY, perMinute, quietLine, reachSentence, type Tally, tallyFor, tallyOf, wireOf } from "../src/screens/today/telemetry";
 
 const call = (at: string, over: Partial<ReachCall> = {}): ReachCall => ({ at, session_id: "run-r1", agent: "ledger", app: "github", tool: "search_issues", read: true, ok: true, items: 30, bytes: 71_200, ms: 340, ...over });
 const total = (over: object = {}) => ({ key: "all", agent: null, calls: 3, reads: 2, changes: 1, failed: 0, items: 412, bytes: 3_700_000, ms: 900, apps: ["ghost", "github", "linear"], first: null, last: "2026-11-12T15:00:00.000Z", ...over });
@@ -53,5 +53,19 @@ describe("telemetry", () => {
     expect(wireOf([b], 6, [a, b]).length).toBe(2);
     expect(perMinute([a, b], Date.parse("2026-11-12T16:00:45.000Z"))).toBe(2);
     expect(perMinute([a, b], Date.parse("2026-11-12T16:01:10.000Z"))).toBe(1);
+  });
+});
+
+describe("the instruments closed (the simplification pass, 2026-11-14)", () => {
+  const t = (over: Partial<Tally>): Tally => ({ ...EMPTY_TALLY, ...over });
+  it("says the day in words, with no unit or identifier", () => {
+    const line = quietLine(t({ calls: 12, items: 79, bytes: 412_000, ms: 9_000, apps: ["calendar", "github"] }), 8);
+    expect(line).toBe("Read 79 items across 2 apps and made 8 changes.");
+    // No size, no time, no dotted tool name, no model id.
+    expect(line).not.toMatch(/\d\s?(B|kB|MB|GB|ms|s)\b/);
+    expect(line).not.toMatch(/[a-z]+[._/][a-z]/);
+    expect(quietLine(t({ calls: 1, items: 1 }), 0)).toBe("Read 1 item.");
+    expect(quietLine(EMPTY_TALLY, 0)).toBe("Nothing read or changed yet today.");
+    expect(quietLine(EMPTY_TALLY, 1)).toBe("Made 1 change.");
   });
 });
