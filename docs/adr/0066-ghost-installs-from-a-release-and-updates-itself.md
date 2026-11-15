@@ -151,3 +151,5 @@ that bridge release must be updated by hand ([releasing.md](../releasing.md)).
 - **An apt repository** (`apt upgrade` updates Ghost). More infrastructure to keep (a signed
   repository, its key in every machine's keyring) for one operator's ask of a button in the
   app. Can come later beside this.
+
+*Amended 2026-11-15 (#168, [ADR 0075](0075-the-bundle-carries-what-its-libraries-need.md)):* the bundle carries espeak-ng's data for the library the AppImage carries; the .deb's install test adds Debian 13, and the AppImage is run in clean Arch and Fedora containers. Debian 12 and older are not supported.

@@ -7,8 +7,9 @@ on:
   workflow_dispatch:
 
 # The bundle (ADR 0038): one .deb and one AppImage carrying the desktop app and ghostd,
-# built the way CI builds them, each signed for the app's updater (ADR 0066), installed
-# into a clean Ubuntu 24.04 and 26.04, and, for a tag only, published as a GitHub release
+# built the way CI builds them, each signed for the app's updater (ADR 0066), the .deb
+# installed into a clean Ubuntu 24.04 and 26.04 and Debian 13, the AppImage run in a clean
+# Arch and Fedora (ADR 0075), and, for a tag only, published as a GitHub release
 # with the update manifest (latest.json) the installed apps read. Nothing here bumps a
 # version or makes a tag.
 jobs:
@@ -92,9 +93,12 @@ jobs:
       # in the bundle: the app downloads them in its first run (ADR 0066), so `ghostd
       # check` names them and exits 1; what it must not name is a script from the
       # checkout, which a person with the .deb does not have.
-      - name: install test in a clean Ubuntu 24.04 and 26.04
+      # ADR 0075: Debian 13 too (glibc 2.41 runs a 24.04 build; Debian 12's 2.36 does not, and
+      # is not supported). Each must start espeak-ng, Kokoro's tokenizer, with data that fits
+      # its library: the system's (24.04's is the bundle's own version, so the bundle's copy).
+      - name: install test in a clean Ubuntu 24.04 and 26.04 and Debian 13
         run: |
-          for image in ubuntu:24.04 ubuntu:26.04; do
+          for image in ubuntu:24.04 ubuntu:26.04 debian:13; do
             echo "::group::$image"
             # GHOST_REPORTS_URL points at nothing: no command here sends a report, and if one
             # did it would go nowhere. `reports status` proves the key is compiled in.
@@ -108,6 +112,8 @@ jobs:
               grep -q "^onnxruntime: /usr/lib/heka-ghost-desktop/onnxruntime/libonnxruntime.so.1.24.4$" <<<"$out"
               grep -q "^models: /usr/lib/heka-ghost-desktop/models$" <<<"$out"
               grep -q "Parakeet: .* is not there" <<<"$out"
+              grep -Eq "^espeak-ng: [0-9.]+, data at /usr/lib/.*espeak-ng-data \((the bundle.s|the system.s)\)$" <<<"$out"
+              ! grep -q "Ghost can.t speak" <<<"$out"
               ! grep -q "scripts/onnxruntime.sh\|scripts/models.sh\|make models" <<<"$out"
               ghostd reports status | tee /dev/stderr | grep -qx "error reports: on"
               ldd /usr/bin/heka-ghost-desktop /usr/bin/ghostd | { ! grep "not found"; }
@@ -132,6 +138,24 @@ jobs:
         run: |
           cd "$RUNNER_TEMP" && "$GITHUB_WORKSPACE"/dist/bundle/*.AppImage --appimage-extract >/dev/null
           squashfs-root/usr/bin/ghostd version | tee /dev/stderr | grep -qF "release $(git -C "$GITHUB_WORKSPACE" rev-parse --short=7 HEAD)"
+      # ADR 0075, #168: the AppImage on two other families, in clean containers with a minimal
+      # desktop stack and no espeak-ng of their own (scripts/distro-check.sh): every binary
+      # finds its libraries, `ghostd check` finds the bundle's runtime, models and espeak-ng
+      # data, Kokoro renders one sentence into memory (its 340 MB, pinned, fetched once here),
+      # and a voice that cannot start is reported, with its part and kind, to a stub on the
+      # container's loopback, never to the real service.
+      - name: Kokoro, for the voice test
+        run: scripts/models.sh kokoro
+      - name: the AppImage on Arch and Fedora
+        run: |
+          for image in archlinux:latest fedora:latest; do
+            echo "::group::$image"
+            docker run --rm -v "$RUNNER_TEMP/squashfs-root":/app:ro \
+              -v "$HOME/.cache/ghost/kokoro":/kokoro:ro \
+              -v "$PWD/scripts/distro-check.sh":/check.sh:ro \
+              "$image" bash /check.sh "$(git rev-parse HEAD)"
+            echo "::endgroup::"
+          done
       # ADR 0067: the page source maps never ship. The build moved them out of dist before the
       # shell embedded it (tools/report_chunks.py refuses to finish otherwise); this checks the
       # files themselves: neither package carries a .map, the shell's embedded assets name

@@ -53,9 +53,11 @@ Read the result:
 
 - **`Linux x86_64`** is required. Anything else: stop and tell the person Ghost runs on x86-64
   Linux only.
-- **`ubuntu 24.04` or `ubuntu 26.04`**: use the .deb (steps 3 to 7). Another x86-64 Linux: the
-  AppImage (step 3 with `.AppImage`, then the note at the end of step 4). The AppImage needs
-  FUSE 2 (`libfuse2t64` on Ubuntu); without it it runs with `--appimage-extract-and-run`.
+- **`ubuntu 24.04`, `ubuntu 26.04` or `debian 13`**: use the .deb (steps 3 to 7). Debian 12 or
+  older: stop; Ghost needs a newer system library (glibc 2.39). Another x86-64 Linux (Arch,
+  Fedora, …): the AppImage (step 3 with `.AppImage`, then the note at the end of step 4). The
+  AppImage needs FUSE 2 (`libfuse2t64` on Ubuntu, `fuse2` on Arch); without it it runs with
+  `--appimage-extract-and-run`.
 - **The session is `x11` or `wayland`** with a display set. `none` (an SSH login, a container):
   stop; Ghost is a desktop app and needs the person at their desktop.
 - **Sound**: `PulseAudio (on PipeWire …)` or a `pipewire` process is best. Plain PulseAudio
@@ -115,8 +117,9 @@ is `2026.11.0`** (older than this guide): in step 5 use
 fetch ends; add `> /dev/null` after step 8's `--command` and `sleep 5;` before step 9's `}`.
 
 **AppImage instead**: no password. Move the file from step 3's `ready:` path to
-`~/Applications/` and `chmod +x` it. There is no `ghostd` command with the AppImage: skip steps
-5 and 6 (the first run does both) and in step 8 use the app's Settings › Developer › Outside tools.
+`~/Applications/`, `chmod +x` it, then `~/Applications/<file> ghostd command install`: it writes
+`~/.local/bin/ghostd`, which runs the AppImage. Use that path wherever a step says `ghostd` or
+`/usr/bin/ghostd`, and `ghostd version` as the check here.
 
 ## 5. Download Ghost's ears and voice
 
@@ -207,9 +210,8 @@ Then add Ghost to your own configuration:
   (keep the entries already there):
   `{"mcpServers": {"ghost": {"command": "/usr/bin/ghostd", "args": ["mcp", "serve", "--client", "cursor"]}}}`
 
-Your new tools usually appear in your next session. With the AppImage there is no bridge
-command: ask the person to use Ghost's Settings › Developer › Outside tools › Connect a tool and paste the
-line it shows into their own terminal, not this chat.
+Your new tools usually appear in your next session. With the AppImage, `~/.local/bin/ghostd`
+(step 4) is the bridge command in all three lines.
 
 ## 9. Ghost says hello
 

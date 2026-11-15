@@ -91,3 +91,5 @@ edited it and took the marker out.
   tests above fail otherwise.
 - The journal keeps Ghost's log lines until the system rotates them; Mesa's shader cache is
   every app's. Neither is Ghost's to remove, and the README says so.
+
+*Amended 2026-11-15 (#168, [ADR 0075](0075-the-bundle-carries-what-its-libraries-need.md)):* `ghostd uninstall` also lists the `ghostd` command Ghost wrote in `~/.local/bin` for the AppImage, only when the file there is Ghost's own.
