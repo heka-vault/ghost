@@ -249,7 +249,16 @@ const both = (names: string[]) => (names.length < 2 ? names.join("") : `${names.
  * server answering on its own port, or a provider's key in the environment Ghost was started
  * in, each one click. Never another tool's sign-in, and the step says why in one sentence.
  */
-export function FoundModels({ view, chosen, onChoose }: { view: OtherToolsView | null; chosen: string; onChoose: (provider: string, model: string | null) => void }) {
+export function FoundModels({
+  view,
+  chosen,
+  onChoose,
+}: {
+  view: OtherToolsView | null;
+  chosen: string;
+  /** `variable`: a key in the environment Ghost was started in, used only once chosen (#137). */
+  onChoose: (provider: string, model: string | null, variable: string | null) => void;
+}) {
   if (!view || (!view.models.length && !view.own_sign_in.length)) return null;
   return (
     <div className="other-models">
@@ -277,8 +286,8 @@ export function FoundModels({ view, chosen, onChoose }: { view: OtherToolsView |
                     Chosen
                   </Badge>
                 ) : (
-                  <Button size="sm" variant="secondary" onClick={() => onChoose(m.provider, m.models[0] ?? null)}>
-                    Use {m.title}
+                  <Button size="sm" variant="secondary" onClick={() => onChoose(m.provider, m.models[0] ?? null, m.variable && !m.chosen ? m.variable : null)}>
+                    {m.variable && !m.chosen ? `Use ${m.variable}` : `Use ${m.title}`}
                   </Button>
                 )
               }

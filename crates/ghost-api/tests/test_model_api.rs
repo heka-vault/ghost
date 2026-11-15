@@ -585,22 +585,103 @@ fn refused() -> Result<HashMap<String, String>, AppError> {
 const SHELL_TOKEN: &str = "sk-shell-0123456789abcdef";
 
 #[tokio::test]
-async fn a_connection_from_the_environment_ghost_was_started_in_is_the_one_reported() {
-    // Started from a shell with a provider's address and key exported: Ghost answers with
-    // them, so the desktop must not say it needs a model.
+async fn a_providers_key_from_the_environment_is_offered_and_not_used() {
+    // #137: started from a shell (a coding agent's, a terminal) with a provider's address and
+    // key exported and no model chosen in Ghost: Ghost does not run on them. It says it has
+    // no model, as with no key at all, and names what it found without using it.
     let w = World::new();
     w.set_started("ANTHROPIC_BASE_URL", "http://proxy.lan:8317");
     w.set_started("ANTHROPIC_AUTH_TOKEN", SHELL_TOKEN);
     let v = w.client().get("/model").await;
+    assert_eq!(v["ready"], false, "{}", v.text);
+    assert_eq!(v["password_set"], false);
+    assert_eq!(
+        v["provider"], "anthropic",
+        "the shell's address is not the connection"
+    );
+    assert_eq!(v["from_environment"], json!([]));
+    assert_eq!(
+        v["offered"],
+        json!(["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"])
+    );
+    assert!(!v.text.contains(SHELL_TOKEN));
+}
+
+#[tokio::test]
+async fn a_key_from_the_environment_is_used_once_chosen_and_said() {
+    let w = World::new();
+    w.set_started("ANTHROPIC_BASE_URL", "http://proxy.lan:8317");
+    w.set_started("ANTHROPIC_AUTH_TOKEN", SHELL_TOKEN);
+    let c = w.client();
+    // Settings › Model's Use them: the names into settings.env, never a value.
+    let r = c
+        .put(
+            "/settings",
+            json!({"values": {"GHOST_LLM_FROM_ENV": "ANTHROPIC_AUTH_TOKEN,ANTHROPIC_BASE_URL"}}),
+        )
+        .await;
+    assert_eq!(r.status, 200, "{}", r.text);
+    let saved = std::fs::read_to_string(&w.settings_path).unwrap();
+    assert!(saved.contains("GHOST_LLM_FROM_ENV=ANTHROPIC_AUTH_TOKEN,ANTHROPIC_BASE_URL"));
+    assert!(!saved.contains(SHELL_TOKEN));
+    let v = c.get("/model").await;
     assert_eq!(v["ready"], true, "{}", v.text);
-    assert_eq!(v["password_set"], true);
     assert_eq!(v["base_url"], "http://proxy.lan:8317");
-    // Named, never shown.
+    // Said wherever it is true: named, never shown.
     assert_eq!(
         v["from_environment"],
         json!(["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"])
     );
+    assert_eq!(v["offered"], json!([]));
+    assert_eq!(
+        v["chosen_from_environment"],
+        json!(["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"])
+    );
     assert!(!v.text.contains(SHELL_TOKEN));
+}
+
+#[tokio::test]
+async fn the_developers_switch_takes_every_key_from_the_environment() {
+    let w = World::new();
+    w.set_started("GHOST_LLM_FROM_ENV", "1");
+    w.set_started("ANTHROPIC_BASE_URL", "http://proxy.lan:8317");
+    w.set_started("ANTHROPIC_AUTH_TOKEN", SHELL_TOKEN);
+    let v = w.client().get("/model").await;
+    assert_eq!(v["ready"], true, "{}", v.text);
+    assert_eq!(
+        v["from_environment"],
+        json!(["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"])
+    );
+}
+
+#[tokio::test]
+async fn what_an_update_kept_is_used_and_named_until_the_person_chooses() {
+    let w = World::new();
+    w.set_started("ANTHROPIC_BASE_URL", "http://proxy.lan:8317");
+    w.set_started("ANTHROPIC_AUTH_TOKEN", SHELL_TOKEN);
+    w.kept_from_before.lock().unwrap().extend([
+        "ANTHROPIC_AUTH_TOKEN".to_string(),
+        "ANTHROPIC_BASE_URL".to_string(),
+    ]);
+    let c = w.client();
+    let v = c.get("/model").await;
+    assert_eq!(v["ready"], true, "{}", v.text);
+    assert_eq!(
+        v["kept_from_before"],
+        json!(["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"])
+    );
+    // Don't use them: the person's no ends what the update kept.
+    let r = c
+        .put("/settings", json!({"values": {"GHOST_LLM_FROM_ENV": "0"}}))
+        .await;
+    assert_eq!(r.status, 200, "{}", r.text);
+    let v = c.get("/model").await;
+    assert_eq!(v["ready"], false, "{}", v.text);
+    assert_eq!(v["kept_from_before"], json!([]));
+    assert_eq!(
+        v["offered"],
+        json!(["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"])
+    );
 }
 
 #[tokio::test]

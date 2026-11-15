@@ -127,10 +127,17 @@ async fn what_is_found_is_names_and_kinds_never_a_secret() {
     assert_eq!(models[0]["provider"], "ollama");
     assert_eq!(models[0]["models"], json!(["llama3.2:latest", "qwen3:8b"]));
     assert_eq!(models[1]["provider"], "openrouter");
-    assert_eq!(
-        models[1]["how"],
-        "OPENROUTER_API_KEY is set in the environment Ghost was started in."
+    // #137: offered by its name, not used until chosen.
+    assert!(
+        models[1]["how"]
+            .as_str()
+            .unwrap()
+            .starts_with("OPENROUTER_API_KEY is set in the environment Ghost was started in. Ghost uses it only if you choose it"),
+        "{}",
+        models[1]["how"]
     );
+    assert_eq!(models[1]["variable"], "OPENROUTER_API_KEY");
+    assert_eq!(models[1]["chosen"], false);
     // Claude Code's sign-in is not one Ghost may not use: Ghost runs the program (ADR 0069).
     assert_eq!(r["own_sign_in"], json!(["Codex"]));
     assert_eq!(

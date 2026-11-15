@@ -27,7 +27,7 @@ import {
   sectionDomId,
   type Values,
 } from "./model";
-import { environmentNote } from "./environment";
+import { environmentNote, FROM_ENV, keptNote, offerNote } from "./environment";
 import { Row } from "./parts";
 import { PasswordRow, passwordTitle } from "./Passwords";
 import { ClaudeCodeFix, ClaudeCodeLead } from "./ClaudeCodeCard";
@@ -126,6 +126,7 @@ export function ModelSection({ s, conn, values, online, mock, setValues, help, e
         ghost: true,
         used_by: ["The model connection"],
         from_environment: false,
+        offered: false,
         added: null,
         updated: null,
         last_used: null,
@@ -273,6 +274,25 @@ export function ModelSection({ s, conn, values, online, mock, setValues, help, e
   // The page's draft becomes the settings Ghost is using, for the save bar to keep them.
   const keepFromEnv = () => setValues(Object.fromEntries(CONNECTION_KEYS.map((k) => [k, conn?.values[k] ?? ""])));
 
+  /* ------------------- a provider's key in that environment: offered, used once chosen (#137) */
+  const offer = conn ? offerNote(conn) : null;
+  const keptFromBefore = conn ? keptNote(conn) : null;
+  const [choosing, setChoosing] = useState(false);
+  // Names only into settings.env (GHOST_LLM_FROM_ENV); a value never passes through here.
+  const chooseFromEnv = async (value: string, title: string) => {
+    setChoosing(true);
+    try {
+      await client.updateSettings({ values: { [FROM_ENV]: value } });
+      toast({ title, tone: "ok" });
+      onPassword([]);
+    } catch (e) {
+      toast({ title: "Couldn’t save that", description: errorText(e), tone: "danger" });
+    } finally {
+      setChoosing(false);
+    }
+  };
+  const keptValue = () => [...new Set([...(conn?.chosen_from_environment ?? []), ...(conn?.kept_from_before ?? [])])].sort().join(",");
+
   /* -------------------------------------------------------------------- render */
   const editing = CONNECTION_KEYS.some((k) => (values[k] ?? "") !== (s.values[k] ?? "")) || keyOpen;
   // A fresh check of what is on screen, else the last kept check of the saved connection.
@@ -316,6 +336,29 @@ export function ModelSection({ s, conn, values, online, mock, setValues, help, e
         {conn && !conn.ready && !editing && (
           <Notice tone="info" title="Ghost can’t reach a model yet">
             {sentence(conn.problems[0] ?? "")}
+          </Notice>
+        )}
+        {keptFromBefore && !editing && (
+          <Notice tone="warn" title={keptFromBefore.title}>
+            <p>{keptFromBefore.text}</p>
+            <p>
+              <Button size="sm" variant="secondary" disabled={!online || choosing} onClick={() => void chooseFromEnv(keptValue(), "Ghost keeps using them")}>
+                Use {conn?.kept_from_before.length === 1 ? "it" : "them"}
+              </Button>{" "}
+              <Button size="sm" variant="ghost" disabled={!online || choosing} onClick={() => void chooseFromEnv("0", "Ghost stopped using them")}>
+                Don’t use {conn?.kept_from_before.length === 1 ? "it" : "them"}
+              </Button>
+            </p>
+          </Notice>
+        )}
+        {offer && !editing && (
+          <Notice tone="info" title={offer.title}>
+            <p>{offer.text}</p>
+            <p>
+              <Button size="sm" variant="secondary" disabled={!online || choosing} onClick={() => void chooseFromEnv(offer.useValue, "Ghost uses it from the environment")}>
+                {offer.useLabel}
+              </Button>
+            </p>
           </Notice>
         )}
         {fromEnv && !editing && (

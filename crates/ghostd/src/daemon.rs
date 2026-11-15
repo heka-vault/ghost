@@ -456,6 +456,9 @@ pub struct Daemon {
     /// The process environment the daemon was started in, read once (`env` resolves the
     /// two with `ghost_core::environment`, and so does the control API).
     pub started_env: Arc<HashMap<String, String>>,
+    /// The providers' keys and address only `started_env` holds, which Ghost offers and
+    /// does not use until the person chooses them (#137; `environment_keys`).
+    pub inherited: ghost_core::environment::SharedInherited,
     pub ports: Ports,
     pub rt: PathBuf,
     pub stop: CancellationToken,
@@ -549,11 +552,14 @@ impl Daemon {
         ));
         let (raise_tx, raise_rx) = mpsc::unbounded_channel();
         let phone_feed = Arc::new(crate::phone::stream::PhoneFeed::new());
+        let started_env: HashMap<String, String> = std::env::vars().collect();
+        let inherited = crate::environment_keys::inherited_at_start(&cfg, &started_env);
         Self {
             cfg: Mutex::new(cfg),
             voice: Mutex::new(Arc::new(voice)),
             environ: Arc::new(Mutex::new(HashMap::new())),
-            started_env: Arc::new(std::env::vars().collect()),
+            started_env: Arc::new(started_env),
+            inherited: Arc::new(std::sync::RwLock::new(inherited)),
             ports,
             rt: runtime_dir(),
             stop: CancellationToken::new(),
@@ -617,7 +623,9 @@ impl Daemon {
 
     /// The environment the daemon was started in, for a test (the process's by default).
     pub fn with_started_env(mut self, env: HashMap<String, String>) -> Self {
+        let inherited = crate::environment_keys::inherited_at_start(&self.cfg(), &env);
         self.started_env = Arc::new(env);
+        self.inherited = Arc::new(std::sync::RwLock::new(inherited));
         self
     }
 
@@ -688,7 +696,19 @@ impl Daemon {
     /// (the vault's values, the settings saved since). The control API resolves the same
     /// (`Deps::ghost_env`), so the desktop says what a session uses (ADR 0037).
     pub fn env(&self) -> HashMap<String, String> {
-        ghost_core::environment::resolve(&self.started_env, &lock(&self.environ))
+        ghost_core::environment::resolve(
+            &self.started_env,
+            &lock(&self.environ),
+            &self.inherited_now(),
+        )
+    }
+
+    /// The providers' keys only the start's environment holds, and what an update kept.
+    pub fn inherited_now(&self) -> ghost_core::environment::Inherited {
+        self.inherited
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     pub fn passwords(&self) -> Option<Arc<Passwords>> {
@@ -1018,6 +1038,7 @@ impl Daemon {
             return;
         }
         info!("passwords: the vault is open");
+        self.settle_environment_keys(); // #137: decided once the vault's keys are there
         let env = self.env();
         match VoiceSettings::from_vars(|name| env.get(name).cloned()) {
             Ok(fresh) => *lock(&self.voice) = Arc::new(fresh),
@@ -1115,7 +1136,9 @@ impl Daemon {
     }
 
     pub(crate) fn apply_model(&self, values: &BTreeMap<String, Option<String>>) -> Vec<String> {
-        let known = llm_env_keys();
+        let mut known = llm_env_keys();
+        known.insert(ghost_core::environment::FROM_ENV); // #137: the person's choice, live
+        let chose = values.contains_key(ghost_core::environment::FROM_ENV);
         let keys: Vec<String> = values
             .keys()
             .filter(|k| known.contains(k.as_str()))
@@ -1151,6 +1174,9 @@ impl Daemon {
                     warn!("llm: {problem}");
                 }
                 *lock(&self.voice) = Arc::new(fresh);
+                if chose {
+                    self.refresh_waiting_now(); // the kept key's note follows the choice
+                }
                 keys
             }
             Err(e) => {
@@ -1623,6 +1649,10 @@ impl Daemon {
             std::fs::create_dir_all(parent)?;
         }
         let store = Arc::new(Store::open(&cfg.db_path)?);
+        // #137: once, what an update keeps of a key from the start's environment, before
+        // anything reads the model's or Jev's keys.
+        d.late.store.set(store.clone()).ok();
+        d.settle_environment_keys();
         // ADR 0057: an operator who turned listening off and restarted is still not heard.
         match d.mic.attach(Items::new(store.clone())) {
             Ok(Listening::On) => {}
@@ -1881,6 +1911,10 @@ impl Daemon {
                             .map(|slow| (crate::model_check::SLOW_NOTE_KEY.to_string(), slow))
                             .into_iter()
                             .collect();
+                        // #137: a key an update kept from the environment Ghost was started in.
+                        if let Some(note) = d.environment_keys_note() {
+                            out.push((crate::environment_keys::NOTE_KEY.to_string(), note));
+                        }
                         // ADR 0063: why the realtime voice was not used, shown, never said.
                         if let Some(note) = lock(&d.realtime_note).clone() {
                             out.push((REALTIME_NOTE_KEY.to_string(), note));
@@ -2851,6 +2885,7 @@ impl Daemon {
             stt_model: voice.stt_model.clone(),
             environ: self.environ.clone(),
             started_env: self.started_env.clone(),
+            inherited: self.inherited.clone(),
             conversations: Some(p.conversations),
             apps: Some(p.apps),
             catalog: Some(p.catalog),
@@ -3103,14 +3138,14 @@ pub fn build_jev(
     cfg: &GhostdSettings,
     env: &HashMap<String, String>,
 ) -> Result<Option<Arc<JevClient>>, ghost_core::JevError> {
-    let mut env = env.clone();
-    env.insert("TYPESAFE_API_KEY".into(), cfg.typesafe_api_key.clone());
-    env.insert("OPENROUTER_API_KEY".into(), cfg.openrouter_api_key.clone());
+    // The keys come from the environment Ghost's settings read (`Daemon::env`), where a key
+    // only the start's environment holds is left out until chosen (#137); never from the
+    // process environment `cfg` was read from.
     let options = JevOptions {
         timeout: Duration::from_secs_f64(cfg.jev_deadline_secs.max(0.1)),
         ..JevOptions::default()
     };
-    Ok(JevClient::from_env(&cfg.jev, &env, options)?.map(Arc::new))
+    Ok(JevClient::from_env(&cfg.jev, env, options)?.map(Arc::new))
 }
 
 /// The TTS engine, for the log (`ghost_voice.elevenlabs.describe_tts`).
@@ -4071,7 +4106,7 @@ pub(crate) mod tests {
         let deps = d.started_env.clone();
         let live = lock(&d.environ).clone();
         assert_eq!(
-            ghost_core::environment::resolve(&deps, &live),
+            ghost_core::environment::resolve(&deps, &live, &d.inherited_now()),
             d.env(),
             "the API resolves what the daemon does"
         );

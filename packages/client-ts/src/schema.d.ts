@@ -2945,6 +2945,8 @@ export interface components {
         };
         /** @description A model connection that is already there. */
         FoundModelView: {
+            /** @description That variable is chosen for Ghost already. */
+            chosen: boolean;
             /** @description How Ghost knows, in a sentence. */
             how: string;
             /** @description What a local server lists; empty for a key. */
@@ -2952,6 +2954,11 @@ export interface components {
             /** @description The provider id Settings › Model takes. */
             provider: string;
             title: string;
+            /**
+             * @description For a key in the environment Ghost was started in: its variable, which Ghost uses
+             *     only once it is chosen (`GHOST_LLM_FROM_ENV`, #137). The name, never a value.
+             */
+            variable?: string | null;
         };
         HearBlock: {
             /** @description Across the room: takes start after a countdown and end on silence. */
@@ -3485,6 +3492,11 @@ export interface components {
             /** @description Set when it isn't the provider's own. */
             base_url_override?: string | null;
             /**
+             * @description The names `GHOST_LLM_FROM_ENV` chooses now of what that environment holds ("1" is all
+             *     of them). What an update kept is `kept_from_before`.
+             */
+            chosen_from_environment: string[];
+            /**
              * @description A second model for a spoken turn's first call (ADR 0050), as saved; none, and the
              *     one model answers everything.
              */
@@ -3500,10 +3512,21 @@ export interface components {
             headers: {
                 [key: string]: string;
             };
+            /**
+             * @description Of `from_environment`, those Ghost uses because an update kept them, not because the
+             *     person chose them: the waiting list's note says so (#137).
+             */
+            kept_from_before: string[];
             /** @description The older setting it comes from ("GHOST_LLM_ENDPOINT=openrouter"). */
             legacy?: string | null;
             /** @description As saved; "" means the provider's default. */
             model: string;
+            /**
+             * @description A provider's key or address the environment Ghost was started in holds and Ghost does
+             *     not use, because nobody chose it for Ghost (#137): offered, by name, never a value.
+             *     Using one writes its name to `GHOST_LLM_FROM_ENV` in settings.env.
+             */
+            offered: string[];
             /** @description The name. */
             password?: string | null;
             password_set: boolean;
@@ -3722,6 +3745,11 @@ export interface components {
             last_used?: string | null;
             /** @description What config files call it: ${NAME} */
             name: string;
+            /**
+             * @description Not in the vault, set in the environment Ghost was started in, and not used: a
+             *     provider's key nobody chose for Ghost (#137). Settings › Model offers it. The name only.
+             */
+            offered: boolean;
             /** @description In the vault; None while the vault is closed (locked): unknown. */
             set: boolean | null;
             /** Format: date-time */
