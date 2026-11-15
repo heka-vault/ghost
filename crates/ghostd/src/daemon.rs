@@ -911,7 +911,7 @@ impl Daemon {
             return;
         };
         let p = gate.pending(&session_id, None).ok().flatten();
-        let view = p.map(|p| ghost_api::pending_view(&p, None));
+        let view = p.map(|p| ghost_api::pending_view(&p, None, &gate.autonomy().permissions));
         let now = view.as_ref().map(|v| v.id.clone());
         let was = self.state.pending().map(|p| p.id);
         if now != was {

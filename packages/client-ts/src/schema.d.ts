@@ -1070,6 +1070,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/permissions/choices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Permission Choices
+         * @description The rules the operator set from a decision on the desktop's card (ADR 0070), newest first, each in a sentence with when it was set and from which change.
+         */
+        get: operations["choices_permissions_choices_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/permissions/choices/{choice_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove Permission Choice
+         * @description Take a rule set from a decision back out (ADR 0070): it leaves policy.toml through the same writer, which puts the file back as it was when that rule was the last thing added, and the gate reads it at once.
+         */
+        delete: operations["remove_choice_permissions_choices__choice_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/phone": {
         parameters: {
             query?: never;
@@ -1124,6 +1164,26 @@ export interface paths {
         /** Put Policy */
         put: operations["put_policy_policy_put"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/proposals/{proposal_id}/always": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Decide And Remember
+         * @description Yes, and don't ask again (allow), or No, and never (block), on a change waiting for the operator (ADR 0070). The rule names exactly that change's tool, taken from the waiting change, never from the request; it is written to `[permissions]` in policy.toml, the gate reads it at once, and the change is then confirmed or dropped as a click would. A click in the operator's desktop session only (`classifier: ui`).
+         */
+        post: operations["always_proposals__proposal_id__always_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2204,6 +2264,36 @@ export interface components {
             secs?: number | null;
             /** @description The session it happened in. */
             session_id: string;
+        };
+        /**
+         * @description Which way the operator decided, made to stick.
+         * @enum {string}
+         */
+        AlwaysChoice: "allow" | "block";
+        /**
+         * @description "Yes, and don't ask again" and "No, and never" for one waiting change (ADR 0070): one
+         *     tool of one app, named from the tool's name and the app's key only.
+         */
+        AlwaysOffer: {
+            /**
+             * @description Whether "don't ask again" takes effect; false when a more careful rule of the
+             *     operator's would still ask.
+             */
+            allow: boolean;
+            /** @description Said instead of "don't ask again" when it would not take effect. */
+            held?: string | null;
+            /** @description The rule a click writes (`github.issue_write`). */
+            rule: string;
+            /** @description The tool and app in plain words: `“issue write” in github`. */
+            scope: string;
+        };
+        AlwaysRequest: {
+            choice: components["schemas"]["AlwaysChoice"];
+        };
+        /** @description What a decision made to stick did: the rule, and the change run (a yes) or dropped. */
+        AlwaysResult: {
+            choice: components["schemas"]["PermissionChoiceView"];
+            outcome?: components["schemas"]["OutcomeView"] | null;
         };
         /** @description One of an app's tools, and what Ghost's own permissions say about it. */
         AppAction: {
@@ -3515,6 +3605,7 @@ export interface components {
             type: "pending";
         };
         PendingProposal: {
+            always?: components["schemas"]["AlwaysOffer"] | null;
             /** Format: date-time */
             expires_at: string;
             /** Format: double */
@@ -3526,6 +3617,22 @@ export interface components {
             source: string;
             summary: string;
             target: string;
+        };
+        /** @description A rule the operator set from a decision (ADR 0070), as Settings › Permissions shows it. */
+        PermissionChoiceView: {
+            choice: components["schemas"]["AlwaysChoice"];
+            /** Format: int64 */
+            id: number;
+            /** @description False when the rule is no longer in the file (taken out by hand). */
+            in_file: boolean;
+            /** @description The change it was decided on. */
+            proposal_id: string;
+            /** @description The rule in the file (`github.issue_write`). */
+            rule: string;
+            /** @description In a sentence: `“issue write” in github runs without asking`. */
+            sentence: string;
+            /** Format: date-time */
+            set_at: string;
         };
         /** @description Whole lists, the mode, or one rule moved; what is not given is kept. */
         PermissionsUpdate: {
@@ -3609,6 +3716,12 @@ export interface components {
          *     route, `PUT /permissions`).
          */
         PolicyUpdate: {
+            /**
+             * @description The file as the editor opened it (ADR 0070). With `text`: when the file has changed
+             *     since (a rule set from a decision, another window), the save is refused with a 409
+             *     rather than writing over that change.
+             */
+            base?: string | null;
             routes?: components["schemas"]["RoutesView"] | null;
             text?: string | null;
         };
@@ -4667,6 +4780,10 @@ export interface components {
 export type SchemaAck = components['schemas']['Ack'];
 export type SchemaActivityEvent = components['schemas']['ActivityEvent'];
 export type SchemaActivityView = components['schemas']['ActivityView'];
+export type SchemaAlwaysChoice = components['schemas']['AlwaysChoice'];
+export type SchemaAlwaysOffer = components['schemas']['AlwaysOffer'];
+export type SchemaAlwaysRequest = components['schemas']['AlwaysRequest'];
+export type SchemaAlwaysResult = components['schemas']['AlwaysResult'];
 export type SchemaAppAction = components['schemas']['AppAction'];
 export type SchemaAppConnect = components['schemas']['AppConnect'];
 export type SchemaAppConnectResult = components['schemas']['AppConnectResult'];
@@ -4781,6 +4898,7 @@ export type SchemaPasswordSet = components['schemas']['PasswordSet'];
 export type SchemaPasswordsView = components['schemas']['PasswordsView'];
 export type SchemaPendingEvent = components['schemas']['PendingEvent'];
 export type SchemaPendingProposal = components['schemas']['PendingProposal'];
+export type SchemaPermissionChoiceView = components['schemas']['PermissionChoiceView'];
 export type SchemaPermissionsUpdate = components['schemas']['PermissionsUpdate'];
 export type SchemaPermissionsView = components['schemas']['PermissionsView'];
 export type SchemaPhase = components['schemas']['Phase'];
@@ -7003,6 +7121,71 @@ export interface operations {
             };
         };
     };
+    choices_permissions_choices_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PermissionChoiceView"][];
+                };
+            };
+        };
+    };
+    remove_choice_permissions_choices__choice_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                choice_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+            /** @description No such choice */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The file doesn't read */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     phone_phone_get: {
         parameters: {
             query?: never;
@@ -7104,6 +7287,48 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["PolicyResult"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    always_proposals__proposal_id__always_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AlwaysRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlwaysResult"];
+                };
+            };
+            /** @description Not waiting, or the choice would not take effect */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

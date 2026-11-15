@@ -116,6 +116,13 @@ impl IntoResponse for ApiError {
     }
 }
 
+/// A file Ghost reads or writes for the operator failed: a 500 with the reason.
+impl From<std::io::Error> for ApiError {
+    fn from(e: std::io::Error) -> Self {
+        ApiError::internal(e.to_string())
+    }
+}
+
 pub type ApiResult<T> = Result<T, ApiError>;
 
 /// serde's messages quote what they found (`invalid type: string "sk-…", expected a map`);

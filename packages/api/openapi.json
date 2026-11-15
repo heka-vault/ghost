@@ -95,6 +95,78 @@
         ],
         "type": "object"
       },
+      "AlwaysChoice": {
+        "description": "Which way the operator decided, made to stick.",
+        "enum": [
+          "allow",
+          "block"
+        ],
+        "type": "string"
+      },
+      "AlwaysOffer": {
+        "description": "\"Yes, and don't ask again\" and \"No, and never\" for one waiting change (ADR 0070): one\ntool of one app, named from the tool's name and the app's key only.",
+        "properties": {
+          "allow": {
+            "description": "Whether \"don't ask again\" takes effect; false when a more careful rule of the\noperator's would still ask.",
+            "type": "boolean"
+          },
+          "held": {
+            "description": "Said instead of \"don't ask again\" when it would not take effect.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rule": {
+            "description": "The rule a click writes (`github.issue_write`).",
+            "type": "string"
+          },
+          "scope": {
+            "description": "The tool and app in plain words: `“issue write” in github`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rule",
+          "scope",
+          "allow"
+        ],
+        "type": "object"
+      },
+      "AlwaysRequest": {
+        "properties": {
+          "choice": {
+            "$ref": "#/components/schemas/AlwaysChoice"
+          }
+        },
+        "required": [
+          "choice"
+        ],
+        "type": "object"
+      },
+      "AlwaysResult": {
+        "description": "What a decision made to stick did: the rule, and the change run (a yes) or dropped.",
+        "properties": {
+          "choice": {
+            "$ref": "#/components/schemas/PermissionChoiceView"
+          },
+          "outcome": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/OutcomeView",
+                "description": "The change's verified outcome, for a yes."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "choice"
+        ],
+        "type": "object"
+      },
       "AppAction": {
         "description": "One of an app's tools, and what Ghost's own permissions say about it.",
         "properties": {
@@ -4163,6 +4235,17 @@
       },
       "PendingProposal": {
         "properties": {
+          "always": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AlwaysOffer",
+                "description": "What the desktop's card may offer to make the decision stick (ADR 0070). None when\nno rule can name this tool."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "expires_at": {
             "format": "date-time",
             "type": "string"
@@ -4200,6 +4283,48 @@
           "rationale",
           "expires_at",
           "expires_in_secs"
+        ],
+        "type": "object"
+      },
+      "PermissionChoiceView": {
+        "description": "A rule the operator set from a decision (ADR 0070), as Settings › Permissions shows it.",
+        "properties": {
+          "choice": {
+            "$ref": "#/components/schemas/AlwaysChoice"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "in_file": {
+            "description": "False when the rule is no longer in the file (taken out by hand).",
+            "type": "boolean"
+          },
+          "proposal_id": {
+            "description": "The change it was decided on.",
+            "type": "string"
+          },
+          "rule": {
+            "description": "The rule in the file (`github.issue_write`).",
+            "type": "string"
+          },
+          "sentence": {
+            "description": "In a sentence: `“issue write” in github runs without asking`.",
+            "type": "string"
+          },
+          "set_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "rule",
+          "choice",
+          "sentence",
+          "set_at",
+          "proposal_id",
+          "in_file"
         ],
         "type": "object"
       },
@@ -4513,6 +4638,13 @@
       "PolicyUpdate": {
         "description": "Either the raw TOML, or the routes rendered into it (the permissions have their own\nroute, `PUT /permissions`).",
         "properties": {
+          "base": {
+            "description": "The file as the editor opened it (ADR 0070). With `text`: when the file has changed\nsince (a rule set from a decision, another window), the save is refused with a 409\nrather than writing over that change.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "routes": {
             "oneOf": [
               {
@@ -10454,6 +10586,80 @@
         ]
       }
     },
+    "/permissions/choices": {
+      "get": {
+        "description": "The rules the operator set from a decision on the desktop's card (ADR 0070), newest first, each in a sentence with when it was set and from which change.",
+        "operationId": "choices_permissions_choices_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PermissionChoiceView"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Permission Choices",
+        "tags": [
+          "policy"
+        ]
+      }
+    },
+    "/permissions/choices/{choice_id}": {
+      "delete": {
+        "description": "Take a rule set from a decision back out (ADR 0070): it leaves policy.toml through the same writer, which puts the file back as it was when that rule was the last thing added, and the gate reads it at once.",
+        "operationId": "remove_choice_permissions_choices__choice_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "choice_id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ack"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such choice"
+          },
+          "409": {
+            "description": "The file doesn't read"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Remove Permission Choice",
+        "tags": [
+          "policy"
+        ]
+      }
+    },
     "/phone": {
       "delete": {
         "description": "Forget the paired phone; its signatures stop working at once.",
@@ -10642,6 +10848,61 @@
           }
         },
         "summary": "Confirm",
+        "tags": [
+          "writes"
+        ]
+      }
+    },
+    "/proposals/{proposal_id}/always": {
+      "post": {
+        "description": "Yes, and don't ask again (allow), or No, and never (block), on a change waiting for the operator (ADR 0070). The rule names exactly that change's tool, taken from the waiting change, never from the request; it is written to `[permissions]` in policy.toml, the gate reads it at once, and the change is then confirmed or dropped as a click would. A click in the operator's desktop session only (`classifier: ui`).",
+        "operationId": "always_proposals__proposal_id__always_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AlwaysRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlwaysResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "description": "Not waiting, or the choice would not take effect"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Decide And Remember",
         "tags": [
           "writes"
         ]
