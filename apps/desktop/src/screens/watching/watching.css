@@ -93,3 +93,43 @@
 .wat-runcard__said.is-clamped { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .wat-runcard__more { align-self: flex-start; display: inline-flex; align-items: center; gap: var(--space-1); padding: 0; border: 0; background: none; color: var(--accent-text); font: inherit; font-size: var(--text-sm); cursor: pointer; }
 .wat-runcard__more .is-up { transform: rotate(180deg); }
+
+/* ------------------------------------------------ On its own (the owner's simplification, 2026-11-14) */
+/* Running now leads the page; Ask Ghost follows; the list; Set it up by hand last. */
+#wat-now { margin-bottom: var(--space-8); }
+.wat-ask { margin-bottom: var(--space-10); }
+.wat-ask__form { display: flex; flex-direction: column; gap: var(--space-2); }
+.wat-ask__label { margin: 0; color: var(--text-1); }
+.wat-ask__form > p { margin: 0; }
+.wat-ask__row { display: flex; align-items: flex-end; gap: var(--space-3); margin-top: var(--space-2); }
+.wat-ask__row > :first-child { flex: 1 1 auto; min-width: 0; }
+.wat-ask__examples { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-1); }
+.wat-ask__example {
+  padding: var(--space-1) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-full);
+  background: var(--bg-surface); color: var(--text-2); font: inherit; font-size: var(--text-sm); cursor: pointer; text-align: left;
+  transition: background-color var(--duration-fast) var(--ease-out), color var(--duration-fast);
+}
+.wat-ask__example:hover { background: var(--bg-hover); color: var(--text-1); }
+.wat-ask__said { display: flex; flex-direction: column; gap: var(--space-3); margin-top: var(--space-4); padding-top: var(--space-4); border-top: 1px solid var(--border-subtle); }
+.wat-ask__you, .wat-ask__ghost { margin: 0; display: flex; flex-direction: column; gap: var(--space-0_5); overflow-wrap: anywhere; }
+.wat-ask__you > :last-child { color: var(--text-2); font-size: var(--text-lg); line-height: var(--leading-lg); }
+.wat-ask__ghost > :last-child { color: var(--text-1); font-size: var(--text-lg); line-height: var(--leading-lg); }
+.wat-ask__wait { margin: 0; display: inline-flex; align-items: center; gap: var(--space-2); }
+.wat-ask__after { display: flex; align-items: center; gap: var(--space-4); }
+
+/* A row is a sentence: Ghost's words, and someone's own words after them. */
+.wat-sentence { display: block; white-space: normal; overflow-wrap: anywhere; color: var(--text-1); font-weight: var(--weight-medium); }
+.wat-sentence [data-user-content] { font-weight: var(--weight-regular); }
+.wat-owners { margin-bottom: var(--space-4); }
+
+.wat-hand { margin-top: var(--space-10); }
+.wat-hand__lead { margin: var(--space-2) 0 var(--space-3); }
+.wat-hand .wat-files { margin-top: var(--space-4); }
+
+/* A watch's or a webhook's details: the old rows' words, as a list of terms. */
+.wat-details { display: grid; grid-template-columns: max-content 1fr; gap: var(--space-2) var(--space-4); margin: 0; overflow-wrap: anywhere; }
+.wat-details dt { color: var(--text-3); font-size: var(--text-sm); line-height: var(--leading-md); }
+.wat-details dd { margin: 0; color: var(--text-1); }
+.wat-details .t-mono { font-variant-ligatures: none; }
+/* The badge reads on at the sentence's end, never on a line of its own. */
+.wat-sentence > span + * { margin-left: var(--space-2); vertical-align: 1px; }

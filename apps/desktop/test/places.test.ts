@@ -31,6 +31,7 @@ describe("where a waiting item leads", () => {
   it("leads each place to its own route", () => {
     expect(placeOf({ place: "model" })).toEqual({ path: "/settings/model", label: "Open Settings › Model" });
     expect(placeOf({ place: "apps" })?.path).toBe("/apps");
+    expect(placeOf({ place: "watching" })).toEqual({ path: "/on-its-own", label: "See what Ghost does on its own" });
   });
   it("leads nowhere without a place, or with one it doesn't know", () => {
     expect(placeOf({ place: null })).toBeNull();
