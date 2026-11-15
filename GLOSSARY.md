@@ -47,8 +47,10 @@ what is said is the **conversation**. The phone metaphor of the first increment 
 | **Error report** | What an installed Ghost sends when something in it breaks: a crash, a page's error, or one of a short list of failures, with the version, the component and coarse facts about the computer, scrubbed of anything said, typed or heard, any app's words and any password (ADR 0067). On by default in a released build, one switch in Settings › General, never from the checkout. | *Telemetry* or *analytics*: Ghost sends no usage, only errors. |
 | **Update** | Replacing the installed Ghost (the app and the daemon it carries) with a newer release, from Settings › General's **Update and restart**, only when the operator presses it and never during a session or a run (ADR 0066). | An *upgrade*: one word, update. |
 | **Speech models** | Parakeet (Ghost's ears) and Kokoro (its voice): too large for the bundle, so the app downloads them once, in the first run or Settings › Sound (ADR 0066). The four small models (the voice activity detector, Smart Turn, the wake front end) are in the bundle. | The *model*, which is the language model Ghost thinks with, connected in Settings › Model. |
+| **The desk** | The main window as you work at it: Today's briefing, the rail and the pages. A live session that doesn't float is seen here, on the rail's status card, Today's live strip and the conversation screen. One of the two postures (`desk` in `posture.ts`). | The *room*, an in-window posture removed on 2026-11-14. |
+| **The floating room** | Ghost over the desktop with no window around it: a thin line at rest, coming forward when called while the window isn't the one in use (ADR 0059). The other posture (`float`), and the way to have Ghost big and present. Its switch is in Settings › General, on the rail and in the tray. | The *room* or *room view*: the in-window posture, gone. *Hold*, which is a session waiting for its name. |
 | **Mark** | Ghost's brand: Wisp lit from within on the night tile, in the state's colour, with the ring of ticks where it reads (docs/design-system.md, The mark). Drawn by `@ghost/ui` `mark.ts`. | logo, icon (for the whole) |
-| **Wisp** | Ghost's mascot: a round head, a rounded three-lobed hem and two mitts ("hem with hands", 2026-11-13). Ghost is always Wisp; each agent is one of Wisp's family (a drop, a bell, a hood, a cloud, a lantern, a star, a moth, or Wisp itself) in a colour of its own: its **look**, a field on the agent the operator picks (ADR 0061). | |
+| **Wisp** | Ghost's mascot: a round head, a rounded three-lobed hem and two mitts ("hem with hands", 2026-11-13). Ghost is always Wisp; each agent is one of Wisp's family (a drop, a bell, a cloud, a lantern, a star, a moth, or Wisp itself) in a colour of its own: its **look**, a field on the agent the operator picks (ADR 0061). | |
 
 Retired words, so old notes still read: a **line** was an agent; a **toolkit** was a
 permission bundle in the policy file and a **template** a folder that stamped one out; a
@@ -56,4 +58,7 @@ permission bundle in the policy file and a **template** a folder that stamped on
 and a **move** put an agent in another one (ADR 0024, gone with ADR 0035, as are its
 **journal** and shared memory); a **settled** line is a retired agent; a thread's
 **scope**, an **allowlist** and **owner** routing are gone (ADR 0034); a **server** is an
-app, and its **declaration** of reads, writes and levels is gone.
+app, and its **declaration** of reads, writes and levels is gone. The **room** (and the
+conversation screen's **room view**) was Ghost filling the main window after a pause, by Ctrl+.
+or the rail's button; it was removed on 2026-11-14 in favour of the desk and the floating room
+(ADR 0059 as amended).

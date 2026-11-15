@@ -7,7 +7,7 @@
  *
  * Titles, questions and choices are other systems' and agents' words: shown as text only.
  */
-import type { QuestionView, WaitingItemView } from "@ghost/client-ts";
+import type { PendingProposal, QuestionView, WaitingItemView } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
 import { BellOff, ExternalLink } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -17,6 +17,7 @@ import { hrefFor } from "../../app/router";
 import { nameOf, useToday } from "../../app/today";
 import { Button, IconButton, Input, LineGlyph, Menu, PendingChange, cx, errorText, relativeTime, useLive, useToast } from "../../ui";
 import { clock, needLine } from "./model";
+import { withoutLive } from "./live";
 import { actionFailure, canSend, expiresIn, sourceLabel, untilTomorrowMorning } from "./needs";
 import { bytes, count, tallyFor } from "./telemetry";
 
@@ -43,7 +44,8 @@ function useAct(): { busy: string | null; act: Act } {
 }
 
 
-export function Now() {
+/** `pending` and `question`: what the talk bar's live strip shows right now, left out here so nothing shows twice. */
+export function Now({ pending = null, question = null }: { pending?: PendingProposal | null; question?: QuestionView | null } = {}) {
   const today = useToday();
   const { client } = useGhost();
   const { online } = useLive();
@@ -53,7 +55,7 @@ export function Now() {
     const t = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(t);
   }, []);
-  const { decide, answer, know } = today.needs;
+  const { decide, answer, know } = withoutLive(today.needs, pending, question);
   const clear = !decide.length && !answer.length && !know.length;
 
   return (

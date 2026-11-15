@@ -47,10 +47,10 @@ import { ModelSection } from "../settings/ModelSection";
 import { HeroPresence, StepFrame, type StepFrameProps } from "./frame";
 import { canFloat, setFirstMeeting, useFloating, useFloatingForward } from "../../app/floating";
 import { markStateOf, moodOf } from "../../app/mood";
-import { usePosture } from "../../app/PostureContext";
+import { useSaying } from "../session/live";
 import { gb, speechLine, SpeechRow } from "./speech";
 import type { Wizard } from "./index";
-import { firstSentence, inputName, phraseCase, splitList, wakeHelp } from "./state";
+import { answeredHere, firstSentence, inputName, phraseCase, splitList, wakeHelp } from "./state";
 import { keeping } from "../hear/wakeTakes";
 import { ErrorReportsLine } from "../settings/ErrorReports";
 import { exchangeOf, isAwake, useWakeWatch } from "./watch";
@@ -510,19 +510,49 @@ function FloatLine({ floating, met }: { floating: ReturnType<typeof useFloating>
 }
 
 /**
+ * The moment where Ghost doesn't float (2026-11-14, the room view removed): this beat shows
+ * Ghost responding, under the lit mark: its state in a word, its first line as it is spoken
+ * (said words bright, the rest dim, from the same stamps as the conversation screen), and why
+ * it answered here, said once.
+ */
+function WindowMoment({ why }: { why: string | null }) {
+  const { turns, activity, pending } = useGhost();
+  const { phase } = useLive();
+  const saying = useSaying(turns, phase === "speaking", activity, 1);
+  const reply = [...turns].reverse().find((t) => t.role === "assistant") ?? null;
+  const said = reply ? (saying[reply.at]?.chars ?? reply.text.length) : 0;
+  const word = pending ? "Waiting for your okay" : phase === "speaking" ? "Speaking" : phase === "thinking" ? "Thinking" : "Listening";
+  return (
+    <div className="onb-here">
+      <p className={cx("onb-here__state", `is-${pending ? "waiting" : phase}`)} role="status">
+        {word}
+      </p>
+      {reply && (
+        <p className="onb-here__reply" data-user-content>
+          <span>{reply.text.slice(0, said)}</span>
+          <span className="onb-here__unsaid">{reply.text.slice(said)}</span>
+        </p>
+      )}
+      {why && <p className="onb-try__meta">{why}</p>}
+    </div>
+  );
+}
+
+/**
  * The moment (2026-11-14): the person says “Hey Ghost” (or types a first line where there is
  * no microphone) and Ghost comes forward over their desktop, lit, and says its own first line
  * (the daemon's `first_meeting`, never a model's), then answers what they said. The first run
  * arms it on Ghost (`PUT /first-meeting`) and on the floating room (`floating_first_meeting`,
  * so it floats over this window too), turns the floating room on once by the person's visible
  * choice (the switch under the title), and says where it happened. Where the desktop can't
- * float, or the screen is shared, the moment is the window's room view.
+ * float, or the screen is shared, the moment happens on this beat itself (2026-11-14: there is
+ * no room view any more): the lit mark, Ghost's state, its first line as it is spoken, and one
+ * sentence saying why it answered here.
  */
 export function WakeStep({ w }: { w: Wizard }) {
   const live = useLive();
   const { status } = useGhost();
   const floating = useFloating();
-  const posture = usePosture();
   const [waking, setWaking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [typing, setTyping] = useState(false);
@@ -587,28 +617,12 @@ export function WakeStep({ w }: { w: Wizard }) {
       // The surface says when it came forward (in the app); in a browser the rule's word stands.
       metWhere: floats ? (inTauri ? null : "floating") : "window",
     });
-    // Where it can't float, the moment is the window's room view (released when it ends);
-    // where it floats, this window keeps the first run in view underneath, so it can say
-    // what happened the moment Ghost goes back.
-    heldDesk.current = floats;
-    posture.hold(floats ? "desk" : "room");
+    // Where it can't float, the moment is this beat (WindowMoment); where it floats, this
+    // window keeps the first run in view underneath, so it can say what happened the moment
+    // Ghost goes back.
     // Only the session's start matters here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session]);
-  const heldDesk = useRef(false);
-  useEffect(() => {
-    if (desk || !heldDesk.current) return;
-    heldDesk.current = false;
-    posture.hold("auto");
-  }, [desk, posture]);
-  useEffect(
-    () => () => {
-      if (heldDesk.current) posture.hold("auto");
-    },
-    // On leaving the step only.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
-  );
   useFloatingForward(() => w.setSaved({ metWhere: "floating" }));
 
   const { alreadyAwake, markClick } = useWakeWatch(awake, (how, at) => {
@@ -776,6 +790,7 @@ export function WakeStep({ w }: { w: Wizard }) {
       </p>
       <div className="onb-try">
         {line && <p className="onb-try__line">{line}</p>}
+        {state === "live" && where !== "floating" && <WindowMoment why={answeredHere(floating.status)} />}
         {state === "ears" && fetching && <Progress value={w.speech.share * 100} label="Downloading Ghost’s ears and voice" tone="info" className="onb-try__bar" />}
         {(state === "waiting" || state === "met") && live.online && <FloatLine floating={floating} met={state === "met"} />}
         {state === "waiting" && mp && !off && !noMic && ready && (
@@ -1107,7 +1122,7 @@ export function AgentStep({ w }: { w: Wizard }) {
         </Card>
       ) : (
         <div className="onb-shapes" aria-hidden>
-          {(["drop", "bell", "hood", "cloud", "lantern", "star"] as const).map((sh, i) => (
+          {(["drop", "bell", "cloud", "lantern", "star"] as const).map((sh, i) => (
             <span key={sh} className="onb-shapes__one" style={{ color: `var(--hue-${i + 1}-fg)`, background: `var(--hue-${i + 1}-bg)` }}>
               <AgentShapeGlyph shape={sh} size={36} />
             </span>

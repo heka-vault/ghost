@@ -1,7 +1,7 @@
 /* The app shell: the rail on the window ground, the page in an inset canvas panel. The
    window never scrolls; the panel does, so its inset, border and radius stay put (Linear).
-   Rail, postures and the room: rail.css. */
-.shell { display: grid; grid-template-columns: var(--rail-width) minmax(0, 1fr); height: 100vh; min-width: var(--window-min); overflow: hidden; background: var(--bg-app); transition: grid-template-columns var(--duration-posture) var(--ease-emphasized); }
+   The rail: rail.css. */
+.shell { display: grid; grid-template-columns: var(--rail-width) minmax(0, 1fr); height: 100vh; min-width: var(--window-min); overflow: hidden; background: var(--bg-app); }
 .shell__main {
   position: relative; display: flex; flex-direction: column; min-width: 0;
   height: calc(100vh - var(--panel-inset) * 2);

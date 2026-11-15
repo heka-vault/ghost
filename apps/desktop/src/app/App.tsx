@@ -1,7 +1,7 @@
 import { SearchX } from "lucide-react";
-import { type ReactNode, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { Button, cx, EmptyState, LiveContext, type LiveState, PageChromeContext, Progress, Skeleton, Spinner, ToastProvider } from "../ui";
+import { Button, EmptyState, LiveContext, type LiveState, PageChromeContext, Progress, Skeleton, Spinner, ToastProvider } from "../ui";
 import { useDesign } from "../design/context";
 import { useConnection } from "./connection";
 import { DaemonNotices } from "./daemon";
@@ -14,9 +14,8 @@ import { opensFirstRun, useSetupNeeded } from "./setup";
 import { parseSaved, storageKey } from "../screens/onboarding/state";
 import { gb, useSpeechModels } from "../screens/onboarding/speech";
 import { useGhost } from "@ghost/ui";
-import { PostureProvider, usePosture } from "./PostureContext";
+import { forgetRoomChoices } from "./posture";
 import { Rail } from "./Rail";
-import { Room } from "./Room";
 import { TodayProvider } from "./today";
 import "./shell.css";
 import "./rail.css";
@@ -26,6 +25,8 @@ const PrototypeStrip = import.meta.env.DEV ? lazy(() => import("../design/chrome
 
 /** The app shell: sidebar, global connection banners, and the routed screen. */
 export function App() {
+  // The in-window room is gone (ADR 0059 as amended 2026-11-14): an older install's choices for it are cleared once.
+  useEffect(() => forgetRoomChoices(), []);
   const raw = usePath();
   // An old address (#/apps, #/audit, #/settings) shows its new page at once; the hash follows.
   const path = redirectFor(raw) ?? raw;
@@ -149,8 +150,6 @@ export function App() {
     <LiveContext.Provider value={live}>
     <ToastProvider>
     <TodayProvider>
-    <PostureProvider>
-    <Postured routeId={match?.route.id ?? null}>
       <DaemonNotices />
       {/* A button, not href="#main": under hash routing that hash is a route. */}
       <button type="button" className="shell-skip" onClick={skipToContent}>
@@ -232,33 +231,9 @@ export function App() {
           </PageChromeContext.Provider>
         </main>
       </div>
-    </Postured>
-    </PostureProvider>
     </TodayProvider>
     </ToastProvider>
     </LiveContext.Provider>
-  );
-}
-
-/**
- * The two postures over one shell. At the desk, the rail and the page. In the room: on the
- * conversation screen in a session at this desk, the rail goes and the screen's own room view
- * takes the window; anywhere else the room is laid over the desk, which stays mounted and
- * inert underneath, so nothing typed is lost. The move between them is one transition: the desk
- * eases back and dims as the room rises over it (reduced motion: a cut).
- */
-function Postured({ routeId, children }: { routeId: string | null; children: ReactNode }) {
-  const { posture, deskSession } = usePosture();
-  const room = posture === "room";
-  const sessionRoom = room && routeId === "session" && deskSession;
-  const overlay = room && !sessionRoom;
-  return (
-    <div className={cx("posture", room && "is-room", sessionRoom && "is-session-room")}>
-      <div className="posture__desk" inert={overlay ? true : undefined} aria-hidden={overlay || undefined}>
-        {children}
-      </div>
-      {overlay && <Room />}
-    </div>
   );
 }
 

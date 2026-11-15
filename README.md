@@ -369,7 +369,7 @@ right there. Its voice, an app, an agent and a first question follow, each optio
    or **Watching › Add schedule**. The run happens with nobody there; its answer lands on
    **Today**. A change it would make that needs your yes waits there instead.
 6. **The floating room.** The first run turns it on when you first say "Hey Ghost";
-   **Settings › General › The room › Float over the desktop** (or the tray) turns it off and on.
+   **Settings › General › The floating room › Float over the desktop** (or the rail, or the tray) turns it off and on.
    It shows Ghost over your work while you talk to it, without the window. It needs X11 or XWayland (GNOME on Wayland has XWayland
    by default). See [docs/floating-room.md](docs/floating-room.md).
 7. **Stop listening.** Ctrl+Shift+M, the switch by Ghost's name in the window, "Ghost, stop

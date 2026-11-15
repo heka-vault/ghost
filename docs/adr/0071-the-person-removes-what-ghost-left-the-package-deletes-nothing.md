@@ -1,4 +1,4 @@
-# 0070: The person removes what Ghost left; the package deletes nothing
+# 0071: The person removes what Ghost left; the package deletes nothing
 
 - **Status:** accepted
 - **Date:** 2026-11-14

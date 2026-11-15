@@ -101,9 +101,7 @@ pub fn slugify(name: &str) -> String {
 
 /// The shapes an agent may be drawn as: a family around Wisp, Ghost's own (docs/design-system.md,
 /// Agents' marks). Ghost itself is always Wisp in colour 0.
-pub const LOOK_SHAPES: [&str; 8] = [
-    "wisp", "drop", "bell", "hood", "cloud", "lantern", "star", "moth",
-];
+pub const LOOK_SHAPES: [&str; 7] = ["wisp", "drop", "bell", "cloud", "lantern", "star", "moth"];
 /// The agent colours (`--hue-0` to `--hue-7`).
 pub const LOOK_HUES: u8 = 8;
 

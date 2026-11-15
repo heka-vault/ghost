@@ -1,4 +1,4 @@
-//! `ghostd uninstall`: remove Ghost from this computer (#147, ADR 0070).
+//! `ghostd uninstall`: remove Ghost from this computer (#147, ADR 0071).
 //!
 //! The list is `ghost_core::leftovers`; this is its command, the real hands it removes with
 //! (systemd, the tools' own commands, the keyring), stopping Ghost first, and the one line the

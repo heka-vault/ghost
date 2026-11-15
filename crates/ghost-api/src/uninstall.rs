@@ -1,4 +1,4 @@
-//! Removing Ghost from this computer (#147, ADR 0070): what it left, by kind, with sizes, for
+//! Removing Ghost from this computer (#147, ADR 0071): what it left, by kind, with sizes, for
 //! Settings › General. The list only: the removal itself is `ghostd uninstall`, which the app
 //! runs once it has quit (it cannot remove the storage of a window that is still open).
 //!

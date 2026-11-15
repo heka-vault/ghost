@@ -1,7 +1,7 @@
 //! What the floating room does while the screen is shared (ADR 0059, amended 2026-11-13).
 //!
 //! By default it hides, as it always has: nothing of Ghost reaches a meeting or a recording by
-//! accident. The operator may choose otherwise (Settings › General › The room, "While my screen
+//! accident. The operator may choose otherwise (Settings › General › The floating room, "While my screen
 //! is shared"): show Ghost in the share, or be asked each time a share starts. Whatever they
 //! answer, or toggle from the tray, holds for that share only and is forgotten when it ends.
 //!

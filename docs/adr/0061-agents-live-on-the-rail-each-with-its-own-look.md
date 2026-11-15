@@ -15,3 +15,8 @@ The owner, using the desk live: the Agents item opened a settings page and there
 **It scales by order and by scroll, not by grouping.** The agent in the session first, then those waiting on the operator, then those at work, then the rest by when they last worked (`app/railAgents.ts`). The list scrolls inside the rail's nav with a fade at its foot, so the rail's foot never moves; + stays at the head of the list; under 760 px of height the names go and the marks stay, each with its tooltip and accessible name.
 
 **Apps is its own place** (`#/apps`, `#/apps/:name`), not a page of Settings; `#/settings/apps…` redirects.
+
+## Amendment, 2026-11-14
+
+The `hood` shape is retired: the operator did not want it in the family. A look that still
+names it is read as no look, so that agent is drawn as Wisp in the colour its slug picks.

@@ -238,9 +238,9 @@
 .set-disclosure__line { display: block; padding-left: var(--space-3); border-left: 2px solid var(--border); }
 .set-wake-takes { display: inline-flex; align-items: center; gap: var(--space-3); }
 
-/* The room's choices (RoomSettings): one width, so the column of selects lines up. */
-.room-select { width: 13rem; }
-.room-select select { width: 100%; }
+/* The floating room's choices (FloatingSettings.tsx): one width, so the column of selects lines up. */
+.float-select { width: 13rem; }
+.float-select select { width: 100%; }
 /* The release notes (ADR 0066): plain text, its own lines kept. */
 .set-notes { white-space: pre-wrap; display: block; max-height: 16rem; overflow: auto; }
 

@@ -1,4 +1,4 @@
-//! What Ghost leaves on this computer, and taking it off again (#147, ADR 0070).
+//! What Ghost leaves on this computer, and taking it off again (#147, ADR 0071).
 //!
 //! The one list of every file, folder, unit and keyring item Ghost or the libraries it runs
 //! write under a person's own folders, typed, sized and grouped into six categories the person

@@ -201,6 +201,34 @@ export function pathToMoment(f: Facts, who: Newcomer): { steps: StepId[]; clicks
   return { steps: [...steps, "wake"], clicks, fields };
 }
 
+/* ------------------------------------------------------------------------ where it answered */
+
+/** What the first run needs of the floating room's state (`app/floating.ts`'s `FloatingStatus`). */
+export interface FloatFacts {
+  support: { kind: string; why?: string };
+  settings: { on: boolean };
+  capture?: "yes" | "no" | "unknown";
+  sharing?: "none" | "hidden" | "asking" | "shown";
+}
+
+/**
+ * The acknowledgment when the moment happened in this window (ADR 0059 as amended 2026-11-14:
+ * there is no room view any more, so the wake beat itself is where Ghost answered). Says why it
+ * didn't float, once, in the product's voice: the desktop can't, the screen is being shared, or
+ * the person turned it off. Null when it floated or nothing is known.
+ */
+export function answeredHere(f: FloatFacts | null): string | null {
+  if (!f) return null;
+  if (f.support.kind === "no") {
+    const why = (f.support.why ?? "").trim().replace(/\.$/, "");
+    return why ? `Ghost answered here. On this desktop it can’t float over your work: ${why.charAt(0).toLowerCase()}${why.slice(1)}.` : "Ghost answered here. On this desktop it can’t float over your work.";
+  }
+  if (!f.settings.on) return "Ghost answered here, since floating is off. Settings › General turns it on.";
+  const shared = f.sharing === "hidden" || f.sharing === "asking" || (!f.sharing && f.capture === "yes");
+  if (shared) return "Ghost answered here, not over your work, because your screen is being shared.";
+  return null;
+}
+
 /* ------------------------------------------------------------------------ the downloads */
 
 /**

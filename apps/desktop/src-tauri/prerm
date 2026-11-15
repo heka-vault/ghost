@@ -1,5 +1,5 @@
 #!/bin/sh
-# heka-ghost-desktop's prerm (#147, ADR 0070). It deletes nothing and stops nothing in anyone's
+# heka-ghost-desktop's prerm (#147, ADR 0071). It deletes nothing and stops nothing in anyone's
 # home folder: a package's scripts run as root, and what Ghost keeps there (settings,
 # transcripts, recordings, passwords) is the person's to remove with `ghostd uninstall`. On
 # `remove` it says so; on an upgrade (the app's own Update and restart is one), a failed

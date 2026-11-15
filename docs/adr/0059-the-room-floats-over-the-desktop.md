@@ -2,6 +2,7 @@
 
 - **Status:** accepted
 - **Date:** 2026-11-12
+- **Amended:** 2026-11-12 (a voice, not captions), 2026-11-13 (sharing, the stage), 2026-11-14 (the first run; no room in the window, which supersedes every mention of a room held or shown in the window above)
 - **Builds on:** ADR 0013 (the control API and its events), ADR 0038 (the daemon ships inside the desktop app), ADR 0055 and ADR 0058 (what the desktop sees of a session), ADR 0057 (not listening)
 - **Amends:** ADR 0013 (one more event, `show_app`)
 
@@ -188,6 +189,52 @@ setup and never see it. So:
 Cost: nothing on a turn; one PUT when the beat opens and closes, one stdin line to the surface,
 one stdout line back. The surface is started at the wake beat instead of never, which is the
 floating room's own cost (below) from then on, as for anyone who turned it on.
+
+## Amended 2026-11-14: no room in the window
+
+The owner, after testing 2026.11.1 with other people: "the UI is a little confusing with the
+normal view and 'the room' view. I think we want to remove the room view and have the floating
+view or the regular (daily brief…) view. The room is cool, but it's not as cool as floating, and
+it's useful but not as useful as the daily brief view."
+
+**Two postures, `desk` and `float`, and no third.** The in-window room is removed: the layer over
+the desk (`Room.tsx`), the conversation screen's room view (`RoomView`), the hold and its key
+(Ctrl+., the rail's button, Settings › General's "Show the room", Escape), and the delays that
+brought it by themselves (20 s of quiet in a session, 1, 3 or 10 minutes stepped away). The rule
+in `posture.ts` keeps one question: does a live session at this desk float? It floats when the
+floating room is on and can show and the main window is not the one in use (or the first run's
+wake beat is open); everything else is the desk. A stored choice from an older install
+(`ghost.room.away`, `ghost.room.session` in the window's storage) is removed quietly at start;
+the hold was never stored. Ctrl+. does nothing now.
+
+What took the room's place, case by case:
+
+- **A session while the floating room is on and can show, with the window not in use**: it
+  floats, as before.
+- **A session where it doesn't float** (switched off, no X11, a share Ghost is kept out of, a
+  focused full-screen app, or the operator using Ghost's own window): the regular window. Today's
+  talk bar becomes a live strip in the conversation screen's own words ("Listening to you",
+  "Using GitHub and Mobbin", "Ghost is speaking", on hold, on the phone), in the phase's colour,
+  with a change waiting for a yes (Confirm, Cancel) or a question asked in the session (its
+  choices) right above it, left out of Now's lists while it is there. The rail's status card
+  and the conversation screen's timeline (ADR 0055, ADR 0058) are unchanged. Nothing new is
+  asked of the daemon: no event, no route.
+- **Stepped away, no session**: the window stays as it is (Today, or whatever page was open).
+- **"I want Ghost big and present"**: the floating room. The rail's room button is the floating
+  room's switch (a toggle with one line in its tooltip; where the desktop can't float there is no
+  button, and Settings › General says why beside its switch), and Settings › General's "The room"
+  section is "The floating room".
+- **The first run where it can't float**: the moment happens on the wake beat itself, under the
+  lit mark: Ghost's state, its first line as it is spoken (said words bright, the rest dim) and
+  one sentence saying why it answered here ("Ghost answered here. On this desktop it can't float
+  over your work: …", or that the screen is being shared). `pathToMoment` is unchanged.
+
+**What is lost**: Ghost legible from three metres inside a window. With the floating room off or
+unable to show, a person across the room sees the window as it is at the desk; the floating
+room, Ghost on stage and the phone are the ways to see Ghost from a distance.
+
+Cost: less than before. No idle timer, no listener on every key, pointer move and scroll for the
+posture, and one large layer fewer; the live strip reads the events the window already had.
 
 ## What it costs (ADR 0018)
 
