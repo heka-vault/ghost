@@ -47,8 +47,14 @@ export HOME=/tmp/home XDG_RUNTIME_DIR=/tmp/run
 mkdir -p "$HOME" "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
 
 echo "== libraries"
-missing=$(for f in "$B"/ghostd "$B"/heka-ghost-desktop "$B"/ghost-mock-github "$B"/ghost-scripts \
-  "$APP"/usr/lib/webkit2gtk-4.1/*Process; do ldd "$f"; done | grep "not found" | sort -u || true)
+helpers=$(find "$APP"/usr -name 'WebKit*Process' -type f)
+[ -n "$helpers" ] || { echo "no WebKit helper processes in the bundle"; exit 1; }
+# WebKit's helper processes carry no RUNPATH: WebKit starts them with the app's own library
+# folder, so they are checked against it.
+# shellcheck disable=SC2086
+missing=$({ for f in "$B"/ghostd "$B"/heka-ghost-desktop "$B"/ghost-mock-github "$B"/ghost-scripts; do
+    ldd "$f"; done
+  for f in $helpers; do LD_LIBRARY_PATH="$APP/usr/lib" ldd "$f"; done; } | grep "not found" | sort -u || true)
 if [ -n "$missing" ]; then echo "missing libraries:"; echo "$missing"; exit 1; fi
 echo "every binary finds its libraries"
 
