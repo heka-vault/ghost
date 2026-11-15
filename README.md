@@ -297,6 +297,20 @@ exported in the shell you start it from wins over the file for that start (an em
 and **Settings › Model** and **Settings › Developer › Passwords** say which ones come "from the environment
 Ghost was started in"; a password is never read from the file.
 
+**A key from the shell is offered, not used** ([#137](https://github.com/heka-vault/ghost/issues/137)).
+A provider's key or address that only the environment Ghost was started in holds
+(`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `OPENAI_API_KEY`,
+`OPENROUTER_API_KEY`, `LLM_API_KEY`, `TYPESAFE_API_KEY`, `ELEVENLABS_API_KEY`) was put there by
+another tool or a shell, so Ghost does not run or bill on it until you choose it: the first
+run's model step and **Settings › Model** name it with a **Use it** button, which writes
+`GHOST_LLM_FROM_ENV=<the names>` to `settings.env` (names, never a value). Until then Ghost says
+it has no model, as with no key at all. To keep the old behaviour for a start from your own
+shell, `export GHOST_LLM_FROM_ENV=1` (every one of them; `make dev` and `make start` pass it
+through); `GHOST_LLM_FROM_ENV=0` uses none. Ghost's own settings (`GHOST_*`) and a name you
+wrote in Ghost (`GHOST_LLM_PASSWORD`, an app's `${NAME}`) are yours and are read as before.
+An install that already answered on such a key before this change keeps it, with a note on the
+waiting list until you choose; `ghostd llm test` and `ghostd check` say which they are.
+
 **What it costs.** A spoken turn sends about 7,000 tokens of prompt and tools, almost all of it
 read from the prompt cache, and gets a sentence or two back. On Claude Sonnet 5.5 that is a
 fraction of a cent a turn and a few cents for a ten-turn conversation; a turn that calls

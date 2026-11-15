@@ -231,6 +231,11 @@ impl GhostClient {
         Ok(reply.body)
     }
 
+    /// The model connection now (ADR 0037): names, never a value.
+    pub async fn model(&self) -> Result<Value, ClientError> {
+        self.expect_ok(Method::GET, "/model", None).await
+    }
+
     /// The realtime voice's settings view (ADR 0063).
     pub async fn realtime(&self) -> Result<Value, ClientError> {
         self.expect_ok(Method::GET, "/voice/realtime", None).await

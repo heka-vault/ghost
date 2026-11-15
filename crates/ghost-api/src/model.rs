@@ -44,6 +44,7 @@ pub fn connection_keys() -> Vec<&'static str> {
         "GHOST_LLM_ENDPOINT",
         "ANTHROPIC_BASE_URL",
         "CLIPROXY_BASE_URL",
+        ghost_core::environment::FROM_ENV, // #137: which keys from the environment are Ghost's
     ]);
     keys
 }
@@ -66,10 +67,18 @@ pub fn model_env(
     draft: Option<&ModelDraft>,
     use_key: bool,
 ) -> ApiResult<HashMap<String, String>> {
-    let mut env = deps.ghost_env();
+    let from_env = ghost_core::environment::FROM_ENV;
+    // A draft's choice of keys from the environment counts for its list or test (#137).
+    let mut env = match draft.and_then(|d| d.values.get(from_env)) {
+        Some(choice) => deps.ghost_env_choosing(choice.as_deref()),
+        None => deps.ghost_env(),
+    };
     let keys = connection_keys();
     if let Some(draft) = draft {
         for (k, v) in &draft.values {
+            if k == from_env && keys.contains(&k.as_str()) {
+                continue; // resolved above
+            }
             if !keys.contains(&k.as_str()) {
                 return Err(ApiError::unprocessable(format!(
                     "{k} is not a model connection setting"
@@ -206,9 +215,11 @@ pub fn from_environment(
     }
     let live = deps.environ();
     let file = deps.settings();
+    let withheld = deps.withheld();
     let mut names: Vec<String> = read
         .into_iter()
         .filter(|k| ghost_core::environment::from_start(k, &deps.started_env, &live, &file))
+        .filter(|k| !withheld.contains(*k)) // offered, not used (#137)
         .map(String::from)
         .collect();
     names.sort();
@@ -241,7 +252,38 @@ fn view(deps: &Deps, env: &HashMap<String, String>) -> ModelConnectionView {
         sign_in_pending: deps.model_sign_in.pending(),
         sign_in_error: deps.model_sign_in.error(),
         from_environment: from_environment(deps, env, &conn),
+        offered: deps.withheld().into_iter().collect(),
+        chosen_from_environment: chosen_from_environment(deps),
+        kept_from_before: kept_from_before(deps),
     }
+}
+
+/// The names `GHOST_LLM_FROM_ENV` chooses now of what the start's environment holds.
+fn chosen_from_environment(deps: &Deps) -> Vec<String> {
+    let inherited = deps.inherited_now();
+    let choice = ghost_core::environment::FromEnv::of(&deps.started_env, &deps.environ());
+    inherited
+        .names
+        .iter()
+        .filter(|n| choice.accepts(n))
+        .cloned()
+        .collect()
+}
+
+/// What an update kept and the person has not chosen (or refused) yet.
+fn kept_from_before(deps: &Deps) -> Vec<String> {
+    use ghost_core::environment::FromEnv;
+    let inherited = deps.inherited_now();
+    let choice = FromEnv::of(&deps.started_env, &deps.environ());
+    if choice == FromEnv::Nothing {
+        return Vec::new();
+    }
+    inherited
+        .kept
+        .iter()
+        .filter(|n| inherited.names.contains(*n) && !choice.accepts(n))
+        .cloned()
+        .collect()
 }
 
 /// The model connection now, with every provider the page offers.

@@ -102,7 +102,7 @@ function found(): OtherToolsView {
   return {
     line: "Claude Code and Cursor are set up on this computer.",
     tools: [claude, cursor],
-    models: [{ provider: "ollama", title: "Ollama", how: "Ollama is running on this computer, with 2 models.", models: ["llama3.2:latest", "qwen3:8b"] }],
+    models: [{ provider: "ollama", title: "Ollama", how: "Ollama is running on this computer, with 2 models.", models: ["llama3.2:latest", "qwen3:8b"], chosen: false }],
     claude_code: CLAUDE_CODE.plan,
     own_sign_in: [],
   };

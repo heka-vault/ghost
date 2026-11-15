@@ -41,6 +41,7 @@ import { verdictOf } from "../settings/check";
 import { ClaudeCodeFix, ClaudeCodeLead } from "../settings/ClaudeCodeCard";
 import { CLAUDE_CODE, claudeCodeOffer, claudeCodeValues } from "../settings/claudeCode";
 import { GhostVoice } from "../settings/GhostVoice";
+import { FROM_ENV } from "../settings/environment";
 import { CONNECTION_KEYS, micOptions, validateConnection } from "../settings/model";
 import { ModelSection } from "../settings/ModelSection";
 import { HeroPresence, StepFrame, type StepFrameProps } from "./frame";
@@ -269,9 +270,15 @@ export function ModelStep({ w }: { w: Wizard }) {
           <FoundModels
             view={others.view}
             chosen={(values.GHOST_LLM_PROVIDER ?? "").trim()}
-            onChoose={(provider, model) =>
-              setValuesState((v) => ({ ...v, ...Object.fromEntries(CONNECTION_KEYS.map((k) => [k, ""])), GHOST_LLM_PROVIDER: provider, GHOST_LLM_MODEL: model ?? "" }))
-            }
+            onChoose={(provider, model, variable) => {
+              setValuesState((v) => ({ ...v, ...Object.fromEntries(CONNECTION_KEYS.map((k) => [k, ""])), GHOST_LLM_PROVIDER: provider, GHOST_LLM_MODEL: model ?? "" }));
+              // #137: the click on a key in the environment is the person's choice of it for
+              // Ghost: its name (never a value) into settings.env, with what is chosen already.
+              if (variable) {
+                const names = [...new Set([...(conn?.chosen_from_environment ?? []), variable])].sort().join(",");
+                client.updateSettings({ values: { [FROM_ENV]: names } }).then(readConn, (e) => setError(errorText(e)));
+              }
+            }}
           />
           <ModelSection
             s={s}

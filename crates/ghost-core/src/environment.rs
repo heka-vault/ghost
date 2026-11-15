@@ -6,18 +6,163 @@
 //!
 //! A setting cleared since the start is kept over it as "", which every reader of Ghost's
 //! settings takes as unset: the process environment is never changed.
+//!
+//! A provider's key or address that comes only from the environment Ghost was started in is
+//! offered, never used, until the person chooses it (#137, ADR 0037's amendment of
+//! 2026-11-14): [`OFFERED`] names them, [`FROM_ENV`] is the choice, and [`resolve`] leaves out
+//! what was not chosen, so every reader of Ghost's settings sees the same.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::{Arc, RwLock};
+
+/// The person's choice to use a provider's key or address from the environment Ghost was
+/// started in: the variables' names, comma-separated (`ANTHROPIC_API_KEY`), which is what the
+/// first run and Settings › Model write to `settings.env`; `1` for every one of them, the
+/// developer's switch; `0` (or `none`) for none, which also ends what an update kept.
+pub const FROM_ENV: &str = "GHOST_LLM_FROM_ENV";
+
+/// The variables Ghost reads by default without the person naming them anywhere in Ghost:
+/// the model providers' keys, the older address, Jev's keys and the ElevenLabs voice's key.
+/// Another tool's or a shell's (a coding agent's `ANTHROPIC_API_KEY`, a proxy's
+/// `ANTHROPIC_BASE_URL`), so one that only the environment Ghost was started in holds is
+/// offered and never used until [`FROM_ENV`] chooses it. A name the person wrote in Ghost
+/// (`GHOST_LLM_PASSWORD`, `GHOST_REALTIME_PASSWORD`, an app's `${NAME}`, a route's) is theirs.
+pub const OFFERED: [&str; 8] = [
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_BASE_URL",
+    "OPENAI_API_KEY",
+    "OPENROUTER_API_KEY",
+    "LLM_API_KEY",
+    "TYPESAFE_API_KEY",
+    "ELEVENLABS_API_KEY",
+];
+
+/// Whether `name` is one of [`OFFERED`].
+pub fn is_offered(name: &str) -> bool {
+    OFFERED.contains(&name)
+}
+
+/// What [`FROM_ENV`] says.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum FromEnv {
+    /// Not set: nothing is chosen, and what an update kept stays kept.
+    #[default]
+    Unset,
+    /// `1`: every offered variable (a developer's switch).
+    All,
+    /// `0`: none, and not what an update kept either.
+    Nothing,
+    /// These variables.
+    Names(BTreeSet<String>),
+}
+
+impl FromEnv {
+    pub fn parse(value: Option<&str>) -> Self {
+        let v = value.unwrap_or("").trim();
+        match v.to_ascii_lowercase().as_str() {
+            "" => Self::Unset,
+            "1" | "all" | "true" | "yes" | "on" => Self::All,
+            "0" | "none" | "false" | "no" | "off" => Self::Nothing,
+            _ => Self::Names(
+                v.split([',', ' ', ';'])
+                    .map(str::trim)
+                    .filter(|n| !n.is_empty())
+                    .map(String::from)
+                    .collect(),
+            ),
+        }
+    }
+
+    pub fn accepts(&self, name: &str) -> bool {
+        match self {
+            Self::All => true,
+            Self::Names(n) => n.contains(name),
+            Self::Unset | Self::Nothing => false,
+        }
+    }
+
+    /// The choice the resolved settings make: a value saved since the start over the start's.
+    pub fn of(started: &HashMap<String, String>, live: &HashMap<String, String>) -> Self {
+        Self::parse(
+            live.get(FROM_ENV)
+                .or_else(|| started.get(FROM_ENV))
+                .map(String::as_str),
+        )
+    }
+}
+
+/// The offered variables the environment Ghost was started in holds and Ghost's own do not,
+/// and what an update kept of them. Names only, never a value.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Inherited {
+    /// Offered variables set at the start whose value is not `settings.env`'s.
+    pub names: BTreeSet<String>,
+    /// Those an install that already ran on them keeps using after the update that brought
+    /// this rule, until the person chooses (`ghostd::environment_keys`).
+    pub kept: BTreeSet<String>,
+}
+
+pub type SharedInherited = Arc<RwLock<Inherited>>;
+
+impl Inherited {
+    /// From the environment at the start and `settings.env` (`file`), which a launcher loads
+    /// into it: a value the file holds is Ghost's own, not inherited.
+    pub fn from_start(started: &HashMap<String, String>, file: &BTreeMap<String, String>) -> Self {
+        let names = OFFERED
+            .iter()
+            .filter(|k| match started.get(**k) {
+                Some(v) if !v.trim().is_empty() => file.get(**k) != Some(v),
+                _ => false,
+            })
+            .map(|k| k.to_string())
+            .collect();
+        Self {
+            names,
+            kept: BTreeSet::new(),
+        }
+    }
+
+    /// The inherited variables Ghost leaves out now: not chosen, not saved since, not kept.
+    pub fn withheld(
+        &self,
+        started: &HashMap<String, String>,
+        live: &HashMap<String, String>,
+    ) -> BTreeSet<String> {
+        let choice = FromEnv::of(started, live);
+        self.names
+            .iter()
+            .filter(|n| !live.contains_key(*n) && !choice.accepts(n))
+            .filter(|n| choice == FromEnv::Nothing || !self.kept.contains(*n))
+            .cloned()
+            .collect()
+    }
+}
 
 /// What Ghost's settings read now: `started` (the process environment at start, which the
-/// launcher filled from `settings.env`), then `live` over it.
+/// launcher filled from `settings.env`) less what it only offers (`inherited`'s withheld),
+/// then `live` over it.
 pub fn resolve(
     started: &HashMap<String, String>,
     live: &HashMap<String, String>,
+    inherited: &Inherited,
 ) -> HashMap<String, String> {
     let mut env = started.clone();
+    for name in inherited.withheld(started, live) {
+        env.remove(&name);
+    }
     env.extend(live.iter().map(|(k, v)| (k.clone(), v.clone())));
     env
+}
+
+/// A `ghostd` command's view of Ghost's settings without a daemon (`ghostd check`): the
+/// process environment less what it only offers, the vault's values over it.
+pub fn as_ghost_reads(
+    process: &HashMap<String, String>,
+    vault: &HashMap<String, String>,
+    file: &BTreeMap<String, String>,
+) -> HashMap<String, String> {
+    resolve(process, vault, &Inherited::from_start(process, file))
 }
 
 /// A setting saved while Ghost runs: set, or cleared (`None` or ""). Cleared, it is kept as ""
@@ -143,6 +288,10 @@ mod tests {
             .collect()
     }
 
+    fn none() -> Inherited {
+        Inherited::default()
+    }
+
     fn file(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
         pairs
             .iter()
@@ -198,7 +347,7 @@ mod tests {
             ("GHOST_LLM_MODEL", "m1"),
         ]);
         let live = map(&[("GHOST_LLM_MODEL", "m2"), ("ANTHROPIC_AUTH_TOKEN", "t")]);
-        let env = resolve(&started, &live);
+        let env = resolve(&started, &live, &Inherited::default());
         assert_eq!(env["ANTHROPIC_BASE_URL"], "http://a");
         assert_eq!(env["GHOST_LLM_MODEL"], "m2");
         assert_eq!(env["ANTHROPIC_AUTH_TOKEN"], "t");
@@ -209,9 +358,9 @@ mod tests {
         let started = map(&[("GHOST_LLM_MODEL", "m1")]);
         let mut live = HashMap::new();
         apply(&started, &mut live, "GHOST_LLM_MODEL", None);
-        assert_eq!(resolve(&started, &live)["GHOST_LLM_MODEL"], "");
+        assert_eq!(resolve(&started, &live, &none())["GHOST_LLM_MODEL"], "");
         apply(&started, &mut live, "GHOST_LLM_MODEL", Some("m3"));
-        assert_eq!(resolve(&started, &live)["GHOST_LLM_MODEL"], "m3");
+        assert_eq!(resolve(&started, &live, &none())["GHOST_LLM_MODEL"], "m3");
         // Nothing at the start: cleared is simply gone.
         apply(&started, &mut live, "GHOST_LLM_FAST_MODEL", Some("f"));
         apply(&started, &mut live, "GHOST_LLM_FAST_MODEL", Some(""));
@@ -240,5 +389,98 @@ mod tests {
             .into_iter()
             .collect();
         assert!(from_start("GHOST_LLM_MODEL", &started, &live, &other));
+    }
+
+    // --- #137: a key from the environment is offered, never used, until chosen ------------
+
+    #[test]
+    fn a_providers_key_from_the_start_is_offered_and_not_used() {
+        let started = map(&[
+            ("ANTHROPIC_BASE_URL", "http://proxy.lan:8317"),
+            ("ANTHROPIC_AUTH_TOKEN", "sk-shell-0123456789"),
+            ("GHOST_LLM_MODEL", "m1"),
+            ("HOME", "/home/x"),
+        ]);
+        let inherited = Inherited::from_start(&started, &file(&[]));
+        assert_eq!(
+            inherited
+                .names
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"]
+        );
+        let env = resolve(&started, &HashMap::new(), &inherited);
+        assert!(!env.contains_key("ANTHROPIC_AUTH_TOKEN"));
+        assert!(!env.contains_key("ANTHROPIC_BASE_URL"));
+        // Ghost's own settings (GHOST_*) and everything else stay.
+        assert_eq!(env["GHOST_LLM_MODEL"], "m1");
+        assert_eq!(env["HOME"], "/home/x");
+    }
+
+    #[test]
+    fn the_choice_names_the_variables_it_takes() {
+        let mut started = map(&[
+            ("ANTHROPIC_API_KEY", "sk-a-0123456789"),
+            ("OPENAI_API_KEY", "sk-o-0123456789"),
+        ]);
+        let inherited = Inherited::from_start(&started, &file(&[]));
+        // Saved since the start (Settings › Model's Use it): this one only.
+        let live = map(&[(FROM_ENV, "ANTHROPIC_API_KEY")]);
+        let env = resolve(&started, &live, &inherited);
+        assert!(env.contains_key("ANTHROPIC_API_KEY"));
+        assert!(!env.contains_key("OPENAI_API_KEY"));
+        // The developer's switch: all of them.
+        started.insert(FROM_ENV.into(), "1".into());
+        let env = resolve(&started, &HashMap::new(), &inherited);
+        assert!(env.contains_key("ANTHROPIC_API_KEY") && env.contains_key("OPENAI_API_KEY"));
+        // Cleared on the page: the start's switch no longer counts.
+        let live = map(&[(FROM_ENV, "")]);
+        assert!(!resolve(&started, &live, &inherited).contains_key("OPENAI_API_KEY"));
+    }
+
+    #[test]
+    fn what_settings_env_or_the_vault_holds_is_ghosts_own() {
+        let started = map(&[
+            ("ANTHROPIC_BASE_URL", "http://proxy.lan:8317"),
+            ("ANTHROPIC_AUTH_TOKEN", "sk-shell-0123456789"),
+        ]);
+        let f = file(&[("ANTHROPIC_BASE_URL", "http://proxy.lan:8317")]);
+        let inherited = Inherited::from_start(&started, &f);
+        assert_eq!(
+            inherited.names.len(),
+            1,
+            "the file's address is Ghost's own"
+        );
+        let live = map(&[("ANTHROPIC_AUTH_TOKEN", "sk-vault-0123456789")]);
+        let env = resolve(&started, &live, &inherited);
+        assert_eq!(env["ANTHROPIC_AUTH_TOKEN"], "sk-vault-0123456789");
+        assert_eq!(env["ANTHROPIC_BASE_URL"], "http://proxy.lan:8317");
+    }
+
+    #[test]
+    fn what_an_update_kept_holds_until_the_person_says_no() {
+        let started = map(&[("ANTHROPIC_API_KEY", "sk-a-0123456789")]);
+        let mut inherited = Inherited::from_start(&started, &file(&[]));
+        inherited.kept.insert("ANTHROPIC_API_KEY".into());
+        assert!(resolve(&started, &HashMap::new(), &inherited).contains_key("ANTHROPIC_API_KEY"));
+        let live = map(&[(FROM_ENV, "0")]);
+        assert!(!resolve(&started, &live, &inherited).contains_key("ANTHROPIC_API_KEY"));
+    }
+
+    #[test]
+    fn the_choice_reads_as_written() {
+        assert_eq!(FromEnv::parse(None), FromEnv::Unset);
+        assert_eq!(FromEnv::parse(Some(" 1 ")), FromEnv::All);
+        assert_eq!(FromEnv::parse(Some("none")), FromEnv::Nothing);
+        let names = FromEnv::parse(Some("ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL"));
+        assert!(names.accepts("ANTHROPIC_BASE_URL") && !names.accepts("OPENAI_API_KEY"));
+    }
+
+    #[test]
+    fn the_choice_is_not_a_password() {
+        // It goes in settings.env, which never takes a password (ADR 0036).
+        assert!(!looks_like_a_password(FROM_ENV));
+        assert!(!crate::passwords::is_password_name(FROM_ENV, &[]));
     }
 }
