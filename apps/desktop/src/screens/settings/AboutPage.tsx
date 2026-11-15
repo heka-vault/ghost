@@ -1,5 +1,5 @@
 /**
- * Owner: settings. Settings › About (ADR 0072), for everyone: what Ghost is (the version and
+ * Owner: settings. Settings › About (ADR 0073), for everyone: what Ghost is (the version and
  * build, this window's), its updates (moved from General, the same state, `UpdatesSection`),
  * the site and the README's Privacy section, the licences of what Ghost is built from, and
  * “Save a diagnostic report” (Diagnostic.tsx).

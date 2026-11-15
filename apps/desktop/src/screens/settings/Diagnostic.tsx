@@ -1,5 +1,5 @@
 /**
- * Owner: settings. “Save a diagnostic report” (ADR 0072), on About: one file in your
+ * Owner: settings. “Save a diagnostic report” (ADR 0073), on About: one file in your
  * Downloads folder that you can hand to a developer. The daemon builds it (`POST /diagnose`)
  * from what Ghost already knows; nothing is uploaded anywhere. Before saving, the person sees
  * what the file will hold, part by part, and its size (`POST /diagnose/preview`). Three boxes,

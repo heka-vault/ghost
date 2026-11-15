@@ -107,7 +107,7 @@ export const ROUTES: RouteDef[] = [
   {
     id: "agents",
     // Every agent, and each one's own page (its profile: name, look, voice, job, memory, what
-    // it does on its own, its activity). Out of Settings since 2026-11-14 (ADR 0072): an
+    // it does on its own, its activity). Out of Settings since 2026-11-14 (ADR 0073): an
     // agent's settings live on the agent. The rail's agents and its + lead here.
     patterns: ["/agents", "/agents/:slug/settings"],
     path: "/agents",
@@ -307,7 +307,7 @@ export const ROUTES: RouteDef[] = [
 
 /**
  * Settings: one place with a page per topic and its own nav (the operator's call,
- * 2026-10-28). Since 2026-11-14 (ADR 0072) five pages a newcomer sees, in this order, and a
+ * 2026-10-28). Since 2026-11-14 (ADR 0073) five pages a newcomer sees, in this order, and a
  * sixth, Developer, once the version on About has been clicked seven times. Each page is
  * `#/settings/<id>`; `#/settings` is the first.
  *
@@ -385,7 +385,7 @@ export function settingsNavId(p: SettingsPage): string {
  */
 export const REDIRECTS: { from: string; to: (p: Record<string, string>) => string }[] = [
   { from: "/settings", to: () => SETTINGS_PAGES[0].path },
-  // The simpler Settings (ADR 0072, 2026-11-14): eleven pages became five, and Developer.
+  // The simpler Settings (ADR 0073, 2026-11-14): eleven pages became five, and Developer.
   { from: "/settings/agents", to: () => "/agents" },
   { from: "/settings/agents/:slug", to: (p) => `/agents/${encodeURIComponent(p.slug)}/settings` },
   { from: "/settings/passwords/:section?", to: () => "/settings/developer/passwords" },

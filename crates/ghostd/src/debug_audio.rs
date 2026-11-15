@@ -1,4 +1,4 @@
-//! Debug mode (ADR 0073): `GHOST_DEBUG_AUDIO` for an hour, from the operator's own switch.
+//! Debug mode (ADR 0074): `GHOST_DEBUG_AUDIO` for an hour, from the operator's own switch.
 //!
 //! The switch turns on exactly what `GHOST_DEBUG_AUDIO=1` turns on, through the same gate
 //! (`ghost_voice::debug::enable`): what Ghost hears and its audio decisions, logged to the

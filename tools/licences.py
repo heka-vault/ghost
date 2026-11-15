@@ -1,4 +1,4 @@
-"""The licences of what Ghost is built from, for Settings › About (ADR 0072).
+"""The licences of what Ghost is built from, for Settings › About (ADR 0073).
 
 Writes `apps/desktop/public/licences.json` from the lock files the repository already has:
 `Cargo.lock` through `cargo metadata --locked --offline` (each crate's own `license` field)

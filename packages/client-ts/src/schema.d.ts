@@ -2801,7 +2801,7 @@ export interface components {
             /** @description The voice heard: its own, else Ghost's. */
             voice: string;
         };
-        /** @description Debug mode is on (ADR 0073). */
+        /** @description Debug mode is on (ADR 0074). */
         DebugAudioMark: {
             /**
              * @description When it turns itself off (RFC 3339); null when Ghost was started with

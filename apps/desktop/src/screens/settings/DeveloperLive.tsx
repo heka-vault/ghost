@@ -1,5 +1,5 @@
 /**
- * Owner: settings. The slot for Developer's live views, built after ADR 0072 merges: a live
+ * Owner: settings. The slot for Developer's live views, built after ADR 0073 merges: a live
  * timing overlay (each turn's stages as they happen) and a live microphone meter. Each is a
  * component boundary here and a place at #/settings/developer/live; until they are built
  * they say so and show no data, never a made-up number.

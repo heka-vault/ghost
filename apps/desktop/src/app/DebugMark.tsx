@@ -1,5 +1,5 @@
 /**
- * Debug mode's mark (ADR 0073): while Ghost is logging what it hears, the rail's status card
+ * Debug mode's mark (ADR 0074): while Ghost is logging what it hears, the rail's status card
  * says so, unmistakably, with the time left, and leads to Settings › Developer where it is
  * turned off. The floating view wears its own (floating/Floating.tsx). Nothing here turns it
  * on: the status carries `debug_audio` only while the daemon's switch is on.

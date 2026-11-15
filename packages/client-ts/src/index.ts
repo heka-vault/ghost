@@ -848,7 +848,7 @@ export class GhostClient {
   setReportsChoice(send: boolean) {
     return unwrap(this.api.PUT("/reports/choice", { body: { send } }));
   }
-  // ------------------------------------------------------------------ Settings › Developer (ADR 0072, ADR 0073)
+  // ------------------------------------------------------------------ Settings › Developer (ADR 0073, ADR 0074)
   /** The experimental switches: each one's real name, value now and where it comes from. */
   developerSwitches() {
     return unwrap(this.api.GET("/developer/switches"));

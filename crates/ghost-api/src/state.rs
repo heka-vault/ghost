@@ -98,7 +98,7 @@ struct Fields {
     ending: bool,
     /// The microphone is closed (ADR 0057).
     not_listening: Option<NotListening>,
-    /// Debug mode is on (ADR 0073).
+    /// Debug mode is on (ADR 0074).
     debug_audio: Option<Box<crate::models::DebugAudioMark>>,
     /// Items on the waiting list still to be heard (ADR 0029).
     waiting: u64,
@@ -252,7 +252,7 @@ impl DaemonState {
         self.lock().debug_audio.clone()
     }
 
-    /// Debug mode turned on or off (ADR 0073); the desktop hears it with the status.
+    /// Debug mode turned on or off (ADR 0074); the desktop hears it with the status.
     pub fn set_debug_audio(&self, mark: Option<crate::models::DebugAudioMark>) {
         let mark = mark.map(Box::new);
         {

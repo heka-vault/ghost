@@ -1,5 +1,5 @@
 /**
- * Owner: routes. Notification routes (#/settings/developer/notifications since ADR 0072; once
+ * Owner: routes. Notification routes (#/settings/developer/notifications since ADR 0073; once
  * “Notifications”, and before that “How Ghost reaches you”, which is General's short section
  * now, with the everyday routes as switches): how
  * Ghost reaches the operator about what needs them (ADR 0031): which

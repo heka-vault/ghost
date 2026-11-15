@@ -150,7 +150,7 @@ impl GhostClient {
         self.request(m, path, body).await
     }
 
-    /// Debug mode (ADR 0073): `GET /debug-audio`, or `PUT` it on or off.
+    /// Debug mode (ADR 0074): `GET /debug-audio`, or `PUT` it on or off.
     pub async fn debug_audio(&self, on: Option<bool>) -> Result<Value, ClientError> {
         match on {
             None => self.expect_ok(Method::GET, "/debug-audio", None).await,
@@ -162,7 +162,7 @@ impl GhostClient {
         }
     }
 
-    /// Save a diagnostic report (ADR 0072); the body is a `DiagnoseRequest`.
+    /// Save a diagnostic report (ADR 0073); the body is a `DiagnoseRequest`.
     pub async fn diagnose(&self, body: &Value) -> Result<Value, ClientError> {
         let reply = self
             .request_with(

@@ -2,7 +2,7 @@
  * Owner: conversations. Agents (ADR 0014, ADR 0035): conversations with a persona and a job.
  *   #/agents                 every agent, with live state, Switch and New agent; Ghost's
  *                            rules (Add rule, Open folder) and what Ghost made in out/
- *                            (Settings › Agents until 2026-11-14, ADR 0072; that address
+ *                            (Settings › Agents until 2026-11-14, ADR 0073; that address
  *                            redirects here)
  *   #/agents/:slug/settings  one agent's own page: voice, persona and look, memory and notes,
  *                            history

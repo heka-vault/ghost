@@ -1,7 +1,7 @@
 /**
  * Owner: settings. The settings pages this screen draws (#/settings/<page>), one screen so
  * that moving between them keeps one draft and one save bar. Five pages for everyone since
- * 2026-11-14 (ADR 0072), and Developer once About's version was clicked seven times:
+ * 2026-11-14 (ADR 0073), and Developer once About's version was clicked seven times:
  *   general    Finish setup while it is unfinished, Set up Ghost, floating, start at login,
  *              how Ghost reaches you (General.tsx), connections (your phone, Apps), error
  *              reports, Remove Ghost from this computer

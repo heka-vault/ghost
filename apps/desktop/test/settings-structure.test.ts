@@ -6,7 +6,7 @@ import { DEVELOPER_PAGE, REDIRECTS, SETTINGS_PAGES, SETTINGS_SUBPAGES, redirectF
 import { debugWords, reachSentence, timeLeft } from "../src/screens/settings/plain";
 import { MOVED, PAGES_AFTER, PAGES_BEFORE } from "../src/screens/settings/moved";
 
-describe("Settings has five pages for everyone (ADR 0072)", () => {
+describe("Settings has five pages for everyone (ADR 0073)", () => {
   it("lists General, Model, Sound, Permissions and About, and Developer only once unlocked", () => {
     expect(SETTINGS_PAGES.map((p) => p.label)).toEqual(PAGES_AFTER);
     expect(PAGES_BEFORE).toHaveLength(11);
@@ -113,7 +113,7 @@ describe("clicking the version seven times shows Developer", () => {
   });
 });
 
-describe("debug mode's marks (ADR 0073)", () => {
+describe("debug mode's marks (ADR 0074)", () => {
   const now = Date.parse("2026-11-14T15:00:00Z");
   it("says the time left, or why it has none", () => {
     expect(debugWords(null, now)).toBeNull();

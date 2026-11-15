@@ -1,5 +1,5 @@
 /**
- * The mock daemon's Settings › Developer (ADR 0072, ADR 0073): the experimental switches,
+ * The mock daemon's Settings › Developer (ADR 0073, ADR 0074): the experimental switches,
  * debug mode with its hour, and the diagnostic report's preview and save. Shaped as
  * `ghost_api::developer` answers; nothing is written anywhere and no number is measured.
  * `?debug=on` (or the `debugmode` scenario) starts with debug mode on, 42 minutes left.

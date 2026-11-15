@@ -1,4 +1,4 @@
-//! The diagnostic report (ADR 0072): one file the person saves and hands to a developer,
+//! The diagnostic report (ADR 0073): one file the person saves and hands to a developer,
 //! built from what Ghost already knows. Nothing is uploaded: it is a file in their Downloads
 //! folder (or one they name), 0600. `docs/diagnostic-report.md` lists every field.
 //!

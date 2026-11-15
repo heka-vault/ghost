@@ -49,7 +49,7 @@ export interface Scenario {
    * this many minutes from load. Any scenario can set it with ?listening=off|<minutes>.
    */
   notListening?: true | number;
-  /** Debug mode is on (ADR 0073), 42 minutes left. Any scenario can set it with ?debug=on. */
+  /** Debug mode is on (ADR 0074), 42 minutes left. Any scenario can set it with ?debug=on. */
   debugAudio?: boolean;
   /**
    * Plays one spoken turn when the event stream opens, as the daemon sends it: three pieces

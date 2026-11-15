@@ -1,5 +1,5 @@
 /**
- * Owner: settings. The plain logic of the simpler Settings (ADR 0072, ADR 0073), with no React
+ * Owner: settings. The plain logic of the simpler Settings (ADR 0073, ADR 0074), with no React
  * and no window, so tests run it in Node.
  */
 import type { RoutesView, Status } from "@ghost/client-ts";

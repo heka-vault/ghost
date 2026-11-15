@@ -103,7 +103,7 @@ export function FloatingRoom({ stage = false }: { stage?: boolean } = {}) {
   const session = status?.session_id ?? null;
   const deskSession = connected && !!session && status?.session_origin !== "phone";
   const micOff = !!status?.not_listening;
-  // ADR 0073: debug mode is on, so Ghost wears it, as it wears “Screen shared”.
+  // ADR 0074: debug mode is on, so Ghost wears it, as it wears “Screen shared”.
   const debugOn = !!status?.debug_audio;
   // A typed session opened no microphone (2026-11-13): Wisp and the label say typing.
   const typed = typedSession(status);
@@ -636,7 +636,7 @@ export function FloatingRoom({ stage = false }: { stage?: boolean } = {}) {
   );
 }
 
-/** The mark Ghost wears while debug mode logs what it hears (ADR 0073). */
+/** The mark Ghost wears while debug mode logs what it hears (ADR 0074). */
 function DebugMark() {
   return (
     <span className="flt-shared flt-shared--debug" role="note">

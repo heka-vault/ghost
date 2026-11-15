@@ -1,4 +1,4 @@
-//! Start at login (ADR 0038): on by default, off from the tray or Settings › General (ADR 0072). The operator's choice is a
+//! Start at login (ADR 0038): on by default, off from the tray or Settings › General (ADR 0073). The operator's choice is a
 //! word in `~/.local/state/ghost/autostart` (`off`); without it the app registers itself at
 //! every launch, so a moved AppImage registers its new path. A checkout's debug build never
 //! registers: `make dev` is not a login item.

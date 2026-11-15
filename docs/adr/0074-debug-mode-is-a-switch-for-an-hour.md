@@ -1,9 +1,9 @@
-# 0073: Debug mode is a switch for an hour
+# 0074: Debug mode is a switch for an hour
 
 - **Status:** accepted
 - **Date:** 2026-11-14
 - **Amends:** the idle-audio rule in CLAUDE.md ("The one exception is `GHOST_DEBUG_AUDIO=1`"),
-  ADR 0010 (passive transcripts are discarded), ADR 0072 (Developer holds the switch)
+  ADR 0010 (passive transcripts are discarded), ADR 0073 (Developer holds the switch)
 
 The rule was: `GHOST_DEBUG_AUDIO=1`, off by default, is set by the operator by hand for a
 debugging session; it logs transcripts and audio decisions to the local journal or terminal
@@ -32,7 +32,7 @@ else. The pipeline is unchanged; the switch is `ghostd::debug_audio`.
 - **One bounded copy, for a diagnostic report.** While the switch is on, the same lines are
   also kept in `debug-audio.log` under Ghost's data folder (0600, at most 4 MB, redacted against
   the vault as every log line is), so the person can tick "Add the debug log" on About's
-  diagnostic report (ADR 0072). The file is deleted when debug mode turns off, by the timer, by
+  diagnostic report (ADR 0073). The file is deleted when debug mode turns off, by the timer, by
   Turn off now or by `ghostd debug-audio off`, and any left by a Ghost that stopped while it was
   on is deleted at the next start. A report saved while it was on carries a copy; nothing else
   does. The lines never reach the desktop's log mirror or a report's log tail.
@@ -55,7 +55,7 @@ else. The pipeline is unchanged; the switch is `ghostd::debug_audio`.
 - Any path for a model, tool, run, app, outside client or the phone to turn it on, read its
   file, or keep it on.
 - Writing `GHOST_DEBUG_AUDIO` into `settings.env`, a unit or a committed config: the experimental
-  switches (ADR 0072) refuse it by name.
+  switches (ADR 0073) refuse it by name.
 
 ## Consequences
 

@@ -1,5 +1,5 @@
 /**
- * Every control Settings had before ADR 0072 (2026-11-14, eleven pages) and where it lives
+ * Every control Settings had before ADR 0073 (2026-11-14, eleven pages) and where it lives
  * now. Pure data: test/settings-structure.test.ts resolves each new address to a route, and
  * the PR's checklist is this list. Nothing was deleted; the Settings › Agents page went
  * because each thing on it is on the agents' own pages.

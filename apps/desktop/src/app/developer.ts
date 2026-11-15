@@ -1,5 +1,5 @@
 /**
- * Settings › Developer (ADR 0072): shown in the settings nav once the version on About has
+ * Settings › Developer (ADR 0073): shown in the settings nav once the version on About has
  * been clicked seven times, and remembered on this computer until it is switched off on the
  * Developer page. It is not a lock and never said to be one: everything behind it is
  * something the operator can already do with a file or a terminal, and every page under it is

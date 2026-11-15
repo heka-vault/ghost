@@ -1052,7 +1052,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_phone_has_no_way_to_debug_mode_the_switches_or_a_report() {
-        // ADR 0072, ADR 0073: the desk's only.
+        // ADR 0073, ADR 0074: the desk's only.
         let p = phone();
         let creds = pair(&p).await;
         for (method, path, body) in [

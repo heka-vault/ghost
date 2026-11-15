@@ -287,14 +287,14 @@ pub struct Status {
     #[serde(default)]
     #[schema(required)]
     pub not_listening: Option<NotListening>,
-    /// Set while debug mode is on (ADR 0073): Ghost is logging what it hears and its audio
+    /// Set while debug mode is on (ADR 0074): Ghost is logging what it hears and its audio
     /// decisions to its own log on this computer. The desktop shows it, unmistakably.
     #[serde(default)]
     #[schema(required)]
     pub debug_audio: Option<Box<DebugAudioMark>>,
 }
 
-/// Debug mode is on (ADR 0073).
+/// Debug mode is on (ADR 0074).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct DebugAudioMark {
     /// When it turns itself off (RFC 3339); null when Ghost was started with
@@ -725,7 +725,7 @@ pub enum WaitingPlace {
     Apps,
     /// Watching: the schedules, watches and Ghost's folder (ADR 0035, ADR 0047).
     Watching,
-    /// Settings › Developer: debug mode's note (ADR 0073).
+    /// Settings › Developer: debug mode's note (ADR 0074).
     Developer,
 }
 

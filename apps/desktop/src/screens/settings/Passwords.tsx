@@ -1,5 +1,5 @@
 /**
- * Owner: settings. Passwords (#/settings/developer/passwords, under Developer since ADR 0072;
+ * Owner: settings. Passwords (#/settings/developer/passwords, under Developer since ADR 0073;
  * every page that uses a password adds and replaces it in place, `PasswordInPlace`): Ghost's
  * vault (ADR 0036).
  *
@@ -478,7 +478,7 @@ function NewPassword({ taken, onClose, onSaved }: { taken: string[]; onClose: ()
 /* ------------------------------------------------------------------------------ in place */
 
 /**
- * A password where it is used (ADR 0072): the vault's own row for `name`, so it is added,
+ * A password where it is used (ADR 0073): the vault's own row for `name`, so it is added,
  * replaced or deleted right there, with "Stored in Ghost's vault · Manage" leading to the list
  * of every name (Settings › Developer › Passwords). The model page has its own; Sound's
  * realtime voice and an app's page use this one.

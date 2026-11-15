@@ -5,7 +5,7 @@
  * Ghost's settings: the floating room's choices are the shell's (`floating.json`), since the
  * shell starts the surface before any window opens, and take effect at once, so these are
  * switches, not part of the page's draft. Captions are a choice inside floating. Ghost on
- * stage (the stage window, for showing Ghost to people) is the tray's item (ADR 0072).
+ * stage (the stage window, for showing Ghost to people) is the tray's item (ADR 0073).
  */
 import { Card, ListRow, Notice, SegmentedControl, Select } from "../ui";
 import { type FloatingCaptions, type FloatingPlacement, prefOf, prefValue, useFloating, type WhileShared } from "./floating";

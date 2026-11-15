@@ -113,7 +113,7 @@
 /* A new version (ADR 0066): quiet, in the accent, never a badge that counts. */
 .rail__update .rail__icon { color: var(--accent); }
 
-/* Debug mode (ADR 0073): under the presence while Ghost logs what it hears, a link to where it is turned off. */
+/* Debug mode (ADR 0074): under the presence while Ghost logs what it hears, a link to where it is turned off. */
 .rail__debug {
   display: inline-flex; align-items: center; justify-content: center; gap: 3px;
   margin: calc(var(--space-1) * -1) auto var(--space-1); padding: 2px 6px; max-width: 100%;

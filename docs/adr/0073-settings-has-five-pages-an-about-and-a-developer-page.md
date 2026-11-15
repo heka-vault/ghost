@@ -1,4 +1,4 @@
-# 0072: Settings has five pages, an About and a developer page
+# 0073: Settings has five pages, an About and a developer page
 
 - **Status:** accepted
 - **Date:** 2026-11-14
@@ -71,7 +71,7 @@ error and a problem keep only the code's own words (`scrub::head`), so an app's 
 first `": "` goes. It never holds what was said or typed, audio, a password, an app's content,
 a persona or memory, a home path or an address's credentials: tests feed each in as a hostile
 fixture. Three boxes, unticked, add the person's own: the last 40 turns with Ghost, debug mode's
-log while it is on (ADR 0073), and up to eight kept wake recordings; each says what it adds, and
+log while it is on (ADR 0074), and up to eight kept wake recordings; each says what it adds, and
 the summary before saving lists every part with its size and marks theirs. Nothing is uploaded:
 the person decides who gets the file. Debug mode's log leaves out of Ghost's log tail (the
 desktop's log mirror and a report's) whatever `ghost_voice::debug` logs, so the person's words
@@ -81,7 +81,7 @@ reach a report only by its box.
 from the fourth a hint says how many are left, in a live region), remembered on this computer
 until hidden on that page. It is not a lock and says so: everything on it is a file or a command
 the operator already has, and every page under it opens by its address. It holds debug mode
-(ADR 0073); tests (the model check, `ghostd reports test` and `ghostd check` to copy, the first
+(ADR 0074); tests (the model check, `ghostd reports test` and `ghostd check` to copy, the first
 run again, the floating position, the speech models, the version line, and "Record a test
 session", which opens the Hearing test's recorder); the **experimental switches**; the advanced
 pages (Passwords, Skills, Outside tools, the Audit log, Notification routes, Permissions'
@@ -109,7 +109,7 @@ phone's routes, the outside listener's tools and Ghost's own tools hold it.
 - Settings' nav has five entries, six with Developer; the nouns a newcomer meets there drop
   from eleven page names to five.
 - Two new daemon capabilities, both the operator's only: the diagnostic report and debug mode
-  (ADR 0073). New reads for Developer: `GET /developer/switches` and `GET /debug-audio`. The
+  (ADR 0074). New reads for Developer: `GET /developer/switches` and `GET /debug-audio`. The
   shell gains `login_status` and `login_set`.
 - `licences.json` is generated and committed; after a dependency change `make licences` writes
   it again, and `tools/tests/test_licences.py` fails until it does.

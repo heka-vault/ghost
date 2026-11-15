@@ -435,7 +435,7 @@ pub struct Late {
     pub outside: OnceLock<Arc<crate::outside::OutsideHost>>,
     /// The speech models' download (ADR 0066).
     pub speech_models: OnceLock<Arc<crate::speech_models::SpeechModelsDesk>>,
-    /// Debug mode's switch (ADR 0073).
+    /// Debug mode's switch (ADR 0074).
     pub debug_audio: OnceLock<Arc<crate::debug_audio::DebugAudio>>,
 }
 
@@ -510,7 +510,7 @@ pub struct Daemon {
     pub(crate) origin: Mutex<Option<SessionOrigin>>,
     route_names: Mutex<Vec<RouteName>>,
     log_mirror: LogMirror,
-    /// Debug mode's capture for a diagnostic report (ADR 0073), a layer of the subscriber.
+    /// Debug mode's capture for a diagnostic report (ADR 0074), a layer of the subscriber.
     debug_capture: crate::debug_audio::Capture,
     /// Not listening (ADR 0057): the operator's switch for the microphone, kept in the store.
     pub mic: Arc<Mic>,
@@ -635,13 +635,13 @@ impl Daemon {
         self
     }
 
-    /// Debug mode's capture the subscriber was built with (ADR 0073).
+    /// Debug mode's capture the subscriber was built with (ADR 0074).
     pub fn with_debug_capture(mut self, capture: crate::debug_audio::Capture) -> Self {
         self.debug_capture = capture;
         self
     }
 
-    /// Debug mode's switch, made once: off at every start (ADR 0073).
+    /// Debug mode's switch, made once: off at every start (ADR 0074).
     pub fn debug_audio(self: &Arc<Self>) -> Arc<crate::debug_audio::DebugAudio> {
         self.late
             .debug_audio
@@ -664,7 +664,7 @@ impl Daemon {
             .clone()
     }
 
-    /// The last lines Ghost logged, for a diagnostic report (ADR 0072).
+    /// The last lines Ghost logged, for a diagnostic report (ADR 0073).
     pub fn log_tail(&self) -> Vec<String> {
         self.log_mirror.tail()
     }
@@ -1866,7 +1866,7 @@ impl Daemon {
                         if let Some(note) = d.mic_note() {
                             out.push((crate::microphone::NOTE_KEY.to_string(), note));
                         }
-                        // ADR 0073: debug mode is on, and until when.
+                        // ADR 0074: debug mode is on, and until when.
                         if let Some(note) = d.late.debug_audio.get().and_then(|x| x.note()) {
                             out.push((crate::debug_audio::NOTE_KEY.to_string(), note));
                         }
@@ -3237,7 +3237,7 @@ pub fn device_of(
 #[derive(Clone, Default)]
 pub struct LogMirror {
     state: Arc<RwLock<Option<Arc<DaemonState>>>>,
-    /// The last lines, redacted, for a diagnostic report (ADR 0072). Never debug mode's
+    /// The last lines, redacted, for a diagnostic report (ADR 0073). Never debug mode's
     /// lines (`ghost_voice::debug`), which stay in the daemon's own log.
     tail: Arc<Mutex<std::collections::VecDeque<String>>>,
 }
@@ -3291,7 +3291,7 @@ impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for LogMirror {
             return;
         }
         // Debug mode's lines (what Ghost heard) go to the daemon's own log only: never the
-        // desktop's mirror, never a report's tail (ADR 0073).
+        // desktop's mirror, never a report's tail (ADR 0074).
         if event.metadata().target() == crate::debug_audio::TARGET {
             return;
         }

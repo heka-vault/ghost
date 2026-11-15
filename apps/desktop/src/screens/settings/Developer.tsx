@@ -1,8 +1,8 @@
 /**
- * Owner: settings. Settings › Developer (ADR 0072, ADR 0073): shown once the version on About
+ * Owner: settings. Settings › Developer (ADR 0073, ADR 0074): shown once the version on About
  * was clicked seven times (app/developer.ts). Not a lock, and the page says so: everything
  * here the operator can already do with a file or a terminal.
- *   Debug mode         GHOST_DEBUG_AUDIO for an hour, in Ghost's memory only (ADR 0073)
+ *   Debug mode         GHOST_DEBUG_AUDIO for an hour, in Ghost's memory only (ADR 0074)
  *   Advanced pages     Passwords, Skills, Outside tools, the Audit log, notification routes,
  *                      Permissions' Advanced, the settings file
  *   Experimental       a closed list of settings that are environment variables, each with

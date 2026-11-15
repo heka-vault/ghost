@@ -339,7 +339,7 @@ fn claude_code_without_its_program_is_a_command_for_the_person() {
 const READ_NOT_WRITTEN: &[(&str, &str)] = &[
     (
         ".config/user-dirs.dirs",
-        "read for the Downloads folder a diagnostic report is saved in (ADR 0072); the report is the person's file",
+        "read for the Downloads folder a diagnostic report is saved in (ADR 0073); the report is the person's file",
     ),
     (
         ".config/Cursor",

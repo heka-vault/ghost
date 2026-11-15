@@ -1,6 +1,6 @@
 /**
  * Owner: settings. The parts of Settings › General that came from pages of their own until
- * 2026-11-14 (ADR 0072):
+ * 2026-11-14 (ADR 0073):
  *   StartAtLogin     the tray's “Start at login”, as a switch here too (the shell's choice)
  *   ReachSection     how Ghost reaches you, in sentences, with the three everyday routes as
  *                    switches; the rest of `[routes]` (how long before the next way, quiet

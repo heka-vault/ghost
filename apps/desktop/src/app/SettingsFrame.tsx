@@ -6,7 +6,7 @@
  * restart owed carries a mark (settingsMarks.ts).
  *
  * Five pages for everyone, and Developer once the version on About was clicked seven times
- * (app/developer.ts, ADR 0072). A sub-page (Phone, the advanced pages) marks its parent.
+ * (app/developer.ts, ADR 0073). A sub-page (Phone, the advanced pages) marks its parent.
  */
 import { RotateCw } from "lucide-react";
 import type { ReactNode } from "react";

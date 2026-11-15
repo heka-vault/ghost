@@ -1,4 +1,4 @@
-//! What Settings › Developer reads and writes (ADR 0072, ADR 0073): the experimental switches
+//! What Settings › Developer reads and writes (ADR 0073, ADR 0074): the experimental switches
 //! (a closed list of settings that are environment variables, written to `settings.env` by the
 //! same writer as every other setting), debug mode (`GHOST_DEBUG_AUDIO` for an hour, held in
 //! the daemon's memory only), and the diagnostic report (one file the person saves and hands
@@ -105,7 +105,7 @@ const fn choice(
 }
 
 /// The experimental switches, in the page's order. Never a password, never
-/// `GHOST_DEBUG_AUDIO` (debug mode is its own switch, ADR 0073), never the voice mode (ADR
+/// `GHOST_DEBUG_AUDIO` (debug mode is its own switch, ADR 0074), never the voice mode (ADR
 /// 0063: chosen on Settings › Sound after what changes is shown), never a listener's
 /// addresses or a path. The fast model's thinking and effort (`GHOST_LLM_FAST_*`) are left
 /// out: the values a route takes are the provider's, not a closed set. Every one is read by the voice settings at Ghost's start, so every one
@@ -408,7 +408,7 @@ async fn put_switches(
     }))
 }
 
-// --- debug mode (ADR 0073) --------------------------------------------------------------------
+// --- debug mode (ADR 0074) --------------------------------------------------------------------
 
 /// How long debug mode stays on once turned on.
 pub const DEBUG_AUDIO_MINUTES: i64 = 60;

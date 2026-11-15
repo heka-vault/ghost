@@ -1,7 +1,7 @@
 # The diagnostic report
 
 A diagnostic report is one file you save and hand to whoever is helping you with Ghost
-(ADR 0072). Ghost writes it; it never sends it. Save one from **Settings › About › Save a
+(ADR 0073). Ghost writes it; it never sends it. Save one from **Settings › About › Save a
 diagnostic report**, or in a terminal:
 
 ```
@@ -49,7 +49,7 @@ Three boxes, all unticked, each with what it adds:
 | Box | Field | What it is |
 | --- | --- | --- |
 | Add recent transcripts (`--transcripts`) | `added_by_you.transcripts` | The last 40 turns of your conversation with Ghost: your words and its answers, word for word (passwords redacted, as the store keeps them). |
-| Add the debug log (`--debug-log`) | `added_by_you.debug_log` | While debug mode is on only (ADR 0073): every line it logged, what Ghost heard word for word and its audio decisions. Turn debug mode on in Settings › Developer, do what goes wrong, then save the report before the hour is up. |
+| Add the debug log (`--debug-log`) | `added_by_you.debug_log` | While debug mode is on only (ADR 0074): every line it logged, what Ghost heard word for word and its audio decisions. Turn debug mode on in Settings › Developer, do what goes wrong, then save the report before the hour is up. |
 | Add kept wake recordings (`--wake-recordings`) | `added_by_you.wake_recordings` | Up to the eight newest kept wake takes as WAV files (base64), your voice saying Ghost's name with a few seconds before it. |
 
 ## What it never holds

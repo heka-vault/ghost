@@ -146,7 +146,7 @@ export function RealtimeVoiceSection({ onSettings }: { onSettings?: (s: Settings
               />
             </Field>
           </Row>
-          {/* ADR 0072: added and replaced here, where it is used. */}
+          {/* ADR 0073: added and replaced here, where it is used. */}
           <PasswordInPlace name={view.password} usedBy="The realtime voice" onChanged={() => void load()} />
           <Row>
             <Field

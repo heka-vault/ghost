@@ -5,8 +5,8 @@
 //! turns' time went (ADR 0018). `ghostd llm test`: the provider check of the saved
 //! connection (ADR 0056). `ghostd api-schema`: the control API's document.
 //! `ghostd reports`: the operator's switch for error reports (ADR 0067).
-//! `ghostd debug-audio`: debug mode for an hour (ADR 0073). `ghostd diagnose`: a diagnostic
-//! report saved as a file (ADR 0072).
+//! `ghostd debug-audio`: debug mode for an hour (ADR 0074). `ghostd diagnose`: a diagnostic
+//! report saved as a file (ADR 0073).
 //! `ghostd mcp`: the outside tools connected to Ghost, and the bridge one of them runs
 //! (ADR 0048). `ghostd version`: what this build is. `ghostd restore-volumes`: what the shell runs
 //! before a start and after a stop (ADR 0038).
@@ -66,7 +66,7 @@ fn main() -> anyhow::Result<()> {
             }
         });
     let mirror = LogMirror::new();
-    // ADR 0073: debug mode's lines, kept for a diagnostic report only while its switch is on.
+    // ADR 0074: debug mode's lines, kept for a diagnostic report only while its switch is on.
     let capture = ghostd::debug_audio::Capture::new();
     tracing_subscriber::registry()
         .with(EnvFilter::try_new(&level).unwrap_or_else(|_| EnvFilter::new("info")))
@@ -86,9 +86,9 @@ fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         None | Some("run") => run(mirror, capture),
-        // ADR 0073: the operator's switch, through the running daemon
+        // ADR 0074: the operator's switch, through the running daemon
         Some("debug-audio") => std::process::exit(debug_audio(&args[1..])),
-        // ADR 0072: a diagnostic report, as a file
+        // ADR 0073: a diagnostic report, as a file
         Some("diagnose") => std::process::exit(diagnose(&args[1..])),
         Some("status") => client("status", &args[1..]),
         Some("wake") => client("wake", &args[1..]),
@@ -363,7 +363,7 @@ async fn setup(args: &[String]) -> i32 {
     .await
 }
 
-/// `ghostd debug-audio on|off|status` (ADR 0073), through the running daemon: debug mode
+/// `ghostd debug-audio on|off|status` (ADR 0074), through the running daemon: debug mode
 /// lives in its memory only.
 #[tokio::main]
 async fn debug_audio(args: &[String]) -> i32 {
@@ -385,7 +385,7 @@ async fn debug_audio(args: &[String]) -> i32 {
     .await
 }
 
-/// `ghostd diagnose [--out FILE] [...]` (ADR 0072).
+/// `ghostd diagnose [--out FILE] [...]` (ADR 0073).
 #[tokio::main]
 async fn diagnose(args: &[String]) -> i32 {
     ghostd::diagnose::cli(args, &mut std::io::stdout(), &mut std::io::stderr()).await

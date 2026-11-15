@@ -274,7 +274,7 @@ export class MockDaemon {
   private hear: MockHear;
   private wakeTakes = new MockWakeTakes();
   private reports = new MockReports();
-  /** Settings › Developer (ADR 0072, ADR 0073): the switches, debug mode, the report. */
+  /** Settings › Developer (ADR 0073, ADR 0074): the switches, debug mode, the report. */
   private developer: MockDeveloper;
   /** What the agents do on their own (ADR 0047): the schedules and their runs. */
   private schedules: MockSchedules;

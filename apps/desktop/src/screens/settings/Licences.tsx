@@ -1,5 +1,5 @@
 /**
- * Owner: settings. Licences, on About (ADR 0072): Ghost's own (MIT) and the open-source
+ * Owner: settings. Licences, on About (ADR 0073): Ghost's own (MIT) and the open-source
  * software it is built from, each with its licence, from `licences.json` (bundled with the
  * page; tools/licences.py writes it from Cargo.lock and the desktop's packages).
  */
