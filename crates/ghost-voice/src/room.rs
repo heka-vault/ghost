@@ -371,6 +371,39 @@ mod tests {
         assert_eq!(segment_level(&[]), None);
     }
 
+    /// What the gate costs a frame (ADR 0018): `cargo test --release -p ghost-voice
+    /// what_the_room_gate_costs -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn what_the_room_gate_costs() {
+        let t0 = Instant::now();
+        let mut g = RoomGate::new(RoomSettings::default(), t0);
+        g.heard_person(-21.0);
+        let frame: Vec<i16> = (0..320)
+            .map(|i| ((i * 7919) % 2001) as i16 - 1000)
+            .collect();
+        let mut stop = LevelStop::default();
+        let mut frames: Vec<f64> = Vec::new();
+        let n = 50 * 600; // ten minutes of 20 ms frames
+        let began = Instant::now();
+        for i in 0..n {
+            let level = crate::stt::level_dbfs(&frame);
+            g.room_frame(level);
+            frames.push(level);
+            if frames.len() > 25 {
+                frames.remove(0);
+            }
+            let _ = g.judge(segment_level(&frames).unwrap_or(-120.0), t0);
+            let _ = stop.frame(level, g.line(t0), 0.02);
+            if i % 50 == 0 {
+                let _ = g.too_loud();
+            }
+        }
+        let per = began.elapsed().as_secs_f64() / n as f64;
+        println!("room gate: {:.2} us a 20 ms frame", per * 1e6);
+        assert!(per < 200e-6, "{per}");
+    }
+
     #[test]
     fn the_persons_segment_ends_on_level_after_the_quiet_has_lasted() {
         let mut s = LevelStop::default();
