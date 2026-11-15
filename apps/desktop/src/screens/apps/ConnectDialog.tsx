@@ -191,15 +191,8 @@ export function ConnectDialog({ entry: e, onClose, onConnected, onOpen }: { entr
             <span className="apps-form__who-title" data-user-content>
               {e.title}
             </span>
-            {e.website && /^https:\/\//.test(e.website) && (
-              <span className="t-small t-3 t-mono" data-user-content>
-                {new URL(e.website).host}
-              </span>
-            )}
           </span>
         </div>
-
-        <AboutApp entry={e} onOpen={onOpen} />
 
         {e.connected.length > 0 && !error && (
           <Notice tone="info" className="apps-form__notice">
@@ -229,7 +222,6 @@ export function ConnectDialog({ entry: e, onClose, onConnected, onOpen }: { entr
           <Field
             key={`${option.id}:${s.key}`}
             label={<span data-user-content>{s.label}</span>}
-            detail={s.key}
             optional={!s.required}
             help={s.secret ? "A password: kept in Ghost’s vault, and never shown again." : undefined}
             error={missing.has(s.key) ? `${s.label} is needed to connect.` : undefined}
@@ -251,6 +243,11 @@ export function ConnectDialog({ entry: e, onClose, onConnected, onOpen }: { entr
         ))}
 
         {option?.kind === "local" && <p className="t-small t-3">Ghost needs the tool it runs (npx, uvx or docker) installed on this computer.</p>}
+
+        {/* Who made it, where it runs and its code: the registry's own words, after the choice (the flow review, 2026-11-14). */}
+        <Disclosure summary="Who made this app">
+          <AboutApp entry={e} onOpen={onOpen} />
+        </Disclosure>
 
         <Disclosure summary="Advanced" defaultOpen={!!error?.taken}>
           <Field label="Name in Ghost" detail={`${name.trim() || e.suggested_name}.*`} help="Rules and the audit log call the app by this name. Lower-case letters and dashes.">

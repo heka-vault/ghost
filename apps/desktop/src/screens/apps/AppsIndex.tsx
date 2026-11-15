@@ -20,9 +20,12 @@ import { NoticedLine, OtherToolsApps, useOtherTools } from "./OtherTools";
 import { problemWords, sentence, summaryWords, usedWords } from "./model";
 import { twinsOf } from "./plain";
 
+/** A phrase that starts the line takes a capital; after a middle dot it stays lowercase. */
+const sentenceStart = (t: string, first: boolean) => (first ? t.charAt(0).toUpperCase() + t.slice(1) : t);
+
 /** After a middle dot, lowercase, except a name (“Ghost can’t reach it”). */
 const afterDot = (t: string) => (t.startsWith("Ghost") ? t : t.charAt(0).toLowerCase() + t.slice(1));
-import { moreWords, placesOf, publisherParts } from "./provenance";
+import { moreWords, placesOf, placeWords, publisherParts, publisherWords } from "./provenance";
 
 const PAGE = 12;
 
@@ -483,7 +486,7 @@ function CatalogCard({ entry: e, onPick }: { entry: CatalogEntryView; onPick: ()
     e.maker ? `from ${e.maker.product}` : "",
     pub ? `by ${pub.name}, ${pub.proof}` : "",
     e.connected.length ? "connected" : "",
-    place ? (place.local ? `runs on this computer, ${place.where}` : `runs on ${place.where}${place.caution ? `, ${place.caution}` : ""}`) : "",
+    place ? `${placeWords(place, e.maker?.product ?? e.product)}${place.caution ? `, ${place.caution}` : ""}` : "",
   ]
     .filter(Boolean)
     .join(", ");
@@ -510,23 +513,24 @@ function CatalogCard({ entry: e, onPick }: { entry: CatalogEntryView; onPick: ()
       </span>
       {pub && (
         <span className="apps-card__by">
-          by <span data-user-content>{pub.name}</span> · {pub.proof}
+          {publisherWords(pub.name) ? (
+            <>
+              by <span data-user-content>{pub.name}</span> · {pub.proof}
+            </>
+          ) : (
+            "by a verified publisher"
+          )}
         </span>
       )}
       <span className="apps-card__desc" data-user-content>
         {e.description}
       </span>
       <span className="apps-card__meta">
-        {place?.local ? (
+        {place ? (
           <>
-            {[...remoteHow, "Runs here"].join(" · ")} · <span data-user-content>{place.where}</span>
-          </>
-        ) : place ? (
-          <>
-            {remoteHow.map((h) => `${h} · `).join("")}
-            <span data-user-content>{place.where}</span>
+            {[...(place.local ? [] : remoteHow), sentenceStart(placeWords(place, e.maker?.product ?? e.product), place.local || remoteHow.length === 0)].join(" · ")}
             {place.caution && <span className="apps-card__caution">, {place.caution}</span>}
-            {runsHere && " · or runs here"}
+            {!place.local && runsHere && " · or on this computer"}
           </>
         ) : null}
       </span>

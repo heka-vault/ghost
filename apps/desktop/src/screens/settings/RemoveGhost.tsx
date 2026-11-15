@@ -1,5 +1,6 @@
 /**
- * Owner: settings. "Remove Ghost from this computer" (#147), last on General: what Ghost left
+ * Owner: settings. "Remove Ghost from this computer" (#147), its own page under General
+ * (`#/settings/general/remove`, one row on General opens it): what Ghost left
  * on this computer by kind, each with its size and a plain sentence, chosen separately (the
  * person's data and passwords off unless they turn them on, each with its warning), then one
  * confirmation that names everything that goes and the one command that finishes it. Confirming
@@ -16,7 +17,7 @@ import { useEffect, useState } from "react";
 import { type LeftoverKind, removeGhostAndQuit } from "../../app/uninstall";
 import { inTauri } from "../../transport";
 import { Button, Card, Checkbox, Dialog, ListRow, Section, errorText, useCopy, useToast } from "../../ui";
-import { SECTION_TITLE, sectionDomId } from "./model";
+import { sectionDomId } from "./model";
 import { chosenAtFirst, humanSize } from "./remove";
 import "./settings.css";
 
@@ -116,12 +117,9 @@ export function RemoveGhostSection({ confirmOpen = false }: { confirmOpen?: bool
   const finish = view.install === "checkout" ? null : view.finish;
 
   return (
-    <Section
-      id={sectionDomId("remove")}
-      title={SECTION_TITLE.remove}
-      description="What Ghost keeps on this computer, by kind. Choose what goes; Ghost quits and removes it, and one command finishes."
-      className="set-section"
-    >
+    // Its own page since the flow review (2026-11-14, `#/settings/general/remove`): the page's
+    // title and description say what the section's did.
+    <Section id={sectionDomId("remove")} className="set-section">
       <Card list>
         {view.categories.map((c) => (
           <Kind key={c.id} c={c} on={chosen.has(c.id)} onChange={(on) => set(c.id, on)} />
