@@ -751,7 +751,7 @@ pub fn waiting_place(source: &str, key: &str) -> Option<WaitingPlace> {
     }
     let head = key.split(':').next().unwrap_or("");
     Some(match (head, key) {
-        (_, "model:slow") => WaitingPlace::Model,
+        (_, "model:slow") | (_, "model:from-environment") => WaitingPlace::Model,
         (_, "voice:realtime")
         | (_, "models:missing")
         | (_, "input:degraded")
@@ -1871,6 +1871,11 @@ pub struct PasswordInfo {
     #[serde(default)]
     #[schema(required)]
     pub from_environment: bool,
+    /// Not in the vault, set in the environment Ghost was started in, and not used: a
+    /// provider's key nobody chose for Ghost (#137). Settings › Model offers it. The name only.
+    #[serde(default)]
+    #[schema(required)]
+    pub offered: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -2342,6 +2347,22 @@ pub struct ModelConnectionView {
     #[serde(default)]
     #[schema(required)]
     pub from_environment: Vec<String>,
+    /// A provider's key or address the environment Ghost was started in holds and Ghost does
+    /// not use, because nobody chose it for Ghost (#137): offered, by name, never a value.
+    /// Using one writes its name to `GHOST_LLM_FROM_ENV` in settings.env.
+    #[serde(default)]
+    #[schema(required)]
+    pub offered: Vec<String>,
+    /// The names `GHOST_LLM_FROM_ENV` chooses now of what that environment holds ("1" is all
+    /// of them). What an update kept is `kept_from_before`.
+    #[serde(default)]
+    #[schema(required)]
+    pub chosen_from_environment: Vec<String>,
+    /// Of `from_environment`, those Ghost uses because an update kept them, not because the
+    /// person chose them: the waiting list's note says so (#137).
+    #[serde(default)]
+    #[schema(required)]
+    pub kept_from_before: Vec<String>,
 }
 
 /// A connection being edited: GHOST_LLM_* values over the saved ones (None removes one),

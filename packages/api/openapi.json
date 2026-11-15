@@ -1925,6 +1925,10 @@
       "FoundModelView": {
         "description": "A model connection that is already there.",
         "properties": {
+          "chosen": {
+            "description": "That variable is chosen for Ghost already.",
+            "type": "boolean"
+          },
           "how": {
             "description": "How Ghost knows, in a sentence.",
             "type": "string"
@@ -1942,13 +1946,21 @@
           },
           "title": {
             "type": "string"
+          },
+          "variable": {
+            "description": "For a key in the environment Ghost was started in: its variable, which Ghost uses\nonly once it is chosen (`GHOST_LLM_FROM_ENV`, #137). The name, never a value.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
           "provider",
           "title",
           "how",
-          "models"
+          "models",
+          "chosen"
         ],
         "type": "object"
       },
@@ -3778,6 +3790,13 @@
               "null"
             ]
           },
+          "chosen_from_environment": {
+            "description": "The names `GHOST_LLM_FROM_ENV` chooses now of what that environment holds (\"1\" is all\nof them). What an update kept is `kept_from_before`.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "fast_model": {
             "description": "A second model for a spoken turn's first call (ADR 0050), as saved; none, and the\none model answers everything.",
             "type": [
@@ -3808,6 +3827,13 @@
             },
             "type": "object"
           },
+          "kept_from_before": {
+            "description": "Of `from_environment`, those Ghost uses because an update kept them, not because the\nperson chose them: the waiting list's note says so (#137).",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "legacy": {
             "description": "The older setting it comes from (\"GHOST_LLM_ENDPOINT=openrouter\").",
             "type": [
@@ -3818,6 +3844,13 @@
           "model": {
             "description": "As saved; \"\" means the provider's default.",
             "type": "string"
+          },
+          "offered": {
+            "description": "A provider's key or address the environment Ghost was started in holds and Ghost does\nnot use, because nobody chose it for Ghost (#137): offered, by name, never a value.\nUsing one writes its name to `GHOST_LLM_FROM_ENV` in settings.env.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "password": {
             "description": "The name.",
@@ -3900,7 +3933,10 @@
           "values",
           "providers",
           "sign_in_pending",
-          "from_environment"
+          "from_environment",
+          "offered",
+          "chosen_from_environment",
+          "kept_from_before"
         ],
         "type": "object"
       },
@@ -4555,6 +4591,10 @@
             "description": "What config files call it: ${NAME}",
             "type": "string"
           },
+          "offered": {
+            "description": "Not in the vault, set in the environment Ghost was started in, and not used: a\nprovider's key nobody chose for Ghost (#137). Settings › Model offers it. The name only.",
+            "type": "boolean"
+          },
           "set": {
             "description": "In the vault; None while the vault is closed (locked): unknown.",
             "type": [
@@ -4582,7 +4622,8 @@
           "set",
           "used_by",
           "ghost",
-          "from_environment"
+          "from_environment",
+          "offered"
         ],
         "type": "object"
       },

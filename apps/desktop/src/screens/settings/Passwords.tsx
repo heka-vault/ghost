@@ -499,6 +499,7 @@ export function PasswordInPlace({ name, usedBy, onChanged }: { name: string; use
     ghost: false,
     used_by: [usedBy],
     from_environment: false,
+    offered: false,
     added: null,
     updated: null,
     last_used: null,

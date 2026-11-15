@@ -654,6 +654,8 @@ pub struct World {
     pub environ: SharedEnviron,
     /// The environment the daemon was started in (ADR 0037): empty unless a test sets it.
     pub started_env: Arc<Mutex<HashMap<String, String>>>,
+    /// What an update kept of the providers' keys from that environment (#137).
+    pub kept_from_before: Mutex<std::collections::BTreeSet<String>>,
     pub source: ToolSource,
     pub settings_path: PathBuf,
     pub env_path: PathBuf,
@@ -763,6 +765,7 @@ impl World {
             vault,
             environ,
             started_env,
+            kept_from_before: Mutex::default(),
             source,
             settings_path: root.join("settings.env"),
             env_path: root.join("env"),
@@ -833,6 +836,14 @@ impl World {
         deps.stt_model = "parakeet".into();
         deps.environ = self.environ.clone();
         deps.started_env = Arc::new(self.started_env.lock().unwrap().clone());
+        // As the daemon does at its start (#137): what only the start's environment holds of
+        // the providers' keys, against settings.env, and what an update kept.
+        let mut inherited = ghost_core::environment::Inherited::from_start(
+            &deps.started_env,
+            &ghost_core::envfile::read_env(&self.settings_path).unwrap_or_default(),
+        );
+        inherited.kept = self.kept_from_before.lock().unwrap().clone();
+        deps.inherited = Arc::new(std::sync::RwLock::new(inherited));
         deps.conversations = Some(self.conversations.clone());
         deps.folder = Some(self.folder.clone());
         deps.rules = Some(self.rules.clone());

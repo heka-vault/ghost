@@ -13,6 +13,7 @@ pub mod debug_audio;
 pub mod deciders;
 pub mod diagnose;
 pub mod dictation;
+pub mod environment_keys;
 pub mod first_meeting;
 pub mod ghost_app;
 pub mod hear;

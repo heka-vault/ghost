@@ -480,9 +480,27 @@ async fn check_run(
             }
         }
     };
-    let mut env: HashMap<String, String> = std::env::vars().collect();
-    env.extend(environ.lock().unwrap_or_else(|e| e.into_inner()).clone());
+    let process: HashMap<String, String> = std::env::vars().collect();
+    let vault_values = environ.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let mut env = process.clone();
+    env.extend(vault_values.clone());
     let cfg = GhostdSettings::from_env(&env).unwrap_or_else(|_| cfg.clone());
+    // #137: what Ghost would read, a provider's key only this shell holds left out unless
+    // chosen (`GHOST_LLM_FROM_ENV`), and said by name.
+    let file = ghost_core::envfile::read_env(&cfg.settings_path).unwrap_or_default();
+    let env = ghost_core::environment::as_ghost_reads(&process, &vault_values, &file);
+    let offered = ghost_core::environment::Inherited::from_start(&process, &file)
+        .withheld(&process, &vault_values);
+    if !offered.is_empty() {
+        let names: Vec<String> = offered.into_iter().collect();
+        let _ = writeln!(
+            out,
+            "environment: {} set in this shell, not used: nobody chose {} for Ghost \
+             (GHOST_LLM_FROM_ENV)",
+            crate::environment_keys::and_list(&names),
+            if names.len() == 1 { "it" } else { "them" }
+        );
+    }
 
     let build = build_info::detect(None, None, None);
     let _ = writeln!(out, "version: {}", build_info::describe(VERSION, &build));

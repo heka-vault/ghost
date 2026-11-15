@@ -413,6 +413,9 @@ pub struct Deps {
     /// The process environment the daemon was started in (the launcher loads
     /// `settings.env` into it); `environ` goes over it (`ghost_core::environment`).
     pub started_env: Arc<HashMap<String, String>>,
+    /// The providers' keys and address that only `started_env` holds: offered, never used
+    /// until the person chooses them (#137, `ghost_core::environment::FROM_ENV`).
+    pub inherited: ghost_core::environment::SharedInherited,
     pub conversations: Option<Arc<Conversations>>,
     pub apps: Option<Arc<dyn AppsPort>>,
     pub catalog: Option<Arc<Catalog>>,
@@ -490,6 +493,7 @@ impl Deps {
             stt_model: String::new(),
             environ: Arc::new(Mutex::new(HashMap::new())),
             started_env: Arc::default(),
+            inherited: Arc::default(),
             conversations: None,
             apps: None,
             catalog: None,
@@ -537,7 +541,36 @@ impl Deps {
     /// environment it was started in, its own over it (ADR 0037).
     pub fn ghost_env(&self) -> HashMap<String, String> {
         let live = self.environ.lock().unwrap_or_else(|e| e.into_inner());
-        ghost_core::environment::resolve(&self.started_env, &live)
+        ghost_core::environment::resolve(&self.started_env, &live, &self.inherited_now())
+    }
+
+    /// The same, as if the person's choice of variables from the environment were `choice`
+    /// (a draft on the Model page or the first run, for a list or a test).
+    pub fn ghost_env_choosing(&self, choice: Option<&str>) -> HashMap<String, String> {
+        let mut live = self.environ();
+        ghost_core::environment::apply(
+            &self.started_env,
+            &mut live,
+            ghost_core::environment::FROM_ENV,
+            choice,
+        );
+        ghost_core::environment::resolve(&self.started_env, &live, &self.inherited_now())
+    }
+
+    /// What the environment Ghost was started in holds of the providers' keys, and what an
+    /// update kept of them. Names only.
+    pub fn inherited_now(&self) -> ghost_core::environment::Inherited {
+        self.inherited
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// The providers' keys and address Ghost is leaving out now: in the environment it was
+    /// started in, not chosen. Names only, never a value.
+    pub fn withheld(&self) -> std::collections::BTreeSet<String> {
+        self.inherited_now()
+            .withheld(&self.started_env, &self.environ())
     }
 
     /// `settings.env`, read now; empty when there is no file.

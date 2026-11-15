@@ -1463,6 +1463,13 @@ impl Store {
         )?)
     }
 
+    /// Whether any agent has a turn: Ghost has answered someone on this install.
+    pub fn any_turn(&self) -> Result<bool> {
+        Ok(self
+            .conn()
+            .query_row("SELECT EXISTS(SELECT 1 FROM turns)", [], |r| r.get(0))?)
+    }
+
     pub fn turn_count(&self, conversation: &str) -> Result<i64> {
         Ok(self.conn().query_row(
             "SELECT COUNT(*) FROM turns WHERE conversation = ? AND hidden_by IS NULL",
