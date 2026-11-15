@@ -210,9 +210,30 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
         let warmup = voice
             .echo_warmup
             .or_else(|| phone.is_none().then(|| d.mic_plan().echo_warmup()));
-        if voice.first_sound_secs.is_none() || typed || warmup != voice.echo_warmup {
+        // The person or the room (ADR 0072): a desk session's, by its microphone; never
+        // the phone's, whose own gain control and canceller flatten the levels it rests on.
+        let room_gate = voice
+            .room_gate
+            .or_else(|| phone.is_none().then(|| d.mic_plan().room_gate()));
+        // How loud the person is, from the segment that woke Ghost, when the wake heard the
+        // same input as the session will.
+        let wake_level = d.take_wake_level();
+        let room_person_db = (room_gate == Some(true) && phone.is_none() && !typed && {
+            let plan = d.mic_plan();
+            plan.session == plan.wake
+        })
+        .then_some(wake_level)
+        .flatten();
+        if voice.first_sound_secs.is_none()
+            || typed
+            || warmup != voice.echo_warmup
+            || room_gate != voice.room_gate
+            || room_person_db.is_some()
+        {
             let mut v = (*voice).clone();
             v.echo_warmup = warmup;
+            v.room_gate = room_gate;
+            v.room_person_db = room_person_db;
             if v.first_sound_secs.is_none() {
                 v.first_word_secs = d.first_word_secs();
             }
@@ -465,6 +486,17 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
             lock(&health).check(dbfs as f32, words, true, std::time::Instant::now());
         }) as ghost_voice::stt::OnRead
     });
+    // The room too loud to tell the person from it (ADR 0072): the microphone's note.
+    let on_too_loud: Option<ghost_voice::stt::OnTooLoud> = mic.then(|| {
+        let d = Arc::downgrade(d);
+        Arc::new(move || {
+            if let Some(d) = d.upgrade() {
+                lock(&d.mic_health).noisy(std::time::Instant::now());
+                // Off the audio's task: the waiting list is SQLite.
+                tokio::task::spawn_blocking(move || d.refresh_waiting_now());
+            }
+        }) as ghost_voice::stt::OnTooLoud
+    });
     // Which words of the reply are heard now (ADR 0058), in step with the voice level.
     let on_said: ghost_voice::level::OnSaid = {
         let d = Arc::downgrade(d);
@@ -575,6 +607,7 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
             on_said: Some(on_said),
             on_result: Some(on_result),
             on_read,
+            on_too_loud,
         },
         wake_phrases: Some(parse_phrases(Some(&cfg.wake_phrases))),
         wake_fuzzy: cfg.wake_fuzzy,
