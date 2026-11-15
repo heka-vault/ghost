@@ -258,3 +258,14 @@
   .onb-moment.is-met::after { opacity: 0; }
   .onb-rail__bar > span { transition: none; }
 }
+
+/* The minimum window (720×480): the moment's words stay above the fold, its mark at 72 (useShortWindow). */
+@media (max-height: 600px) {
+  .onb { row-gap: var(--space-4); }
+  .onb-rail { gap: var(--space-2); }
+  .onb-step--centered .onb-step__lead { margin-bottom: var(--space-3); }
+  .onb-step--centered .onb-step__head { margin-bottom: var(--space-3); }
+  .onb-step--centered .onb-step__foot { margin-top: var(--space-4); padding-top: var(--space-4); }
+  .onb-step--centered .onb-step__title { font-size: var(--text-2xl); line-height: var(--leading-2xl); }
+  .onb-try { min-height: 0; }
+}

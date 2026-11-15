@@ -112,3 +112,19 @@ export function placesOf(e: CatalogEntryView): Place[] {
 
 /** “4 more from other publishers”. */
 export const moreWords = (n: number) => (n === 1 ? "1 more from another publisher" : `${n} more from other publishers`);
+
+/**
+ * Where a card's app runs, in words with no hostname or package (the flow review, 2026-11-14:
+ * `api.githubcopilot.com` on a card): the host and the package are in the connect dialog's
+ * “Who made this app”.
+ */
+export function placeWords(p: Place, product: string | null | undefined): string {
+  if (p.local) return "runs on this computer";
+  if (p.caution) return "runs online";
+  return product ? `runs at ${product}` : "runs online";
+}
+
+/** A publisher's name for a card: a domain name (“mcparmory.com”) says “a verified publisher” instead. */
+export function publisherWords(name: string): string | null {
+  return /\.[a-z]{2,}$/i.test(name.trim()) ? null : name;
+}

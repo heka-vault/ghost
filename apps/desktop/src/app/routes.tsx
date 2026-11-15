@@ -26,6 +26,7 @@ import {
   ShieldCheck,
   Smartphone,
   Sun,
+  Trash2,
   Volume2,
   Wrench,
 } from "lucide-react";
@@ -325,12 +326,12 @@ export interface SettingsPage {
   parent?: string;
 }
 const page = (id: string, label: string, icon: LucideIcon): SettingsPage => ({ id, label, icon, path: `/settings/${id}` });
-const sub = (parent: string, id: string, label: string, icon: LucideIcon): SettingsPage => ({
+const sub = (parent: string, id: string, label: string, icon: LucideIcon, path?: string): SettingsPage => ({
   id,
   label,
   icon,
   parent,
-  path: parent === "developer" ? `/settings/developer/${id}` : `/settings/${id}`,
+  path: path ?? (parent === "developer" ? `/settings/developer/${id}` : `/settings/${id}`),
 });
 /** The pages in the nav for everyone. */
 export const SETTINGS_PAGES: SettingsPage[] = [
@@ -345,6 +346,8 @@ export const DEVELOPER_PAGE: SettingsPage = page("developer", "Developer", Wrenc
 /** The sub-pages: in no nav, each under its parent. */
 export const SETTINGS_SUBPAGES: SettingsPage[] = [
   sub("general", "phone", "Phone", Smartphone),
+  // One row on General opens it (the flow review, 2026-11-14): six kinds, unchanged.
+  sub("general", "remove", "Remove Ghost from this computer", Trash2, "/settings/general/remove"),
   sub("developer", "passwords", "Passwords", KeyRound),
   sub("developer", "skills", "Skills", BookOpen),
   sub("developer", "tools", "Outside tools", PlugZap),
@@ -353,7 +356,7 @@ export const SETTINGS_SUBPAGES: SettingsPage[] = [
   sub("developer", "live", "Live views", Activity),
 ];
 /** The pages the settings screen itself draws; the rest are their owners' screens. */
-export const SETTINGS_SCREEN_PAGES = ["general", "model", "sound", "about", "developer", "phone"];
+export const SETTINGS_SCREEN_PAGES = ["general", "model", "sound", "about", "developer", "phone", "remove"];
 /** The developer sub-pages the settings screen draws (`/settings/developer/<id>`). */
 export const DEVELOPER_SCREEN_PAGES = ["passwords", "tools", "live"];
 
@@ -364,6 +367,8 @@ export const DEVELOPER_SCREEN_PAGES = ["passwords", "tools", "live"];
 export function settingsPageOf(path: string): SettingsPage | null {
   const [, area, id, more] = path.split("/");
   if (area !== "settings") return null;
+  const deeper = more ? SETTINGS_SUBPAGES.find((p) => p.path === `/settings/${id}/${more}`) : undefined;
+  if (deeper) return deeper;
   if (id === "developer" && more) return SETTINGS_SUBPAGES.find((p) => p.parent === "developer" && p.id === more) ?? DEVELOPER_PAGE;
   if (id === "developer") return DEVELOPER_PAGE;
   return SETTINGS_PAGES.find((p) => p.id === id) ?? SETTINGS_SUBPAGES.find((p) => p.parent !== "developer" && p.id === id) ?? null;

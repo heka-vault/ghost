@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { HINT_FROM, NO_TAPS, TAP_GAP_MS, UNLOCK_TAPS, tap } from "../src/app/developer";
 import { placeOf } from "../src/app/places";
 import { DEVELOPER_PAGE, REDIRECTS, SETTINGS_PAGES, SETTINGS_SUBPAGES, redirectFor, resolve, settingsNavId, settingsPageOf } from "../src/app/routes";
-import { debugWords, reachSentence, timeLeft } from "../src/screens/settings/plain";
+import { clockWords, debugWords, reachSentence, timeLeft } from "../src/screens/settings/plain";
 import { MOVED, PAGES_AFTER, PAGES_BEFORE } from "../src/screens/settings/moved";
 
 describe("Settings has five pages for everyone (ADR 0073)", () => {
@@ -24,6 +24,10 @@ describe("Settings has five pages for everyone (ADR 0073)", () => {
     expect(settingsNavId(settingsPageOf("/settings/phone")!)).toBe("general");
     expect(settingsNavId(settingsPageOf("/settings/developer/passwords")!)).toBe("developer");
     expect(settingsNavId(settingsPageOf("/settings/developer/audit")!)).toBe("developer");
+    // Remove Ghost is its own page under General (the flow review, 2026-11-14).
+    expect(settingsPageOf("/settings/general/remove")?.id).toBe("remove");
+    expect(settingsNavId(settingsPageOf("/settings/general/remove")!)).toBe("general");
+    expect(settingsPageOf("/settings/general/floating")?.id).toBe("general");
   });
 });
 
@@ -133,8 +137,11 @@ describe("how Ghost reaches you, in a sentence", () => {
   const base = { escalate_after: 10, batch_secs: 60, calls_per_hour: 2, calls_per_day: 6, carry: "count", greeting: "Hi", urgency: {}, available: [], ntfy: null, ntfy_token: null } as const;
   it("names the ways in order and the quiet hours", () => {
     expect(reachSentence({ ...base, enabled: ["digest"], quiet_hours: null } as never)).toBe("When something needs you, Ghost tells you the next time you wake it. It doesn’t reach out otherwise.");
-    expect(reachSentence({ ...base, enabled: ["digest", "desk", "desktop"], quiet_hours: "22:00-07:00" } as never)).toBe(
-      "When something needs you, Ghost tells you the next time you wake it. If you don’t hear about it, it tries, in order: asks at the desk, desktop notification. Quiet hours: 22:00 to 07:00, when only the quiet ways are used.",
+    expect(reachSentence({ ...base, enabled: ["digest", "desk", "desktop"], quiet_hours: "22:00-07:00" } as never, "en-US")).toBe(
+      "When something needs you, Ghost tells you the next time you wake it. If you don’t hear about it, it tries, in order: asks at the desk, desktop notification. Quiet from 10 PM to 7 AM, when only the quiet ways are used.",
     );
+    // The locale's clock, not a 24-hour string.
+    expect(reachSentence({ ...base, enabled: ["digest"], quiet_hours: "22:30-07:00" } as never, "en-GB")).toContain("Quiet from 22:30 to 07:00,");
+    expect(clockWords("09:15", "en-US")).toBe("9:15 AM");
   });
 });
