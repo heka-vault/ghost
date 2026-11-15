@@ -349,8 +349,15 @@ export default function PermissionsScreen({ params }: RouteProps) {
         </Notice>
       )}
 
-      <Section id="perm-decided" title="What you’ve decided" description="When Ghost asks about a change, “More choices” on the card can make your answer stick. Those answers are here; remove one and Ghost goes back to the rules below.">
+      <Section id="perm-decided" title="What you’ve decided" description="When Ghost asks about a change, “More choices” on the card can make your answer stick. Those answers are here; remove one and Ghost goes back to your other rules, under Advanced.">
         <Decided choices={choices} online={online} setting={setting} onRemove={(c) => void removeChoice(c)} />
+        <NeverForm
+          apps={apps ?? []}
+          disabled={!online}
+          busy={!!setting && setting.startsWith("never:")}
+          already={(rule) => listOf(rule) === "block"}
+          onNever={(rule, said) => change(`never:${rule}`, { set: { rule, level: "block" } }, { what: `Ghost never ${said}.`, undo: { set: { rule, level: listOf(rule) } } })}
+        />
       </Section>
 
       <Disclosure summary="Advanced: the mode, every rule and the policy file" className="policy-advanced" defaultOpen={params.section === "advanced"}>
@@ -470,7 +477,11 @@ export default function PermissionsScreen({ params }: RouteProps) {
     <Page
       width="default"
       title="Permissions"
-      description="Everything runs: Ghost uses every app you connect and tells you what it changed. When it asks you first, your answer can stick; what you decided that way is here. Every change is in the audit log; to reverse one, ask Ghost to change it back."
+      description={
+        <>
+          Everything runs: Ghost uses every app you connect and tells you what it changed. When it asks you first, your answer can stick; what you decided that way is here. Every change is on <Link to="/">Today</Link>; to reverse one, ask Ghost to change it back.
+        </>
+      }
       actions={
         view === "toml" && (
         <SegmentedControl<View>
@@ -517,6 +528,50 @@ function Decided({ choices, online, setting, onRemove }: { choices: PermissionCh
         </div>
       ))}
     </Card>
+  );
+}
+
+/* ------------------------------------------------------------ never let Ghost… */
+
+/** A tool's name in words: `issue_write` is “issue write”. Ghost's words from the name only, never the app's description. */
+export const toolWords = (name: string) => name.replace(/[_.-]+/g, " ").trim();
+
+/**
+ * The plain way to say “never let Ghost do this” without opening Advanced (the flow review,
+ * 2026-11-14): an app and one of its tools that changes something, or the whole app, as one
+ * `block` rule through this page's own writer (the operator's screen, as Add a rule is). The
+ * words come from the app's title and the tool's name only.
+ */
+function NeverForm({ apps, disabled, busy, already, onNever }: { apps: AppView[]; disabled: boolean; busy: boolean; already: (rule: string) => boolean; onNever: (rule: string, said: string) => Promise<boolean> }) {
+  const usable = apps.filter((a) => a.actions.length > 0);
+  const [app, setApp] = useState("");
+  const [tool, setTool] = useState("*");
+  const a = usable.find((x) => x.name === app) ?? usable[0];
+  if (!a) return null;
+  const changes = a.actions.filter((x) => !x.reads);
+  const rule = tool === "*" ? a.name : `${a.name}.${tool}`;
+  const said = tool === "*" ? `uses ${a.title}` : `does “${toolWords(tool)}” in ${a.title}`;
+  const has = already(rule);
+  return (
+    <form
+      className="policy-never"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!has) void onNever(rule, said).then((ok) => ok && setTool("*"));
+      }}
+    >
+      <span className="policy-never__lead">Never let Ghost</span>
+      <Select aria-label="App" value={a.name} onChange={(e) => (setApp(e.target.value), setTool("*"))} options={usable.map((x) => ({ value: x.name, label: `use ${x.title}` }))} />
+      <Select
+        aria-label="Which of its tools"
+        value={tool}
+        onChange={(e) => setTool(e.target.value)}
+        options={[{ value: "*", label: "at all" }, ...changes.map((x) => ({ value: x.name, label: `to ${toolWords(x.name)}` }))]}
+      />
+      <Button type="submit" variant="secondary" loading={busy} disabled={disabled || has}>
+        {has ? "Already never" : "Never allow"}
+      </Button>
+    </form>
   );
 }
 
