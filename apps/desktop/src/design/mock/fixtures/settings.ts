@@ -92,6 +92,7 @@ function passwords(s: Scenario, set: Set<string>, apps: string[]): PasswordsView
       updated: on ? ago(60 * 24 * (name === "ANTHROPIC_AUTH_TOKEN" ? 6 : 40)) : null,
       last_used: on && used[name] ? ago(used[name]) : null,
       from_environment: false,
+      offered: false,
       ...extra,
     };
   };

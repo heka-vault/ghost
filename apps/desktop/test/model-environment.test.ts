@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { environmentNote, passwordFromEnvironment } from "../src/screens/settings/environment";
+import { environmentNote, keptNote, offerNote, passwordFromEnvironment } from "../src/screens/settings/environment";
 
 describe("a connection from the environment Ghost was started in (ADR 0037)", () => {
   it("says nothing when every setting is Ghost's own", () => {
@@ -48,5 +48,38 @@ describe("Settings › Passwords: a password from the environment Ghost was star
 
   it("an older daemon that doesn't say is Not set, as before", () => {
     expect(passwordFromEnvironment({ name: "HF_TOKEN", set: false })).toBeNull();
+  });
+});
+
+describe("#137: a provider's key in the environment is offered, never used, until chosen", () => {
+  it("names what it found and says Ghost doesn't use it", () => {
+    const n = offerNote({ offered: ["ANTHROPIC_API_KEY"], chosen_from_environment: [] })!;
+    expect(n.text).toContain("ANTHROPIC_API_KEY is set there, and Ghost doesn’t use it");
+    expect(n.text).toContain("billed");
+    expect(n.useLabel).toBe("Use it");
+    expect(n.useValue).toBe("ANTHROPIC_API_KEY");
+  });
+
+  it("Use keeps what is chosen already", () => {
+    const n = offerNote({ offered: ["OPENAI_API_KEY"], chosen_from_environment: ["ANTHROPIC_API_KEY"] })!;
+    expect(n.useValue).toBe("ANTHROPIC_API_KEY,OPENAI_API_KEY");
+  });
+
+  it("says nothing when nothing is offered, or for an older daemon", () => {
+    expect(offerNote({ offered: [], chosen_from_environment: [] })).toBeNull();
+    expect(offerNote({} as never)).toBeNull();
+  });
+
+  it("an update's keep is named as nobody's choice", () => {
+    const n = keptNote({ kept_from_before: ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"] })!;
+    expect(n.text).toContain("ANTHROPIC_AUTH_TOKEN and ANTHROPIC_BASE_URL");
+    expect(n.text).toContain("Nobody chose them");
+    expect(keptNote({ kept_from_before: [] })).toBeNull();
+  });
+
+  it("Passwords says it is there and not used, in place of Not set", () => {
+    const n = passwordFromEnvironment({ name: "ANTHROPIC_API_KEY", set: false, from_environment: false, offered: true })!;
+    expect(n.badge).toBe("In the environment, not used");
+    expect(n.text).toContain("doesn’t use it unless you choose it");
   });
 });

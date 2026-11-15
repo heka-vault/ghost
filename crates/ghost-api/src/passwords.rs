@@ -250,12 +250,15 @@ pub fn passwords_view(deps: &Deps) -> ApiResult<PasswordsView> {
     }
     names.extend(rest);
     let live = deps.environ();
+    let withheld = deps.withheld();
     let rows = names
         .into_iter()
         .map(|name| {
             let m = meta.get(&name);
             PasswordInfo {
+                offered: m.is_none() && withheld.contains(&name),
                 from_environment: m.is_none()
+                    && !withheld.contains(&name)
                     && ghost_core::environment::from_start(
                         &name,
                         &deps.started_env,

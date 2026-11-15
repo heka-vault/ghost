@@ -112,6 +112,9 @@ export class MockModel {
       sign_in_pending: this.signIn.pending,
       sign_in_error: this.signIn.error,
       from_environment: [],
+      offered: [],
+      chosen_from_environment: [],
+      kept_from_before: [],
     };
   }
 

@@ -9,7 +9,8 @@
   a route refuses is left out of its requests; a failed turn is said); 2026-11-13 below (what
   the desktop is told is the connection Ghost uses; Passwords says it, and `ghostd` reads
   `settings.env` itself); 2026-11-14 below (the named `cliproxy` provider removed, its saved
-  value read as `custom`)
+  value read as `custom`); 2026-11-14 (later) below, #137 (a provider's key or address only the
+  environment Ghost was started in holds is offered, never used, until the person chooses it)
 
 Ghost reached its model through whatever `ANTHROPIC_BASE_URL` pointed at, or OpenRouter's
 Anthropic API with `GHOST_LLM_ENDPOINT=openrouter`. Only Anthropic's protocol was spoken, the
@@ -146,3 +147,67 @@ headers). `GET /model` reports it as `custom` with that address as its own, so S
 `ANTHROPIC_BASE_URL` is `custom` whatever `CLIPROXY_BASE_URL` says. A kept model check from
 before is named as `custom` in the slow note's advice. `make perf-providers` and `perf llm`
 time your own address as `custom` (`GHOST_LLM_BASE_URL`, else `ANTHROPIC_BASE_URL`).
+
+## Amendment, 2026-11-14 (later): a key from the environment is offered, never used, until chosen (#137)
+
+The 2026-11-13 amendment made Ghost say where a connection came from; it still used it.
+Started from a terminal or a coding agent's shell, Ghost ran on that shell's
+`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_BASE_URL`, `OPENAI_API_KEY` or
+`OPENROUTER_API_KEY`: the person's Ghost answered on a credential nobody chose for it and was
+billed to it, and the first run did not say so. On the owner's workstation an inherited proxy
+token became the model credential during testing this way.
+
+**The rule.** A variable Ghost reads by default without the person naming it anywhere in Ghost
+(`ghost_core::environment::OFFERED`: the providers' keys, the older `ANTHROPIC_BASE_URL`, Jev's
+`OPENROUTER_API_KEY` and `TYPESAFE_API_KEY`, the ElevenLabs voice's key) is *offered*, never
+*used*, when only the environment Ghost was started in holds it: not the vault, not a setting
+saved since, not `settings.env` (`Inherited::from_start` compares the start's value with the
+file's, which a launcher loads into it). `ghost_core::environment::resolve`, the one function
+every reader of Ghost's settings goes through (`Daemon::env`, `Deps::ghost_env`), leaves such a
+variable out until the person chooses it, so a session, `/model`, the model check, Jev, the
+realtime voice (its default `OPENAI_API_KEY`) and the slow note all see the same. Until then
+Ghost says it has no model, exactly as with no key at all.
+
+**The choice** is a setting that names the variables, never a value:
+`GHOST_LLM_FROM_ENV=ANTHROPIC_API_KEY` (comma-separated). The first run's model step offers each
+key it finds there by its variable (`FoundModelView.variable`; its **Use ANTHROPIC_API_KEY** is
+the choice and saves the name); Settings › Model names what is offered
+(`ModelConnectionView.offered`) with **Use it**. Both write through `PUT /settings`, which the
+daemon applies live. `GHOST_LLM_FROM_ENV=1` is every one of them, the developer's one switch
+(exported in the shell `make dev` or `ghostd run` starts from, or in a `./.env`);
+`GHOST_LLM_FROM_ENV=0` is none. A value of the variable chosen still lives only in that
+environment: it is used while Ghost is started that way, and adding it to the vault keeps it.
+
+**What stays as it was, and why.** Ghost's own settings (`GHOST_*`) exported in a shell are
+named for Ghost and are read as before. So is a name the person wrote in Ghost:
+`GHOST_LLM_PASSWORD`, `GHOST_REALTIME_PASSWORD`, an app's `${NAME}` in `apps.json` (the apps
+and the hooks still fall back on the process environment for it), a route's password in
+`[routes]`: writing the name was the choice. `HF_TOKEN` (speech model downloads of public files)
+bills nothing and is left as it was. The Claude Code provider's child was already given an
+environment built from scratch (ADR 0069) and is not affected. The perf harnesses
+(`ghostd perf`, `make perf*`) are a developer's commands run by hand from their own shell, and
+`make perf-providers` already reads keys only from the variables named on its command line;
+they read the shell as before and are not Ghost's connection.
+
+**Said wherever it is true, by name only.** `GET /model` has `from_environment` (what the
+connection uses from there, now only what was chosen or kept), `offered`,
+`chosen_from_environment` and `kept_from_before`; `PasswordInfo.offered` marks a row there and
+not used ("In the environment, not used"); `GET /other-tools` says of each key whether Ghost
+uses it; `ghostd llm test` prints the same lines after the check, and `ghostd check` names what
+it leaves out. A value never leaves the vault or the process (ADR 0036).
+
+**An install that already worked this way** must not go quiet on update. Once, at the first
+start with this rule that has a store and an open vault (`ghostd::environment_keys`): when Ghost
+has answered before (a turn in the store) and the model connection is ready only with variables
+the start's environment holds, those names are kept, in memory, and recorded by name in the
+store's checkpoint so the decision is made once and a later start from another shell keeps
+nothing it did not keep then. One note on the waiting list (`model:from-environment`, its place
+Settings › Model, shown and never said) says which, that nobody chose them for Ghost, and the
+way out: **Use them** (writes `GHOST_LLM_FROM_ENV`) or **Don't use them** (`=0`), or choose
+another connection. Ghost does not write the acceptance itself: the choice is the one thing
+this amendment makes the person's, and Ghost writing it would be Ghost choosing again. A new
+install, or one whose connection works on its own vault and settings, keeps nothing.
+
+**What it costs.** Nothing on a turn: one filter over at most eight names when the environment
+is resolved, which was already a map copy per session.
+
