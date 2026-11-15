@@ -1,7 +1,7 @@
 /**
  * Today's model: what needs the operator, what happened, and what is happening, from the
  * daemon's own records (the waiting list, the audit, the runs, the questions). Pure functions,
- * so the screen, the room and the tests read the same day the same way.
+ * so the screen, the rail and the tests read the same day the same way.
  *
  * Every line here is text from the operator's own Ghost, but titles, answers and summaries can
  * carry an outside system's words: they are shown as text, never as markup.

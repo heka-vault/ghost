@@ -307,7 +307,7 @@ export function schedules(s: Scenario): { view: SchedulesView; runs: Record<stri
   if (s.data !== "busy") return { view: { schedules: [MORNING, INBOX], time_zone: "America/Detroit", problems: [] }, runs };
   runs[RELEASE.id] = [run(RELEASE, 60 * 24 * 5, { status: "failed", error: "HTTP 529: the model is overloaded", delivery: "failure", retries: 3, model_calls: 4, tool_calls: 0 })];
   // Busy: two agents at work right now, side by side (one on its schedule, one for a watch),
-  // and a morning of runs, so Today's timeline and the room show work in parallel.
+  // and a morning of runs, so Today's timeline shows work in parallel.
   runs[INBOX.id] = [run(INBOX, 2, { status: "running", started_at: ago(2), finished_at: null, model_calls: 3, tool_calls: 5 }), ...runs[INBOX.id]];
   runs["watch-reviews"] = [
     { ...run(INBOX, 1, { status: "running", started_at: ago(1), finished_at: null, model_calls: 1, tool_calls: 2 }), id: "act-reviews-1", schedule: null, source: "watch:reviews", agent: "legal", name: "review requests" },

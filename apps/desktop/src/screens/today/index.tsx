@@ -19,7 +19,7 @@ import { Button, IconButton, Notice, Page, Skeleton, errorText, useLive, useSetu
 import { type DayCounts, type Moment, cluster, countsOf, dayLabel, headline, isSameDay, momentsOf, shiftDay } from "./model";
 import { Now } from "./Needs";
 import { Signal } from "./Signal";
-import { TalkBar } from "./TalkBar";
+import { TalkBar, useLiveSession } from "./TalkBar";
 import { Timeline } from "./Timeline";
 import "./today.css";
 
@@ -28,6 +28,8 @@ const MAX_BACK_DAYS = 30;
 
 export default function TodayScreen(_: RouteProps) {
   const today = useToday();
+  // A live session is seen here when Ghost doesn't float (the room view removed, 2026-11-14).
+  const live = useLiveSession();
   const { client } = useGhost();
   const { online, setupNeeded, setupLocked, setupHref, loadingModels } = useLive();
   const [day, setDay] = useState(() => new Date());
@@ -65,7 +67,7 @@ export default function TodayScreen(_: RouteProps) {
   const working = today.working.length;
 
   return (
-    <Page title="Today" bare width="wide" className="today" dock={isToday ? <TalkBar /> : undefined}>
+    <Page title="Today" bare width="wide" className="today" dock={isToday ? <TalkBar live={live} /> : undefined}>
       <header className="today-head">
         <div className="today-day">
           <IconButton size="sm" variant="ghost" label={`The day before (${"["})`} icon={<ChevronLeft />} onClick={() => go(-1)} />
@@ -120,7 +122,7 @@ export default function TodayScreen(_: RouteProps) {
       {(isToday && !today.loaded) || (!isToday && past.loading) ? (
         <TimelineSkeleton />
       ) : (
-        <Timeline key={day.toDateString()} moments={moments} agents={today.agents} isToday={isToday} head={isToday ? <Now /> : null} />
+        <Timeline key={day.toDateString()} moments={moments} agents={today.agents} isToday={isToday} head={isToday ? <Now pending={live.pending} question={live.question} /> : null} />
       )}
     </Page>
   );

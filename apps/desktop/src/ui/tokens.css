@@ -26,10 +26,8 @@
   --text-2xl: 20px;  --leading-2xl: 28px;
   --text-3xl: 24px;  --leading-3xl: 32px;
   --text-4xl: 32px;  --leading-4xl: 40px;
-  /* Room view only (the conversation screen read from across a room): one step past 4xl. */
+  /* Display figures only (Today's numbers): one step past 4xl. */
   --text-5xl: 44px;  --leading-5xl: 56px;
-  /* The room only (Ghost read from three metres): its state word. Clamped by the room itself. */
-  --text-6xl: 64px;  --leading-6xl: 72px;
 
   --weight-regular: 400;
   --weight-medium: 500;
@@ -103,7 +101,7 @@
   --duration-base: 180ms;
   --duration-slow: 280ms;
   --duration-slower: 420ms;
-  --duration-posture: 560ms;     /* desk to room and back: the one long move in the app */
+  --duration-posture: 560ms;     /* the first run's moment: the one long move in the app */
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
   --ease-emphasized: cubic-bezier(0.3, 0, 0, 1);
@@ -220,9 +218,6 @@
   --kind-question: var(--accent-text);
   --kind-note: var(--text-3);
   --kind-failed: var(--danger);
-
-  /* the room: a deeper ground than the canvas, so the room never reads as one more page */
-  --room-bg: light-dark(#eeeef1, #050507);
 
   /* line (conversation) glyph hues: fg on its own soft tile is >= 4.5:1 */
   --hue-0-fg: light-dark(#3f4bc9, #9db0ff); --hue-0-bg: light-dark(rgba(76, 87, 224, 0.1), rgba(110, 130, 255, 0.16));
