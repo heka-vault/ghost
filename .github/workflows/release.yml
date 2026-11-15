@@ -123,7 +123,7 @@ jobs:
               printf "%s\n" "$removed" | grep -i ghost
               grep -q "nothing there was deleted" <<<"$removed"
               grep -q "run .ghostd uninstall. before removing the package" <<<"$removed"
-              if command -v ghostd; then echo "ghostd is still installed"; exit 1; fi
+              if [ -e /usr/bin/ghostd ]; then echo "ghostd is still installed"; exit 1; fi
               [ "$before" = "$(find /home/person -printf "%y %s %p\n" | sort)" ]'
             echo "::endgroup::"
           done
