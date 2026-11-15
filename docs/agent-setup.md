@@ -34,7 +34,7 @@ Say this in your own words, then ask whether to go ahead. Do nothing else until 
   `~/.local/share/ghost`; none of it is uploaded by Ghost.
 - When something in Ghost breaks, it sends an error report: what failed and where in its
   code, never what they said or typed. On by default; Settings › General turns it off.
-- It is early software, Linux only, built at one desk.
+- Early software, Linux only, tested with one microphone only (a reSpeaker XVF3800 USB array).
 - The download is about 180 MB (the .deb; 240 MB for the AppImage), and its ears and voice are
   2.9 GB more, downloaded once. Installed it takes about 4 GB of disk.
 - Installing the .deb needs their password once, typed by them in their own terminal.
