@@ -1,6 +1,6 @@
 # 0034: Apps connect to Ghost; everything runs unless a permission blocks it
 
-- **Status:** accepted (decided 2026-10-27); amended by ADR 0036 (an app's key is a password in Ghost's vault)
+- **Status:** accepted (decided 2026-10-27); amended by ADR 0036 (an app's key is a password in Ghost's vault) and ADR 0076 (the client a sign-in uses; apps the registry lacks)
 - **Date:** 2026-10-27
 - **Supersedes:** ADR 0022's write declarations and the reads list; ADR 0024's servers per
   department (`mcp.json`, `use`, the declarations in `department.json`, `root_servers`) and
@@ -72,13 +72,15 @@ operator's docs say *app*, *connect*, *sign in* and *permission*. They do not sa
 or declaration. The code keeps `mcp` only where it names the protocol library.
 
 **Apps come from a catalog.** The desktop's Apps screen lists apps from the official MCP
-registry. The registry asks host applications not to query it live, so `ghostd` keeps its
+registry, and (ADR 0076) a short in-tree list of first-party apps the registry lacks. The registry asks host applications not to query it live, so `ghostd` keeps its
 own copy, refreshed at most hourly when the screen asks. Each entry offers the ways it can
 connect:
 
 - *Sign in*: a remote app that uses OAuth. Ghost registers itself with the app's
   authorization server, opens the browser, and receives the code on a loopback address that
-  listens only while a sign-in is open.
+  listens only while a sign-in is open. (ADR 0076: a server that takes no registration is
+  signed in to as the person's own client, Ghost's own for that server, or Ghost's client
+  metadata document, in that order, and one none of them gets into says so in words.)
 - *API key*: a remote app with a secret header. The key goes into Ghost's environment, and the
   file names it by reference.
 - *Runs on this computer*: an npm, PyPI or container package, started through `npx`, `uvx` or
