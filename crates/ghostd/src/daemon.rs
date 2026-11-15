@@ -80,8 +80,8 @@ use crate::check::{
 };
 use crate::config::{GhostdSettings, runtime_dir};
 use crate::deciders::{Completer, model_decider};
-use crate::dictation::is_dictating;
 use crate::hooks_listener::HooksListener;
+use crate::nerd_dictation;
 use crate::passwords::{
     Opened, VAULT_RETRY, in_use, open_passwords, operator_keyring, problems as password_problems,
     wait_for_vault,
@@ -278,6 +278,12 @@ pub struct Ports {
     pub sound_facts: Arc<dyn Fn() -> Option<crate::microphone::SoundFacts> + Send + Sync>,
     /// What Repair does to the sound stack (ADR 0064).
     pub repairer: Arc<dyn crate::microphone::Repairer>,
+    /// Dictation's capture (ADR 0077); None: the session's microphone through `ghost_audio`.
+    pub dictation_media: Option<MediaFactory>,
+    /// Where dictated text goes: the X11 clipboard, or a test's fake.
+    pub clipboard: Arc<dyn crate::dictation::Clipboard>,
+    /// What the operator sees of a dictation with no terminal: a desktop notification.
+    pub dictation_notes: Arc<dyn crate::dictation::Notifier>,
 }
 
 /// No sound stack to repair: a test's.
@@ -344,6 +350,9 @@ impl Ports {
             players: Arc::new(crate::players::MprisPlayers::default()),
             sound_facts: Arc::new(crate::microphone::live_facts),
             repairer: Arc::new(crate::microphone::LiveRepairer),
+            dictation_media: None,
+            clipboard: Arc::new(crate::dictation::XClipboard::default()),
+            dictation_notes: Arc::new(crate::dictation::DesktopNotes::default()),
         }
     }
 
@@ -370,6 +379,12 @@ impl Ports {
             players: Arc::new(crate::players::NoPlayers),
             sound_facts: Arc::new(|| None),
             repairer: Arc::new(NoRepair),
+            dictation_media: Some(Arc::new(|| {
+                Ok(Box::new(ghost_voice::transport::Silent)
+                    as Box<dyn ghost_voice::transport::MediaIn>)
+            })),
+            clipboard: Arc::new(crate::dictation::NoClipboard),
+            dictation_notes: Arc::new(crate::dictation::NoNotes),
         }
     }
 }
@@ -447,6 +462,8 @@ pub struct Late {
     pub speech_models: OnceLock<Arc<crate::speech_models::SpeechModelsDesk>>,
     /// Debug mode's switch (ADR 0074).
     pub debug_audio: OnceLock<Arc<crate::debug_audio::DebugAudio>>,
+    /// Ghost's own dictation (ADR 0077).
+    pub dictation: OnceLock<Arc<crate::dictation::Dictation>>,
 }
 
 /// What a session with any agent reaches (ADR 0034, ADR 0035).
@@ -537,6 +554,8 @@ pub struct Daemon {
     wake_level: Arc<Mutex<Option<(Instant, f64)>>>,
     /// The plan and when it was made: the facts are read again after `PLAN_FOR`.
     mic_plan: Mutex<Option<(Instant, crate::microphone::Plan)>>,
+    /// Dictation asking the passive loop for the microphone (ADR 0077).
+    pub(crate) dictation_mic: Arc<crate::dictation::Leases>,
 }
 
 /// How long a read of the sound devices is trusted.
@@ -621,6 +640,7 @@ impl Daemon {
             mic_health: Arc::new(Mutex::new(crate::microphone::Health::default())),
             wake_level: Arc::new(Mutex::new(None)),
             mic_plan: Mutex::new(None),
+            dictation_mic: Arc::new(crate::dictation::Leases::default()),
         }
     }
 
@@ -744,6 +764,31 @@ impl Daemon {
             .wake_takes
             .get_or_init(|| Arc::new(ghost_core::wake_takes::Takes::new(&self.cfg().data_dir)))
             .clone()
+    }
+
+    /// Ghost's own dictation (ADR 0077): made once, over this daemon.
+    pub fn dictation(self: &Arc<Self>) -> Arc<crate::dictation::Dictation> {
+        self.late
+            .dictation
+            .get_or_init(|| {
+                crate::dictation::Dictation::new(
+                    Arc::new(crate::dictation::DaemonHost {
+                        d: Arc::downgrade(self),
+                    }),
+                    self.ports.clipboard.clone(),
+                    self.ports.dictation_notes.clone(),
+                    crate::dictation::LIMIT,
+                )
+            })
+            .clone()
+    }
+
+    /// End a dictation if one is going on (a session opening, listening off, Ghost
+    /// stopping): nothing of it reaches the clipboard.
+    pub(crate) async fn end_dictation(&self, why: ghost_api::dictation::DictationReason) {
+        if let Some(d) = self.late.dictation.get() {
+            d.end(why).await;
+        }
     }
 
     /// The Hearing test's recorder (ADR 0042).
@@ -961,7 +1006,7 @@ impl Daemon {
             && self.state.phase() == Phase::Passive
             && self.phone_q_empty()
             && self.raise_q_empty()
-            && !is_dictating(&self.cfg().dictation_flag)
+            && !nerd_dictation::running(&self.cfg().nerd_dictation_flag)
     }
 
     /// The phone's own session is running, or is about to start: the phone route does
@@ -2599,16 +2644,19 @@ impl Daemon {
                     p = d.next_phone() => Won::Phone(p),
                     r = d.next_raised() => match r { Some(r) => Won::Raised(r), None => Won::Rearm },
                     l = d.next_hear() => Won::Hear(l),
+                    l = d.dictation_mic.next() => Won::Dictate(l),
                 };
                 (won, Some(wake_task))
             };
             d.waiting_flag.store(false, Ordering::SeqCst);
             let (mut woke, mut phone, mut raised, mut hear) = (None, None, None, None);
+            let mut dictate = None;
             match won {
                 Won::Wake(r) => woke = Some(r),
                 Won::Phone(p) => phone = Some(p),
                 Won::Raised(r) => raised = Some(r),
                 Won::Hear(l) => hear = Some(l),
+                Won::Dictate(l) => dictate = Some(l),
                 Won::Stop | Won::Rearm => {}
             }
             if woke.is_none() {
@@ -2621,7 +2669,7 @@ impl Daemon {
                         let _ = task.await;
                     }
                 }
-                wake.stop().await; // releases the mic
+                wake.stop().await; // releases the mic, and the kept takes' array tape
             }
             if phone.is_none() {
                 phone = d.take_phone(); // accepted in the same tick
@@ -2630,7 +2678,7 @@ impl Daemon {
                 if phone.is_some()
                     || woke.is_some()
                     || d.stop.is_cancelled()
-                    || is_dictating(&d.cfg().dictation_flag)
+                    || nerd_dictation::running(&d.cfg().nerd_dictation_flag)
                 {
                     let _ = r.reply.send(ghost_core::routes::Delivery::Unavailable); // the operator came first
                 } else {
@@ -2662,6 +2710,29 @@ impl Daemon {
                     }
                     continue;
                 }
+            }
+            if let Some(lease) = dictate.take() {
+                // Dictation (ADR 0077): the wake listener stopped above, its capture closed and
+                // its pipeline and the array's tape dropped; dropping the lease (a wake or a
+                // phone in the same tick came first) tells dictation so.
+                if woke.is_none()
+                    && phone.is_none()
+                    && raised.is_none()
+                    && !d.stop.is_cancelled()
+                    && lease.granted.send(()).is_ok()
+                {
+                    match d.dictating(lease.release).await {
+                        Dictating::Done => continue,
+                        Dictating::Stop => break,
+                        Dictating::Phone(p) => phone = Some(p),
+                        Dictating::Called(words) => woke = Some(words),
+                    }
+                }
+            }
+            if woke.is_some() || phone.is_some() || raised.is_some() {
+                // A session opens: a dictation still being read is dropped (ADR 0077).
+                d.end_dictation(ghost_api::dictation::DictationReason::SessionOpened)
+                    .await;
             }
             if let Some(raised) = raised {
                 // ADR 0032: Ghost greets at the desk and waits
@@ -2695,8 +2766,8 @@ impl Daemon {
             let Some(first) = woke else {
                 continue; // settings changed: rebuild the listener
             };
-            if is_dictating(&d.cfg().dictation_flag) {
-                info!("wake ignored: dictation is active");
+            if nerd_dictation::running(&d.cfg().nerd_dictation_flag) {
+                info!("wake ignored: nerd-dictation is active");
                 d.restore_early_chime();
                 continue;
             }
@@ -2721,6 +2792,59 @@ impl Daemon {
                 )
                 .await;
         }
+        // Ghost is stopping: a dictation still being read reaches nothing.
+        d.end_dictation(ghost_api::dictation::DictationReason::Stopping)
+            .await;
+    }
+
+    /// While dictation has the microphone (ADR 0077): until its capture closes. A phone call
+    /// or a typed turn or Call (a session opening) cancels it first, as do listening turned
+    /// off and Ghost stopping; the wake listener is not running meanwhile.
+    async fn dictating(self: &Arc<Self>, release: oneshot::Receiver<()>) -> Dictating {
+        use ghost_api::dictation::DictationReason as Why;
+        let d = self;
+        info!("passive: dictation has the microphone; the wake is paused");
+        let mut mic = d.mic.watch();
+        mic.borrow_and_update();
+        let manual = lock(&d.manual).clone();
+        let called = async {
+            match &manual {
+                Some(m) => m.wait().await,
+                None => std::future::pending().await,
+            }
+        };
+        tokio::pin!(release);
+        tokio::pin!(called);
+        let out = loop {
+            tokio::select! {
+                _ = &mut release => break Dictating::Done,
+                _ = d.stop.cancelled() => {
+                    d.end_dictation(Why::Stopping).await;
+                    break Dictating::Stop;
+                }
+                _ = mic.changed() => {
+                    if d.mic.is_off() {
+                        d.end_dictation(Why::ListeningTurnedOff).await;
+                        break Dictating::Done;
+                    }
+                }
+                p = d.next_phone() => {
+                    d.end_dictation(Why::SessionOpened).await;
+                    break Dictating::Phone(p);
+                }
+                words = &mut called => {
+                    d.end_dictation(Why::SessionOpened).await;
+                    break Dictating::Called(words);
+                }
+            }
+        };
+        // The capture is closed once the hold is dropped; wait for it, so a session's own
+        // input never opens beside dictation's.
+        if !matches!(out, Dictating::Done) {
+            let _ = tokio::time::timeout(Duration::from_secs(2), &mut release).await;
+        }
+        info!("passive: dictation gave the microphone back");
+        out
     }
 
     /// A typed turn with no session open (2026-11-13): a typed session, which opens no
@@ -2984,6 +3108,7 @@ impl Daemon {
             })),
             meter: Some(Arc::new(crate::meter::MeterDesk::new(self))),
             checks: Some(Arc::new(crate::check::ChecksDesk::this_process())),
+            dictation: Some(Arc::new(crate::dictation::DictationDesk(self.dictation()))),
         });
         self.late.deps.set(deps.clone()).ok();
         let listener = match ghost_api::server::bind(&socket).await {
@@ -3102,6 +3227,17 @@ impl Daemon {
     }
 }
 
+/// How the passive loop's wait beside a dictation ended.
+pub(crate) enum Dictating {
+    /// Its capture closed; the loop listens again.
+    Done,
+    Stop,
+    /// A phone call came; the dictation was cancelled for it.
+    Phone(PendingPhone),
+    /// A typed turn or Call; the dictation was cancelled for it.
+    Called(Option<String>),
+}
+
 pub(crate) enum Won {
     Wake(Option<String>),
     Stop,
@@ -3110,6 +3246,8 @@ pub(crate) enum Won {
     Raised(Raised),
     /// The Hearing test's recorder wants the mic (ADR 0042).
     Hear(crate::hear::Lease),
+    /// Dictation wants the mic (ADR 0077).
+    Dictate(crate::dictation::Lease),
 }
 
 struct StartApi {
@@ -3469,7 +3607,7 @@ pub(crate) mod tests {
             env_path: tmp.join("config/env"),
             vault_env_path: tmp.join("no-heka"),
             infra_dir: tmp.join("infra"),
-            dictation_flag: tmp.join("rt/dictation"),
+            nerd_dictation_flag: tmp.join("rt/dictation"),
             mcp_listen: String::new(), // never the operator's port from a test
             ..GhostdSettings::default()
         };

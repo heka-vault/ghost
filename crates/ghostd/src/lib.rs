@@ -26,6 +26,7 @@ pub mod mcp;
 pub mod meter;
 pub mod microphone;
 pub mod model_check;
+pub mod nerd_dictation;
 pub mod outside;
 pub mod passwords;
 pub mod phone;

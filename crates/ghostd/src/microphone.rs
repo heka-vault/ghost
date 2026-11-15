@@ -56,7 +56,7 @@ impl Node {
         self.props.get("device.id").map(String::as_str)
     }
 
-    fn is_source(&self) -> bool {
+    pub fn is_source(&self) -> bool {
         // A virtual source (a noise-suppression app's, a loopback) is a microphone too.
         matches!(
             self.class.as_str(),

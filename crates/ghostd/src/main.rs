@@ -1,4 +1,5 @@
-//! `ghostd run`: the daemon. `ghostd status|wake|say|sleep|listening`: clients of its socket.
+//! `ghostd run`: the daemon. `ghostd status|wake|say|sleep|listening|dictate`: clients of its
+//! socket.
 //! `ghostd passwords`: the vault from the command line. `ghostd check`: the settings,
 //! the vault, Ghost's folder and the apps, with a problem as the exit code. `ghostd push`:
 //! a signed delivery to the webhook listener (ADR 0027). `ghostd latency`: where the
@@ -96,6 +97,8 @@ fn main() -> anyhow::Result<()> {
         Some("sleep") => client("sleep", &args[1..]),
         // ADR 0057: for a keyboard shortcut of the desktop's own
         Some("listening") => client("listening", &args[1..]),
+        // ADR 0077: dictation to the clipboard, for a keyboard shortcut
+        Some("dictate") => std::process::exit(dictate(&args[1..])),
         Some("restore-volumes") => restore_volumes(),
         // ADR 0065: the retrained wake detectors, and the one-command way back
         Some("detector") => {
@@ -229,7 +232,7 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Some(other) => anyhow::bail!(
-            "unknown command {other:?}; commands: run, status, wake, say, sleep, check, models, echo-cancel, command, reports, debug-audio, diagnose, push, latency, llm, perf, restore-volumes, passwords, mcp, setup, uninstall, api-schema, version"
+            "unknown command {other:?}; commands: run, status, wake, say, sleep, listening, dictate, check, models, echo-cancel, command, reports, debug-audio, diagnose, push, latency, llm, perf, restore-volumes, passwords, mcp, setup, uninstall, api-schema, version"
         ),
     }
 }
@@ -384,6 +387,24 @@ async fn debug_audio(args: &[String]) -> i32 {
     }
     let client = GhostClient::new(&path);
     ghostd::debug_audio::cli(
+        args,
+        &client,
+        &mut std::io::stdout(),
+        &mut std::io::stderr(),
+    )
+    .await
+}
+
+/// `ghostd dictate start|stop|toggle|cancel|status` (ADR 0077), through the running daemon.
+#[tokio::main]
+async fn dictate(args: &[String]) -> i32 {
+    let path = default_socket_path();
+    if !path.exists() {
+        eprintln!("ghostd is not running (no socket at {})", path.display());
+        return 2;
+    }
+    let client = GhostClient::new(&path);
+    ghostd::dictation::cli(
         args,
         &client,
         &mut std::io::stdout(),

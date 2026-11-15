@@ -1268,6 +1268,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_phone_has_no_way_to_dictate() {
+        // ADR 0077: dictation is the operator's at the desk; the phone listener has no route
+        // to it, signed or not, and never proxies the control API's.
+        let p = phone();
+        let creds = pair(&p).await;
+        for (method, path) in [
+            ("GET", "/dictation"),
+            ("POST", "/dictation/start"),
+            ("POST", "/dictation/stop"),
+            ("POST", "/dictation/toggle"),
+            ("POST", "/dictation/cancel"),
+        ] {
+            let (r, _) = signed(&p.app, &creds, method, path, None).await;
+            assert_eq!(r.status, StatusCode::NOT_FOUND, "{method} {path}");
+        }
+    }
+
+    #[tokio::test]
     async fn the_waiting_list_is_signed_like_everything_else() {
         // ADR 0029: the phone reads the same list and acknowledges or snoozes from it.
         let p = phone();

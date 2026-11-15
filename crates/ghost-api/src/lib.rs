@@ -19,6 +19,7 @@ pub mod controller;
 pub mod conversations;
 pub mod deps;
 pub mod developer;
+pub mod dictation;
 pub mod echo_cancel;
 pub mod error;
 pub mod hear;

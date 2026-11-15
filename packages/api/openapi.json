@@ -1855,6 +1855,162 @@
         ],
         "type": "object"
       },
+      "DictationOutcome": {
+        "description": "How a dictation, or a request about one, ended.",
+        "enum": [
+          "on_clipboard",
+          "nothing_heard",
+          "not_on_clipboard",
+          "cancelled",
+          "refused"
+        ],
+        "type": "string"
+      },
+      "DictationReason": {
+        "description": "Why, when the outcome needs one.",
+        "enum": [
+          "not_listening",
+          "busy",
+          "hearing_test",
+          "no_speech_model",
+          "no_microphone",
+          "microphone_failed",
+          "already_dictating",
+          "still_reading",
+          "not_dictating",
+          "limit",
+          "microphone_ended",
+          "operator",
+          "listening_turned_off",
+          "session_opened",
+          "stopping",
+          "no_display",
+          "clipboard_failed"
+        ],
+        "type": "string"
+      },
+      "DictationResult": {
+        "description": "What a dictation, or a request, ended with: kinds and numbers, never words.",
+        "properties": {
+          "chars": {
+            "description": "Characters put on the clipboard (after the cleanup).",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "first_frame_ms": {
+            "description": "From the start request to the first frame captured, in milliseconds: how much of a\nfirst word could be lost.",
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/DictationOutcome"
+          },
+          "queue_ms": {
+            "description": "Waiting for the shared recognizer behind a read in flight, in milliseconds.",
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "read_ms": {
+            "description": "Parakeet's read itself, in milliseconds.",
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "reason": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DictationReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "seconds": {
+            "description": "Seconds of audio recorded.",
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "outcome",
+          "reason",
+          "seconds",
+          "chars",
+          "first_frame_ms",
+          "queue_ms",
+          "read_ms"
+        ],
+        "type": "object"
+      },
+      "DictationState": {
+        "description": "Where a dictation is.",
+        "enum": [
+          "idle",
+          "recording",
+          "reading"
+        ],
+        "type": "string"
+      },
+      "DictationView": {
+        "description": "The state now, and a result: what this request ended with, or for `GET` the last one.",
+        "properties": {
+          "first_frame_ms": {
+            "description": "While recording: from the start request to the first frame, in milliseconds.",
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "limit_secs": {
+            "description": "The hard limit on one dictation's recording, in seconds.",
+            "format": "double",
+            "type": "number"
+          },
+          "recording_secs": {
+            "description": "Seconds since recording started, while it records.",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "result": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DictationResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "$ref": "#/components/schemas/DictationState"
+          }
+        },
+        "required": [
+          "state",
+          "limit_secs",
+          "recording_secs",
+          "first_frame_ms",
+          "result"
+        ],
+        "type": "object"
+      },
       "FirstMeetingRequest": {
         "description": "`PUT /first-meeting`: the first run opens (or closes) its moment (ADR 0059 as amended\n2026-11-14). Armed, the next desk session with Ghost opens with Ghost's own first line,\nonce. The operator's window only: no tool, outside client or phone reaches it.",
         "properties": {
@@ -10395,6 +10551,111 @@
         "summary": "Preview a diagnostic report",
         "tags": [
           "developer"
+        ]
+      }
+    },
+    "/dictation": {
+      "get": {
+        "operationId": "dictation_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DictationView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Dictation's state",
+        "tags": [
+          "dictation"
+        ]
+      }
+    },
+    "/dictation/cancel": {
+      "post": {
+        "operationId": "dictation_cancel",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DictationView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Cancel dictating",
+        "tags": [
+          "dictation"
+        ]
+      }
+    },
+    "/dictation/start": {
+      "post": {
+        "operationId": "dictation_start",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DictationView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Start dictating",
+        "tags": [
+          "dictation"
+        ]
+      }
+    },
+    "/dictation/stop": {
+      "post": {
+        "operationId": "dictation_stop",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DictationView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Stop dictating",
+        "tags": [
+          "dictation"
+        ]
+      }
+    },
+    "/dictation/toggle": {
+      "post": {
+        "operationId": "dictation_toggle",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DictationView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Start or stop dictating",
+        "tags": [
+          "dictation"
         ]
       }
     },

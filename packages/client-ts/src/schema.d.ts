@@ -560,6 +560,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/dictation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Dictation's state */
+        get: operations["dictation_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/dictation/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel dictating */
+        post: operations["dictation_cancel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/dictation/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start dictating */
+        post: operations["dictation_start"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/dictation/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Stop dictating */
+        post: operations["dictation_stop"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/dictation/toggle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start or stop dictating */
+        post: operations["dictation_toggle"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/events/schema": {
         parameters: {
             query?: never;
@@ -3021,6 +3106,69 @@ export interface components {
             path: string;
         };
         /**
+         * @description How a dictation, or a request about one, ended.
+         * @enum {string}
+         */
+        DictationOutcome: "on_clipboard" | "nothing_heard" | "not_on_clipboard" | "cancelled" | "refused";
+        /**
+         * @description Why, when the outcome needs one.
+         * @enum {string}
+         */
+        DictationReason: "not_listening" | "busy" | "hearing_test" | "no_speech_model" | "no_microphone" | "microphone_failed" | "already_dictating" | "still_reading" | "not_dictating" | "limit" | "microphone_ended" | "operator" | "listening_turned_off" | "session_opened" | "stopping" | "no_display" | "clipboard_failed";
+        /** @description What a dictation, or a request, ended with: kinds and numbers, never words. */
+        DictationResult: {
+            /** @description Characters put on the clipboard (after the cleanup). */
+            chars: number;
+            /**
+             * Format: int64
+             * @description From the start request to the first frame captured, in milliseconds: how much of a
+             *     first word could be lost.
+             */
+            first_frame_ms: number | null;
+            outcome: components["schemas"]["DictationOutcome"];
+            /**
+             * Format: int64
+             * @description Waiting for the shared recognizer behind a read in flight, in milliseconds.
+             */
+            queue_ms: number | null;
+            /**
+             * Format: int64
+             * @description Parakeet's read itself, in milliseconds.
+             */
+            read_ms: number | null;
+            reason: components["schemas"]["DictationReason"] | null;
+            /**
+             * Format: double
+             * @description Seconds of audio recorded.
+             */
+            seconds: number;
+        };
+        /**
+         * @description Where a dictation is.
+         * @enum {string}
+         */
+        DictationState: "idle" | "recording" | "reading";
+        /** @description The state now, and a result: what this request ended with, or for `GET` the last one. */
+        DictationView: {
+            /**
+             * Format: int64
+             * @description While recording: from the start request to the first frame, in milliseconds.
+             */
+            first_frame_ms: number | null;
+            /**
+             * Format: double
+             * @description The hard limit on one dictation's recording, in seconds.
+             */
+            limit_secs: number;
+            /**
+             * Format: double
+             * @description Seconds since recording started, while it records.
+             */
+            recording_secs: number | null;
+            result: components["schemas"]["DictationResult"] | null;
+            state: components["schemas"]["DictationState"];
+        };
+        /**
          * @description `PUT /first-meeting`: the first run opens (or closes) its moment (ADR 0059 as amended
          *     2026-11-14). Armed, the next desk session with Ghost opens with Ghost's own first line,
          *     once. The operator's window only: no tool, outside client or phone reaches it.
@@ -5408,6 +5556,11 @@ export type SchemaDiagnosePart = components['schemas']['DiagnosePart'];
 export type SchemaDiagnosePreview = components['schemas']['DiagnosePreview'];
 export type SchemaDiagnoseRequest = components['schemas']['DiagnoseRequest'];
 export type SchemaDiagnoseSaved = components['schemas']['DiagnoseSaved'];
+export type SchemaDictationOutcome = components['schemas']['DictationOutcome'];
+export type SchemaDictationReason = components['schemas']['DictationReason'];
+export type SchemaDictationResult = components['schemas']['DictationResult'];
+export type SchemaDictationState = components['schemas']['DictationState'];
+export type SchemaDictationView = components['schemas']['DictationView'];
 export type SchemaFirstMeetingRequest = components['schemas']['FirstMeetingRequest'];
 export type SchemaFirstMeetingView = components['schemas']['FirstMeetingView'];
 export type SchemaFoundAppView = components['schemas']['FoundAppView'];
@@ -6725,6 +6878,106 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dictation_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DictationView"];
+                };
+            };
+        };
+    };
+    dictation_cancel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DictationView"];
+                };
+            };
+        };
+    };
+    dictation_start: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DictationView"];
+                };
+            };
+        };
+    };
+    dictation_stop: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DictationView"];
+                };
+            };
+        };
+    };
+    dictation_toggle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DictationView"];
                 };
             };
         };

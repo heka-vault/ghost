@@ -880,6 +880,11 @@ async fn nothing_an_outside_client_must_not_reach_is_offered() {
         "report",
         "reports",
         "telemetry",
+        // ADR 0077: dictation and the clipboard are the operator's own act.
+        "dictate",
+        "dictation",
+        "clipboard",
+        "paste",
     ];
     for t in &tools {
         let arguments: Vec<String> = t

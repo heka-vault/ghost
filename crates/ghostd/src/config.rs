@@ -194,7 +194,7 @@ pub struct GhostdSettings {
     pub input_repair_auto: bool,
 
     /// Coexist with nerd-dictation (F9): its toggle script writes this file while active.
-    pub dictation_flag: PathBuf,
+    pub nerd_dictation_flag: PathBuf,
 }
 
 impl Default for GhostdSettings {
@@ -243,7 +243,7 @@ impl Default for GhostdSettings {
             pause_players: true,
             input_repair_auto: false,
             chime: true,
-            dictation_flag: runtime.join("dictation-audio-duck.state"),
+            nerd_dictation_flag: runtime.join("dictation-audio-duck.state"),
         }
     }
 }
@@ -466,7 +466,7 @@ impl GhostdSettings {
         let mut repair = String::new();
         env.string("GHOST_INPUT_REPAIR", &mut repair);
         s.input_repair_auto = repair.trim().eq_ignore_ascii_case("auto");
-        env.path("GHOST_DICTATION_FLAG", &mut s.dictation_flag);
+        env.path("GHOST_DICTATION_FLAG", &mut s.nerd_dictation_flag);
         Ok(s)
     }
 
@@ -596,7 +596,10 @@ mod tests {
         assert_eq!(s.clients_dir(), home.join(".local/share/ghost/clients"));
         let off = GhostdSettings::from_env(&env(&[("GHOST_MCP_LISTEN", "")])).unwrap();
         assert_eq!(off.mcp_listen, "");
-        assert!(s.dictation_flag.ends_with("dictation-audio-duck.state"));
+        assert!(
+            s.nerd_dictation_flag
+                .ends_with("dictation-audio-duck.state")
+        );
     }
 
     #[test]

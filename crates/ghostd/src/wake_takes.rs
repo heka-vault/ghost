@@ -79,11 +79,19 @@ impl ArrayTape {
         &self.node
     }
 
-    /// Open the capture, unless it is open.
+    /// Open the capture, unless it is open. A tape that starts holds nothing from before it
+    /// stopped: a frame a stopping capture added late is dropped here, so nothing from a
+    /// pause in the passive listener (a session, the Hearing test, a dictation, ADR 0077)
+    /// can be in a take.
     pub fn start(self: &Arc<Self>) {
         let mut task = lock(&self.task);
         if task.as_ref().is_some_and(|t| !t.is_finished()) {
             return;
+        }
+        {
+            let mut r = lock(&self.ring);
+            r.buf.clear();
+            r.newest = None;
         }
         let node = self.node.clone();
         let ring = self.ring.clone();
