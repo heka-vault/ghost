@@ -16,6 +16,7 @@ pub mod dictation;
 pub mod environment_keys;
 pub mod first_meeting;
 pub mod ghost_app;
+pub mod ghostd_command;
 pub mod hear;
 pub mod hooks_listener;
 pub mod latency;

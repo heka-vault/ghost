@@ -59,12 +59,15 @@ highest `vYYYY.M.N` tag of this month, or `.0` when this month has none.
    The tag starts `.github/workflows/release.yml`. It checks the tag names the version the
    files say, builds the bundle (below) signed for the updater, checks each signature
    against the public key the app carries, installs the .deb into clean Ubuntu 24.04 and
-   26.04 and runs `ghostd version`, which must name the tagged commit, and `ghostd check`,
-   which must find the bundle's runtime and model files on its own and name no script from
-   the checkout, then makes a person with Ghost's folders in their home, installs the same
+   26.04 and Debian 13 and runs `ghostd version`, which must name the tagged commit, and
+   `ghostd check`, which must find the bundle's runtime and model files on its own, start
+   espeak-ng with data that fits its library, and name no script from the checkout, then makes a person with Ghost's folders in their home, installs the same
    .deb again (an upgrade, which must print nothing about uninstalling) and removes it,
    which must print the `prerm`'s two lines (what stays, and `ghostd uninstall`) and leave
-   that home exactly as it was (ADR 0071), checks the AppImage carries the same daemon,
+   that home exactly as it was (ADR 0071), checks the AppImage carries the same daemon and
+   runs `scripts/distro-check.sh` on it in clean Arch and Fedora containers (ADR 0075: its
+   libraries, `ghostd check`, Kokoro rendering a sentence, and a voice that cannot start
+   reported to a stub on the container's loopback),
    writes `latest.json` (the
    update manifest, `tools/release_manifest.py`, with GitHub's generated notes), and
    publishes the .deb, the AppImage, their `.sig` files and `latest.json` in one release.
@@ -88,6 +91,14 @@ build) and 18 with a warm one.
 The release is built on GitHub's Ubuntu 24.04 runner on purpose: a bundle links the glibc of
 the machine that built it, so one built on 26.04 (glibc 2.43) refuses to start on 24.04
 (`GLIBC_2.43 not found`). A `make bundle` on a 26.04 workstation is for that workstation.
+That is also why Debian 12 (glibc 2.36) is not supported and Debian 13 (2.41) is (ADR 0075);
+the build base does not move for an older system.
+
+**Supported distributions** (ADR 0075), x86-64 only: Ubuntu 24.04 and 26.04 and Debian 13 by
+the .deb; Arch, Fedora and others by the AppImage, which needs an ordinary desktop from the
+system (PipeWire's library, ALSA, X11 or XWayland, Mesa, fontconfig, FreeType, HarfBuzz,
+FriBidi, Wayland's client library) and FUSE 2. What a container cannot check waits for a
+real machine: [omarchy-checklist.md](omarchy-checklist.md).
 
 If the month turns between the merge and the tag, `make release` refuses: the merged
 `2026.10.x` is no longer this month's. Bump again with `make version V=next` in a PR.
@@ -112,7 +123,8 @@ What `tauri build` does, in order (`apps/desktop/src-tauri/tauri.conf.json`):
    speech models](#the-speech-models)) and copies them with their licences to
    `apps/desktop/src-tauri/resources/models/`; then `apps/desktop/src-tauri/resources/
    ghost-build.json`, the record of what the build is ([below](#what-each-build-says-it-is));
-   then `cargo build --release -p ghostd -p ghost-core --bins` and the three binaries the
+   then `scripts/espeak.sh stage`, espeak-ng's data for the library the AppImage carries
+   (below); then `cargo build --release -p ghostd -p ghost-core --bins` and the three binaries the
    bundle carries, `ghostd`, `ghost-mock-github` and `ghost-scripts` (the two apps
    `apps.json` names), copied to `apps/desktop/src-tauri/binaries/<name>-<target triple>`,
    where Tauri's bundler looks for `bundle.externalBin`. Neither folder is committed.
@@ -126,9 +138,12 @@ What `tauri build` does, in order (`apps/desktop/src-tauri/tauri.conf.json`):
    `/usr/lib/heka-ghost-desktop/pipewire/` (`ghostd echo-cancel`, ADR 0066); the AppImage
    carries them in its `usr/bin` and `usr/lib`. The .deb depends on
    `libespeak-ng1` (Kokoro's phonemizer; the one system library `ghostd` links that a bare
-   Ubuntu lacks) and `pulseaudio-utils` (`pactl`, which the echo canceller's installer and
+   Ubuntu lacks; the .deb's `ghostd` loads the system's copy, whose package brings the data
+   made for it) and `pulseaudio-utils` (`pactl`, which the echo canceller's installer and
    Ghost's sound checks use; the tools only, not the PulseAudio server), recommends
-   `pipewire-bin`, on top of the GTK and WebKit packages Tauri adds.
+   `pipewire-bin` and `pkexec` (Update and restart installs the .deb through it; Debian 13's
+   minimal systems lack it, and the updater falls back to zenity or kdialog), on top of the
+   GTK and WebKit packages Tauri adds.
 
 The shell's build script hides `externalBin` and `resources` from `tauri-build` (the
 sidecars are the workspace's own binaries, which `tauri-build` would otherwise copy over
@@ -162,6 +177,22 @@ daemon also stops on its own when the app is gone (`GHOST_PARENT_PID`). The app 
 login, in the tray with its window hidden (`--hidden`), off from the tray's "Start at login"
 (`~/.local/state/ghost/autostart`), and a second launch opens the first one's window. Under `make dev` the app only adopts (`GHOST_SHELL_ADOPT_ONLY=1`), since
 `scripts/dev.sh` runs the daemon.
+
+## espeak-ng's data
+
+Kokoro's tokenizer is espeak-ng, a C library that reads a data folder made for its own version,
+at the path its build chose (#168, ADR 0075). The AppImage carries the build machine's
+`libespeak-ng.so.1`, so it carries that library's data too: `scripts/espeak.sh stage` copies
+the build machine's `espeak-ng-data` (checked by `dpkg-query` to be the same package version as
+`libespeak-ng1`), English's dictionary only (2.6 MB, about 0.5 MB compressed), with its
+`COPYRIGHT`, a `SOURCE` note naming the source package, and `GHOST-ESPEAK-NG-VERSION`, into
+`resources/espeak-ng-data/` (`/usr/lib/heka-ghost-desktop/espeak-ng-data`). `ghostd` chooses
+the folder in this order (`crates/ghost-infer/src/espeak.rs`): `GHOST_ESPEAK_DATA`; the
+bundle's copy when its stamp is the loaded library's release; the system's
+(`/usr/lib/<arch>-linux-gnu/espeak-ng-data`, `/usr/share/espeak-ng-data`) when the loaded
+library is the system's; the library's default. `ghostd check` prints `espeak-ng: <version>,
+data at <folder> (<where from>)`, and `ghostd models voice-test` renders one sentence into
+memory. The bundle is built on Debian or Ubuntu; the script refuses elsewhere.
 
 ## The speech models
 

@@ -545,6 +545,134 @@ fn needs_the_files(ports: &mut Ports) {
     });
 }
 
+/// A stand-in for the error tracking service: answers every request 200 and keeps the
+/// bodies. Loopback only; nothing leaves the machine.
+async fn report_stub() -> (String, Arc<Mutex<Vec<serde_json::Value>>>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let got: Arc<Mutex<Vec<serde_json::Value>>> = Arc::default();
+    let kept = got.clone();
+    tokio::spawn(async move {
+        while let Ok((mut sock, _)) = listener.accept().await {
+            let kept = kept.clone();
+            tokio::spawn(async move {
+                let mut buf = Vec::new();
+                let mut chunk = [0u8; 8192];
+                loop {
+                    let n = sock.read(&mut chunk).await.unwrap_or(0);
+                    if n == 0 {
+                        return;
+                    }
+                    buf.extend_from_slice(&chunk[..n]);
+                    let text = String::from_utf8_lossy(&buf).to_string();
+                    let Some(head_end) = text.find("\r\n\r\n") else {
+                        continue;
+                    };
+                    let length = text[..head_end]
+                        .lines()
+                        .find_map(|l| {
+                            l.to_ascii_lowercase()
+                                .strip_prefix("content-length:")
+                                .map(|v| v.trim().parse::<usize>().unwrap_or(0))
+                        })
+                        .unwrap_or(0);
+                    if buf.len() < head_end + 4 + length {
+                        continue;
+                    }
+                    let body = &buf[head_end + 4..head_end + 4 + length];
+                    if let Ok(v) = serde_json::from_slice(body) {
+                        kept.lock().unwrap().push(v);
+                    }
+                    let _ = sock
+                        .write_all(
+                            b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{}",
+                        )
+                        .await;
+                    return;
+                }
+            });
+        }
+    });
+    (url, got)
+}
+
+/// #168: espeak-ng's data does not fit the library (the AppImage on Arch). Before any
+/// speech model is downloaded, the waiting list says Ghost cannot speak and what to do,
+/// and one error report goes out with the part and the kind, though the daemon never
+/// becomes ready; nothing in it is the loader's text.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_voice_that_cannot_start_is_said_and_reported_before_the_models_are_downloaded() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (url, got) = report_stub().await;
+    let reporter = Arc::new(ghost_reports::Reporter::new(
+        &tmp.path().join("report-data"),
+        Some("phc_test".into()),
+        &url,
+        ghost_reports::Context::detect("0.0.0", ghost_reports::Component::Daemon),
+        ghost_reports::Scrubber::from_env(),
+    ));
+    ghostd::reports::start(reporter);
+    let w = world_retrying(
+        tmp.path(),
+        "file",
+        |_| {},
+        |ports| {
+            needs_the_files(ports);
+            ports.espeak = Arc::new(|_| {
+                Some(ghost_voice::pipeline::LoadError::new(
+                    ghost_reports::SpeechPart::Kokoro,
+                    ghost_infer::InferError::EspeakData {
+                        kind: ghost_infer::espeak::DataProblem::Missing,
+                        message: "espeak-ng 1.51 (/home/alice/x/libespeak-ng.so.1) has no data \
+                                  folder here"
+                            .into(),
+                    },
+                ))
+            });
+        },
+        Duration::from_secs(3600),
+    );
+    let run = {
+        let d = w.daemon.clone();
+        tokio::spawn(async move { d.run().await })
+    };
+    let client = &w.client;
+    until(client, "the API up and the voice's problem listed", |v| {
+        v["models_ready"] == false && v["waiting"].as_u64().unwrap_or(0) >= 1
+    })
+    .await;
+    let text = waiting_text(client).await;
+    assert!(text.contains("voice:unavailable"), "{text}");
+    assert!(text.contains("Ghost can't speak"), "{text}");
+    assert!(text.contains("GHOST_ESPEAK_DATA"), "what to do: {text}");
+    assert!(
+        text.contains("not downloaded yet"),
+        "and the download still: {text}"
+    );
+
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let report = loop {
+        if let Some(r) = got.lock().unwrap().first().cloned() {
+            break r;
+        }
+        assert!(Instant::now() < deadline, "no report reached the stub");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+    let facts = &report["properties"]["ghost_facts"];
+    assert_eq!(
+        report["properties"]["$exception_list"][0]["type"],
+        "speech_models_load"
+    );
+    assert_eq!(facts["part"], "espeak");
+    assert_eq!(facts["espeak"], "data_missing");
+    assert_eq!(facts["error"], "EspeakData");
+    assert!(!report.to_string().contains("alice"), "{report}");
+    assert_eq!(client.status().await.unwrap()["models_ready"], false);
+    w.daemon.stop.cancel();
+    run.await.unwrap().unwrap();
+}
+
 /// #135: the terminal's `ghostd models fetch` finished the download (another process);
 /// the running daemon loads the files without a restart, well before its next retry,
 /// so the first run moves on and `models_ready` flips by itself.

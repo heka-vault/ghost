@@ -3,7 +3,8 @@
 # built from this workspace and copied where Tauri's bundler looks for them,
 # apps/desktop/src-tauri/binaries/<name>-<target triple>; and the bundle's resources under
 # apps/desktop/src-tauri/resources/: ONNX Runtime 1.24.4 (scripts/onnxruntime.sh stage), the
-# four small model files with their licences (scripts/models.sh stage) and ghost-build.json,
+# four small model files with their licences (scripts/models.sh stage), espeak-ng's data for the
+# library the AppImage carries (scripts/espeak.sh stage, #168) and ghost-build.json,
 # the record of what this build is (ghostd::build_info, docs/releasing.md). `tauri build`
 # runs this first (beforeBuildCommand in tauri.conf.json); `make bundle` is `tauri build`.
 #
@@ -52,6 +53,7 @@ record_build() {
 
 "$ROOT/scripts/onnxruntime.sh" stage >/dev/null
 "$ROOT/scripts/models.sh" stage >/dev/null
+"$ROOT/scripts/espeak.sh" stage >/dev/null
 record_build
 
 echo "sidecars: cargo build $FLAG $LOCKED -p ghostd -p ghost-core --bins" >&2

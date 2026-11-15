@@ -8,6 +8,7 @@
 mod autostart;
 mod bridge;
 pub mod floating;
+mod ghostd_command;
 mod reports;
 mod supervisor;
 mod tray;
@@ -90,6 +91,12 @@ fn context() -> tauri::Context<tauri::Wry> {
 }
 
 pub fn run() {
+    // ADR 0075: `Ghost.AppImage ghostd <args>` runs the bundled daemon's command line, so a
+    // person with the AppImage has `ghostd` too (and `ghostd command install` puts it on the
+    // PATH). Only as the first argument; nothing else of the app starts.
+    if std::env::args().nth(1).as_deref() == Some(ghostd_command::ARG) {
+        ghostd_command::exec_ghostd(std::env::args_os().skip(2));
+    }
     if std::env::args().any(|a| a == floating::CHECK_ARG) {
         #[cfg(target_os = "linux")]
         floating::surface::check();
@@ -148,6 +155,8 @@ pub fn run() {
             updater::update_cancel,
             reports::report_page_error,
             uninstall::remove_ghost,
+            ghostd_command::ghostd_command_status,
+            ghostd_command::ghostd_command_install,
             autostart::login_status,
             autostart::login_set
         ])

@@ -121,6 +121,8 @@ jobs:
               - 'scripts/sidecars.sh'
               - 'scripts/onnxruntime.sh'
               - 'scripts/models.sh'
+              - 'scripts/espeak.sh'
+              - 'scripts/distro-check.sh'
               - 'scripts/posthog-cli.sh'
               - 'tools/report_chunks.py'
               - 'tools/release_manifest.py'
@@ -172,6 +174,8 @@ jobs:
                    models/silero_vad.onnx models/smart-turn-v3.2-cpu.onnx \
                    models/melspectrogram.onnx models/embedding_model.onnx \
                    models/LICENSE.silero-vad models/LICENSE.smart-turn models/LICENSE.openwakeword \
+                   espeak-ng-data/phontab espeak-ng-data/en_dict espeak-ng-data/COPYRIGHT \
+                   espeak-ng-data/SOURCE espeak-ng-data/GHOST-ESPEAK-NG-VERSION \
                    ghost-build.json; do
             dpkg-deb -c target/release/bundle/deb/*.deb | grep -q "usr/lib/heka-ghost-desktop/$f\$" \
               || { echo "missing: $f"; exit 1; }

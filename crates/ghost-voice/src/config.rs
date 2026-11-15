@@ -131,6 +131,10 @@ pub struct VoiceSettings {
     /// `GHOST_TTS_STREAM_DIR`: the two halves' folder; unset, `kokoro/windowed/` in Ghost's
     /// cache (`scripts/models.sh kokoro-windowed`).
     pub tts_stream_dir: Option<PathBuf>,
+    /// `GHOST_ESPEAK_DATA`: the `espeak-ng-data` folder Kokoro's tokenizer reads, for an
+    /// espeak-ng whose data is somewhere Ghost does not look (#168); unset, Ghost chooses
+    /// (`ghost_infer::espeak`: the bundle's copy, then the system's folders).
+    pub espeak_data: Option<PathBuf>,
     /// `GHOST_TTS_WINDOW_FRAMES` (8, 25 ms each) and `GHOST_TTS_WINDOW_CONTEXT` (16): the
     /// first window's frames and the context decoded on each side of every window.
     pub tts_window_frames: usize,
@@ -417,6 +421,7 @@ impl VoiceSettings {
                 Some(_) => return Err(ConfigError::Stream),
             },
             tts_stream_dir: path("GHOST_TTS_STREAM_DIR"),
+            espeak_data: path(ghost_infer::espeak::ENV_VAR),
             tts_window_frames: usize_or("GHOST_TTS_WINDOW_FRAMES", 8)?.max(1),
             tts_window_context: usize_or("GHOST_TTS_WINDOW_CONTEXT", 16)?,
             tts_engine,
@@ -560,7 +565,7 @@ impl VoiceSettings {
                 .tts_voices_path
                 .clone()
                 .unwrap_or_else(|| dir.join("voices-v1.0.bin")),
-            espeak_data: None,
+            espeak_data: self.espeak_data.clone(),
         }
     }
 

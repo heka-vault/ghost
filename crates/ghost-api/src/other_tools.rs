@@ -285,6 +285,12 @@ fn ghost_of(deps: &Deps) -> Ghost {
 }
 
 fn bridge(deps: &Deps) -> Result<Bridge, String> {
+    // ADR 0075: from an AppImage, the `ghostd` command the person installed for it.
+    if deps.in_appimage
+        && let Some(g) = ghost_core::ghost_app::clients::appimage_ghostd(|k| std::env::var(k).ok())
+    {
+        return Ok(Bridge::Command(g));
+    }
     if !deps.in_appimage
         && let Some(g) = ghost_core::ghost_app::clients::stable_ghostd(|_| None)
     {

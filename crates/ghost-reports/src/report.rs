@@ -104,6 +104,77 @@ impl FailureKind {
     }
 }
 
+/// Which part of Ghost's voice did not load (`FailureKind::SpeechModelsLoad`, #168): a
+/// closed set, so a report says which without the loader's words.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpeechPart {
+    /// Kokoro's tokenizer, espeak-ng, and its data.
+    Espeak,
+    Kokoro,
+    Parakeet,
+    Onnxruntime,
+    Silero,
+    SmartTurn,
+    Wake,
+}
+
+impl SpeechPart {
+    pub const ALL: [SpeechPart; 7] = [
+        Self::Espeak,
+        Self::Kokoro,
+        Self::Parakeet,
+        Self::Onnxruntime,
+        Self::Silero,
+        Self::SmartTurn,
+        Self::Wake,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Espeak => "espeak",
+            Self::Kokoro => "kokoro",
+            Self::Parakeet => "parakeet",
+            Self::Onnxruntime => "onnxruntime",
+            Self::Silero => "silero",
+            Self::SmartTurn => "smart_turn",
+            Self::Wake => "wake",
+        }
+    }
+}
+
+/// What was wrong with espeak-ng, in a closed set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EspeakKind {
+    DataMissing,
+    DataVersionMismatch,
+    DataUnreadable,
+    /// The library itself is not there. The daemon links it, so that one stops the dynamic
+    /// loader before `main`; only the app sees it, as the daemon's exit (code 127).
+    LibraryMissing,
+}
+
+impl EspeakKind {
+    pub const ALL: [EspeakKind; 4] = [
+        Self::DataMissing,
+        Self::DataVersionMismatch,
+        Self::DataUnreadable,
+        Self::LibraryMissing,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::DataMissing => "data_missing",
+            Self::DataVersionMismatch => "data_version_mismatch",
+            Self::DataUnreadable => "data_unreadable",
+            Self::LibraryMissing => "library_missing",
+        }
+    }
+}
+
+/// The facts that tell one failure of a kind from another in error tracking: they join the
+/// fingerprint, so an espeak failure and a Parakeet one are two issues, not one.
+const GROUPING_FACTS: [&str; 2] = ["part", "espeak"];
+
 /// A failure as the code reports it: the kind, the Rust error's type where it is Ghost's
 /// own (`ghost_llm::LlmError::Status`), and coarse facts.
 #[derive(Debug, Clone, PartialEq)]
@@ -129,13 +200,40 @@ impl Failure {
         self
     }
 
+    /// Which part of the voice failed: a closed word.
+    pub fn speech_part(mut self, part: SpeechPart) -> Self {
+        self.facts.insert("part", part.as_str().to_string());
+        self
+    }
+
+    /// What was wrong with espeak-ng: a closed word.
+    pub fn espeak(mut self, kind: EspeakKind) -> Self {
+        self.facts.insert("espeak", kind.as_str().to_string());
+        self
+    }
+
     /// A fact: a short word (a provider's name, `5xx`, `signal`). Anything else is `other`,
     /// so no sentence from anywhere rides in a fact.
     pub fn fact(mut self, key: &'static str, value: impl AsRef<str>) -> Self {
         let v = value.as_ref();
-        let v = if FACT.is_match(v) { v } else { "other" };
+        // A path is never a fact: a model's id may have a `/`, a folder starts with one.
+        let path = v.starts_with(['/', '~', '.']);
+        let v = if FACT.is_match(v) && !path {
+            v
+        } else {
+            "other"
+        };
         self.facts.insert(key, v.to_string());
         self
+    }
+}
+
+/// A word as a fact keeps it: itself when it passes the fact filter, else `other`.
+pub fn fact_word(v: &str) -> String {
+    if FACT.is_match(v) && !v.starts_with(['/', '~', '.']) {
+        v.to_string()
+    } else {
+        "other".to_string()
     }
 }
 
@@ -322,6 +420,8 @@ struct Exception {
     handled: bool,
     frames: Vec<Frame>,
     facts: BTreeMap<String, String>,
+    /// What else separates this report's group: a failure's error type and grouping facts.
+    group: String,
 }
 
 fn exception(what: &What, ctx: &Context, scrub: &Scrubber) -> Exception {
@@ -389,6 +489,7 @@ fn exception(what: &What, ctx: &Context, scrub: &Scrubber) -> Exception {
                 handled: false,
                 frames,
                 facts,
+                group: String::new(),
             }
         }
         What::Page(p) => {
@@ -415,6 +516,7 @@ fn exception(what: &What, ctx: &Context, scrub: &Scrubber) -> Exception {
                 handled: p.source == PageSource::Boundary,
                 frames: frames::javascript(&p.stack, scrub, ctx.page_chunks.as_ref()),
                 facts,
+                group: String::new(),
             }
         }
         What::Failure(f) => {
@@ -426,6 +528,14 @@ fn exception(what: &What, ctx: &Context, scrub: &Scrubber) -> Exception {
             if let Some(e) = f.error {
                 facts.insert("error".into(), word(e, 96));
             }
+            let group = std::iter::once(facts.get("error").cloned().unwrap_or_default())
+                .chain(
+                    GROUPING_FACTS
+                        .iter()
+                        .map(|k| facts.get(*k).cloned().unwrap_or_default()),
+                )
+                .collect::<Vec<_>>()
+                .join("|");
             Exception {
                 kind: "failure",
                 error_type: f.kind.as_str().into(),
@@ -433,6 +543,7 @@ fn exception(what: &What, ctx: &Context, scrub: &Scrubber) -> Exception {
                 handled: true,
                 frames: Vec::new(),
                 facts,
+                group,
             }
         }
         What::Test => Exception {
@@ -442,6 +553,7 @@ fn exception(what: &What, ctx: &Context, scrub: &Scrubber) -> Exception {
             handled: true,
             frames: Vec::new(),
             facts: BTreeMap::new(),
+            group: String::new(),
         },
     }
 }
@@ -472,6 +584,11 @@ pub fn build(
             &top,
         ] {
             h.update(part.as_bytes());
+            h.update([0]);
+        }
+        // Only where there is one, so the groups reports already have keep their prints.
+        if !e.group.trim_matches('|').is_empty() {
+            h.update(e.group.as_bytes());
             h.update([0]);
         }
         hex::encode(&h.finalize()[..8])
@@ -728,6 +845,93 @@ mod tests {
             &s(),
         );
         assert_ne!(a.fingerprint, c.fingerprint);
+    }
+
+    #[test]
+    fn a_speech_load_failure_is_grouped_by_its_part_and_kind() {
+        // #168: an espeak failure, a Parakeet one and ONNX Runtime's are separate issues.
+        let print = |f: Failure| build(&What::Failure(f), &ctx(), "id", at(), &s()).fingerprint;
+        let load = || Failure::new(FailureKind::SpeechModelsLoad);
+        let espeak_missing = print(
+            load()
+                .error("EspeakData")
+                .speech_part(SpeechPart::Espeak)
+                .espeak(EspeakKind::DataMissing),
+        );
+        let espeak_version = print(
+            load()
+                .error("EspeakData")
+                .speech_part(SpeechPart::Espeak)
+                .espeak(EspeakKind::DataVersionMismatch),
+        );
+        let parakeet = print(load().error("Model").speech_part(SpeechPart::Parakeet));
+        let runtime = print(load().error("Runtime").speech_part(SpeechPart::Onnxruntime));
+        let all = [&espeak_missing, &espeak_version, &parakeet, &runtime];
+        for (i, a) in all.iter().enumerate() {
+            for b in &all[i + 1..] {
+                assert_ne!(a, b);
+            }
+        }
+        // The same failure again is the same issue.
+        assert_eq!(
+            parakeet,
+            print(load().error("Model").speech_part(SpeechPart::Parakeet))
+        );
+        // A failure with no grouping facts keeps the print it always had.
+        let plain = build(&What::Failure(load()), &ctx(), "id", at(), &s()).fingerprint;
+        let mut h = Sha256::new();
+        for part in [
+            "daemon",
+            "failure",
+            "speech_models_load",
+            load().kind.sentence(),
+            "",
+        ] {
+            h.update(part.as_bytes());
+            h.update([0]);
+        }
+        assert_eq!(plain, hex::encode(&h.finalize()[..8]));
+    }
+
+    #[test]
+    fn a_speech_load_failure_carries_closed_words_only_whatever_the_loader_said() {
+        // The loader's text names paths, a home folder and anything a file held; none of it
+        // may ride in a fact, the error or the value.
+        let hostile = "/home/alice/.cache/ghost/kokoro: Wrong version of espeak-ng-data at \
+                       '/home/alice/espeak-ng-data' (call me at 555-0100, alice@example.com)";
+        let f = Failure::new(FailureKind::SpeechModelsLoad)
+            .error("EspeakData")
+            .speech_part(SpeechPart::Espeak)
+            .espeak(EspeakKind::DataVersionMismatch)
+            .fact("detail", hostile)
+            .fact("path", "/home/alice");
+        let b = build(&What::Failure(f), &ctx(), "id", at(), &s());
+        let p = &b.event["properties"];
+        let text = b.event.to_string();
+        for leak in [
+            "alice",
+            "/home",
+            "espeak-ng-data'",
+            "555-0100",
+            "Wrong version",
+        ] {
+            assert!(!text.contains(leak), "{leak} in {text}");
+        }
+        assert_eq!(p["ghost_facts"]["part"], "espeak");
+        assert_eq!(p["ghost_facts"]["espeak"], "data_version_mismatch");
+        assert_eq!(p["ghost_facts"]["error"], "EspeakData");
+        assert_eq!(p["ghost_facts"]["detail"], "other");
+        assert_eq!(
+            p["$exception_list"][0]["value"],
+            "The speech models did not load"
+        );
+        // Every closed word is a fact the filter would pass on its own.
+        for part in SpeechPart::ALL {
+            assert!(FACT.is_match(part.as_str()) && !part.as_str().contains('/'));
+        }
+        for kind in EspeakKind::ALL {
+            assert!(FACT.is_match(kind.as_str()) && !kind.as_str().contains('/'));
+        }
     }
 
     #[test]

@@ -197,3 +197,5 @@ still said, with its switch beside it, before the first run ends, and Settings â
 unchanged for anyone who skips the first run. A report is about the app breaking, not about the
 wake, so nothing is sent earlier than it was disclosed in any way that the beat's position
 changed: a released build could already report a crash before the wake beat was reached.
+
+*Amended 2026-11-15 (#168, [ADR 0075](0075-the-bundle-carries-what-its-libraries-need.md)):* a `speech_models_load` failure carries closed facts, `part`, `error` (Ghost's variant name) and `espeak` (its kind), which join the fingerprint; a fact value that starts like a path is `other`; espeak-ng's data is checked at the daemon's start, so a voice that cannot start is reported before the models are downloaded.

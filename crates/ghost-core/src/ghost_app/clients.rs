@@ -473,8 +473,8 @@ pub fn stdio_snippets(name: &str, ghostd: &str) -> Snippets {
 /// Said when a command was asked for and Ghost runs from an AppImage.
 pub const APPIMAGE_NOTE: &str = "Ghost is running from an AppImage, which is mounted at a new \
 path each time it starts, so another tool cannot be given a command to run that keeps working. \
-These connect by address instead. A tool that can only start a command needs Ghost installed \
-from the .deb.";
+These connect by address instead. To give a tool a command, install the ghostd command first \
+(Settings › General, or `ghostd command install` from the AppImage), then connect it again.";
 
 /// Whether this process runs from an AppImage (`APPIMAGE` or `APPDIR` set by its
 /// runtime), whose `ghostd` is on a temporary mount.
@@ -485,12 +485,13 @@ pub fn in_appimage(var: impl Fn(&str) -> Option<String>) -> bool {
 }
 
 /// The `ghostd` another tool can be told to run, and that will still be there tomorrow:
-/// this binary, unless it runs from an AppImage. The AppImage's launcher is the desktop
-/// app and does not hand its arguments to `ghostd`, so it is no command either; there is
-/// no stable one, and a command client connects by address instead.
+/// this binary, unless it runs from an AppImage. The AppImage's own `ghostd` is on a mount
+/// that moves, so there it is the `ghostd` command Ghost wrote for that AppImage (ADR 0075,
+/// `~/.local/bin/ghostd`) when the person installed it, and otherwise none: a command client
+/// connects by address instead.
 pub fn stable_ghostd(var: impl Fn(&str) -> Option<String>) -> Option<String> {
-    if in_appimage(var) {
-        return None;
+    if in_appimage(&var) {
+        return appimage_ghostd(var);
     }
     Some(
         std::env::current_exe()
@@ -498,6 +499,20 @@ pub fn stable_ghostd(var: impl Fn(&str) -> Option<String>) -> Option<String> {
             .and_then(|p| p.to_str().map(String::from))
             .unwrap_or_else(|| "ghostd".to_string()),
     )
+}
+
+/// The `ghostd` command for the AppImage `$APPIMAGE` names, when Ghost's script for it is in
+/// `$HOME/.local/bin`.
+pub fn appimage_ghostd(var: impl Fn(&str) -> Option<String>) -> Option<String> {
+    let home = var("HOME").filter(|h| !h.trim().is_empty())?;
+    let app = var("APPIMAGE").filter(|a| !a.trim().is_empty())?;
+    let home = Path::new(&home);
+    match crate::ghostd_command::state(home, Some(Path::new(&app))) {
+        crate::ghostd_command::State::Installed { .. } => {
+            crate::ghostd_command::path(home).to_str().map(String::from)
+        }
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -703,5 +718,31 @@ mod tests {
         }
         // Set but empty is not an AppImage.
         assert!(!in_appimage(|_: &str| Some(String::new())));
+    }
+
+    #[test]
+    fn an_appimage_with_ghosts_ghostd_command_gives_that_one() {
+        let t = tempfile::tempdir().unwrap();
+        let home = t.path().display().to_string();
+        let app = t.path().join("Ghost.AppImage");
+        std::fs::write(&app, b"ELF").unwrap();
+        let app_s = app.display().to_string();
+        let var = |k: &str| match k {
+            "HOME" => Some(home.clone()),
+            "APPIMAGE" => Some(app_s.clone()),
+            _ => None,
+        };
+        assert_eq!(stable_ghostd(var), None, "not installed yet");
+        crate::ghostd_command::install(t.path(), &app).unwrap();
+        assert_eq!(
+            stable_ghostd(var),
+            Some(t.path().join(".local/bin/ghostd").display().to_string())
+        );
+        // For another AppImage, the script is not this one's.
+        let other = |k: &str| match k {
+            "APPIMAGE" => Some("/elsewhere/Ghost.AppImage".to_string()),
+            k => var(k),
+        };
+        assert_eq!(stable_ghostd(other), None);
     }
 }

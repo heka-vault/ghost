@@ -32,6 +32,7 @@
     "resources": {
       "resources/onnxruntime/": "onnxruntime/",
       "resources/models/": "models/",
+      "resources/espeak-ng-data/": "espeak-ng-data/",
       "resources/ghost-build.json": "ghost-build.json",
       "../../../infra/pipewire/install.sh": "pipewire/install.sh",
       "../../../infra/pipewire/ghost-echo-cancel.conf.in": "pipewire/ghost-echo-cancel.conf.in",
@@ -40,7 +41,7 @@
     "linux": {
       "deb": {
         "depends": ["libespeak-ng1", "pulseaudio-utils"],
-        "recommends": ["pipewire-bin"],
+        "recommends": ["pipewire-bin", "pkexec"],
         "section": "utils",
         "desktopTemplate": "./ghost.desktop",
         "preRemoveScript": "./prerm"

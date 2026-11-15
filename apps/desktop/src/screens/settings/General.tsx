@@ -67,6 +67,72 @@ export function StartAtLogin() {
   );
 }
 
+/** `ghostd command status --json` (ADR 0075), as the shell hands it on. */
+type GhostdCommandView = {
+  appimage: boolean;
+  path: string;
+  on_path: boolean;
+  command: { state: "absent" | "installed" | "stale" | "other"; appimage?: string };
+};
+
+async function invokeGhostdCommand(install: boolean): Promise<GhostdCommandView | string | null> {
+  if (!inTauri) return null;
+  const { invoke } = await import("@tauri-apps/api/core");
+  return install ? invoke<string>("ghostd_command_install") : invoke<GhostdCommandView>("ghostd_command_status");
+}
+
+/**
+ * ADR 0075: the AppImage puts no `ghostd` on the PATH, so this offers the small script that
+ * does (`~/.local/bin/ghostd`, which runs the AppImage). Shown only when Ghost runs from an
+ * AppImage; `ghostd uninstall` removes it.
+ */
+export function GhostdCommandRow() {
+  const toast = useToast();
+  const [view, setView] = useState<GhostdCommandView | null>(null);
+  const [busy, setBusy] = useState(false);
+  const refresh = () =>
+    invokeGhostdCommand(false)
+      .then((v) => setView(v && typeof v === "object" ? v : null))
+      .catch(() => setView(null));
+  useEffect(() => {
+    void refresh();
+  }, []);
+  if (!view?.appimage) return null;
+  const state = view.command.state;
+  const description =
+    state === "installed"
+      ? `${view.path} runs this AppImage, so ghostd works in a terminal${view.on_path ? "." : " once that folder is on your PATH (a new login usually does it)."}`
+      : state === "stale"
+        ? `${view.path} runs an AppImage that has moved. Install it again to point it here.`
+        : state === "other"
+          ? `${view.path} is there and isn’t Ghost’s, so Ghost leaves it alone.`
+          : "For the terminal steps in Ghost’s docs: a small script in ~/.local/bin that runs this AppImage. ghostd uninstall removes it.";
+  return (
+    <ListRow
+      title="The ghostd command"
+      description={description}
+      trailing={
+        state === "installed" || state === "other" ? undefined : (
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={busy}
+            onClick={() => {
+              setBusy(true);
+              invokeGhostdCommand(true)
+                .then(() => refresh())
+                .catch((e: unknown) => toast({ tone: "danger", title: "Couldn’t install the ghostd command", description: errorText(e) }))
+                .finally(() => setBusy(false));
+            }}
+          >
+            Install the ghostd command
+          </Button>
+        )
+      }
+    />
+  );
+}
+
 /* ------------------------------------------------------------------ the first run, unfinished */
 
 /**

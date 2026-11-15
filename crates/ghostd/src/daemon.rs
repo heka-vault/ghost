@@ -209,6 +209,12 @@ pub struct DeskMediaRequest {
     pub mic: bool,
 }
 
+/// espeak-ng's data, checked at the start (#168): `Some` is the voice that cannot start.
+pub type EspeakCheck = Arc<
+    dyn Fn(&ghost_voice::config::VoiceSettings) -> Option<ghost_voice::pipeline::LoadError>
+        + Send
+        + Sync,
+>;
 pub type LoadModels = Arc<dyn Fn(&VoiceSettings) -> anyhow::Result<Models> + Send + Sync>;
 pub type ModelFactory = Arc<
     dyn Fn(&VoiceSettings, &HashMap<String, String>) -> anyhow::Result<Arc<dyn ModelPort>>
@@ -255,6 +261,8 @@ pub fn claude_code_for(
 pub struct Ports {
     pub keyring: Arc<dyn Keyring>,
     pub load_models: LoadModels,
+    /// The check before the models load (#168); a test's says what it is told.
+    pub espeak: EspeakCheck,
     pub model: ModelFactory,
     pub fast_model: FastModelFactory,
     pub desk_media: DeskMedia,
@@ -294,6 +302,7 @@ impl Ports {
         Self {
             keyring: operator_keyring(),
             load_models: Arc::new(Models::load),
+            espeak: Arc::new(|voice| ghost_voice::pipeline::espeak_ready(voice).err()),
             model: Arc::new(|voice, env| {
                 let target = voice.llm_target(Some(env));
                 if let Some(cc) = claude_code_for(&target, env) {
@@ -344,6 +353,7 @@ impl Ports {
         Self {
             keyring: Arc::new(ghost_core::MemoryKeyring::new()),
             load_models: Arc::new(|_| anyhow::bail!("no models in this test")),
+            espeak: Arc::new(|_| None),
             model: Arc::new(|_, _| anyhow::bail!("no model in this test")),
             fast_model: Arc::new(|_, _| None),
             desk_media: Arc::new(|_| {
@@ -467,6 +477,8 @@ pub struct Daemon {
     followed_vault: AtomicBool,
     /// The last model load's failure while it is tried again; on the waiting list meanwhile.
     models_problem: Mutex<Option<String>>,
+    /// #168: the voice that cannot start, apart from the models' download.
+    voice_problem: Mutex<Option<String>>,
     /// Why the realtime voice was not used or stopped, for the waiting list (ADR 0063):
     /// a note under [`REALTIME_NOTE_KEY`], shown and never said.
     pub(crate) realtime_note: Mutex<Option<String>>,
@@ -541,6 +553,8 @@ pub const SPEECH_MODELS_LOOK: std::time::Duration = std::time::Duration::from_se
 pub const MODELS_PROBLEM_KEY: &str = "models:missing";
 /// The waiting list's key while the sound output plays nothing (#117).
 pub const OUTPUT_PROBLEM_KEY: &str = "output:unavailable";
+/// #168: Ghost's voice cannot start (espeak-ng's data), whatever is downloaded.
+pub const VOICE_PROBLEM_KEY: &str = "voice:unavailable";
 
 impl Daemon {
     pub fn new(cfg: GhostdSettings, voice: VoiceSettings, ports: Ports) -> Self {
@@ -567,6 +581,7 @@ impl Daemon {
             passwords: Mutex::new(None),
             followed_vault: AtomicBool::new(false),
             models_problem: Mutex::new(None),
+            voice_problem: Mutex::new(None),
             realtime_note: Mutex::new(None),
             realtime_check: Mutex::new(None),
             model_slow: Mutex::new(None),
@@ -1884,6 +1899,9 @@ impl Daemon {
                         );
                         out.extend(crate::schedules::problems(&jobs, &lock(&folder)));
                         if let Some(d) = weak.upgrade() {
+                            if let Some(problem) = lock(&d.voice_problem).clone() {
+                                out.push((VOICE_PROBLEM_KEY.to_string(), problem));
+                            }
                             if let Some(problem) = lock(&d.models_problem).clone() {
                                 out.push((MODELS_PROBLEM_KEY.to_string(), problem));
                             }
@@ -2413,6 +2431,19 @@ impl Daemon {
         // crash: under the app's supervisor (ADR 0038) that would be a restart loop with
         // nothing to read. The API is up, the waiting list says what is missing, and the
         // load is tried again until it works or the daemon is stopped.
+        // #168: espeak-ng's data, checked now, in milliseconds, so a voice that cannot start
+        // is said and reported before the speech models are downloaded for it, not after.
+        let espeak_problem = {
+            let check = d.ports.espeak.clone();
+            let voice = d.voice();
+            tokio::task::spawn_blocking(move || check(&voice)).await?
+        };
+        if let Some(e) = &espeak_problem {
+            error!("tts: {e}");
+            ghost_reports::failure(e.failure());
+            *lock(&d.voice_problem) = Some(e.plain());
+            d.refresh_waiting_now();
+        }
         let models = loop {
             let load = d.ports.load_models.clone();
             let voice = d.voice();
@@ -2426,18 +2457,35 @@ impl Daemon {
                     // ADR 0066: files that are simply not here yet are said as that, with
                     // where to get them, not as the loader's error.
                     let missing = crate::speech_models::missing(&d.voice());
+                    let loader = e.downcast_ref::<ghost_voice::pipeline::LoadError>();
+                    let espeak = loader
+                        .filter(|l| l.part == ghost_reports::SpeechPart::Espeak)
+                        .or(espeak_problem.as_ref());
                     // ADR 0067: files not yet downloaded are not a failure; a load that
-                    // fails with them all here is.
-                    if missing.is_empty() {
-                        ghost_reports::failure(ghost_reports::Failure::new(
-                            ghost_reports::FailureKind::SpeechModelsLoad,
-                        ));
+                    // fails with them all here is, and espeak's data is one whatever is
+                    // downloaded. The report says which part and what kind (#168), never
+                    // the loader's words.
+                    if let Some(l) = espeak {
+                        ghost_reports::failure(l.failure());
+                    } else if missing.is_empty() {
+                        ghost_reports::failure(match loader {
+                            Some(l) => l.failure(),
+                            None => ghost_reports::Failure::new(
+                                ghost_reports::FailureKind::SpeechModelsLoad,
+                            ),
+                        });
                     }
-                    *lock(&d.models_problem) = Some(if missing.is_empty() {
-                        format!("Ghost's speech models are not loaded: {e}")
+                    *lock(&d.voice_problem) = espeak.map(|l| l.plain());
+                    *lock(&d.models_problem) = if !missing.is_empty() {
+                        Some(crate::speech_models::missing_note(&missing))
+                    } else if espeak.is_some() {
+                        None
                     } else {
-                        crate::speech_models::missing_note(&missing)
-                    });
+                        Some(match loader {
+                            Some(l) => l.plain(),
+                            None => format!("Ghost's speech models are not loaded: {e}"),
+                        })
+                    };
                     d.refresh_waiting_now();
                     let files_missing = !missing.is_empty();
                     tokio::select! {
@@ -2453,7 +2501,8 @@ impl Daemon {
             // Loaded, perhaps with a voice that fell back (ADR 0053): that stays on the
             // waiting list until the files are there; anything else resolves.
             let after = models.problem.clone();
-            if *lock(&d.models_problem) != after {
+            let voice_was = lock(&d.voice_problem).take();
+            if *lock(&d.models_problem) != after || voice_was.is_some() {
                 *lock(&d.models_problem) = after;
                 d.refresh_waiting_now();
             }

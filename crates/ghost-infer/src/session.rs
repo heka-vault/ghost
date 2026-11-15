@@ -27,7 +27,9 @@ pub fn environment() -> Result<&'static Environment> {
             .map_err(|e| e.to_string())
     })
     .as_ref()
-    .map_err(|e| InferError::Model(format!("onnxruntime environment: {e}")))
+    // The runtime's own failure (its library missing or refused), whichever model asked: a
+    // report names it as ONNX Runtime's (#168), not the model's.
+    .map_err(|e| InferError::Runtime(format!("onnxruntime environment: {e}")))
 }
 
 /// `onnxruntime.SessionOptions` as the Python wrappers set them.

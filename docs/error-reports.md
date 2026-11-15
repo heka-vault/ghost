@@ -32,7 +32,7 @@ The same failure goes at most once an hour, and at most 30 reports a day.
 | `ghost_kind` | `panic`, `page`, `failure` or `test`. |
 | `ghost_version`, `$lib_version` | Ghost's version. |
 | `ghost_component` | `daemon`, `shell`, `floating` or `page`. |
-| `ghost_facts` | A few words about the failure: where a panic was, which page, the HTTP status's class (`5xx`), the model's name, how the daemon exited. |
+| `ghost_facts` | A few words about the failure: where a panic was, which page, the HTTP status's class (`5xx`), the model's name, how the daemon exited; for speech models that did not load, which part (`espeak`, `kokoro`, `parakeet`, `onnxruntime`, …), Ghost's error type and, for espeak-ng, what was wrong with its data (ADR 0075). Never a path: a value that starts like one is sent as `other`. |
 | `os_name`, `os_version` | From `/etc/os-release`: `Ubuntu`, `24.04`. |
 | `session_type` | `x11`, `wayland`, `tty` or `unknown`. |
 | `arch` | `x86_64`, `aarch64`. |

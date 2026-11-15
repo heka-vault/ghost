@@ -53,9 +53,31 @@ pub enum InferError {
     Audio(String),
     #[error("espeak-ng: {0}")]
     Espeak(String),
+    /// espeak-ng could not start with its data (#168): what kind of problem, for a report,
+    /// and the sentence for the person.
+    #[error("espeak-ng: {message}")]
+    EspeakData {
+        kind: espeak::DataProblem,
+        message: String,
+    },
     /// ONNX Runtime's library is not where `runtime` looks for it.
     #[error("{0}")]
     Runtime(String),
+}
+
+impl InferError {
+    /// The variant's name, for an error report (ADR 0067): Ghost's own word, never the text.
+    pub fn variant(&self) -> &'static str {
+        match self {
+            Self::Ort(_) => "Ort",
+            Self::Io(_) => "Io",
+            Self::Model(_) => "Model",
+            Self::Audio(_) => "Audio",
+            Self::Espeak(_) => "Espeak",
+            Self::EspeakData { .. } => "EspeakData",
+            Self::Runtime(_) => "Runtime",
+        }
+    }
 }
 
 pub type Result<T> = std::result::Result<T, InferError>;

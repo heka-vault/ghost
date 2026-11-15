@@ -103,7 +103,8 @@ impl Category {
             }
             Category::OtherTools => {
                 "Ghost's entry in Cursor, Codex or Claude Code, the copies Ghost made of their \
-                 files before changing them, and the keys those tools use to reach Ghost."
+                 files before changing them, the keys those tools use to reach Ghost, and the \
+                 ghostd command Ghost put in ~/.local/bin for the AppImage."
             }
             Category::SpeechModels => {
                 "Parakeet and Kokoro, which Ghost downloaded to hear and speak. Ghost can \
@@ -444,6 +445,20 @@ pub fn inventory(p: &Places, look: &dyn Look) -> Vec<Item> {
         "client-keys",
         "The keys your other tools use to reach Ghost",
         vec![p.ghost_data.join("clients")],
+        Removal::Paths,
+    ));
+    // ADR 0075: the `ghostd` command an AppImage's person asked for. Listed only when the
+    // file there is Ghost's own script: a `ghostd` of anyone else's is not touched.
+    let command = crate::ghostd_command::path(&p.home);
+    items.push(item(
+        Category::OtherTools,
+        "ghostd-command",
+        "The ghostd command Ghost put in ~/.local/bin for the AppImage",
+        if crate::ghostd_command::is_ours(&command) {
+            vec![command]
+        } else {
+            Vec::new()
+        },
         Removal::Paths,
     ));
 

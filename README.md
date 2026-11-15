@@ -80,7 +80,8 @@ see [What's rough](#whats-rough). Linux only today.
 - **It works best with, and has only been tested with, one microphone:** a reSpeaker XVF3800
   USB microphone array with the speakers plugged into it. Other microphones work, but a
   laptop's built-in one hears much worse, above all in a noisy room. See [Sound](#sound).
-- **It is early software**, built on one desk. Linux only. See [What's rough](#whats-rough).
+- **It is early software**, built on one desk. Linux only, x86-64: Ubuntu 24.04 and 26.04 and
+  Debian 13 by the .deb, Arch, Fedora and others by the AppImage. See [What's rough](#whats-rough).
 
 ## Install
 
@@ -100,7 +101,7 @@ Ghost as an outside tool. It never handles your keys: you type those into Ghost.
 
 ### By hand
 
-On Ubuntu 24.04 or 26.04 (x86-64), from the [latest release](https://github.com/heka-vault/ghost/releases/latest):
+On Ubuntu 24.04 or 26.04, or Debian 13 (x86-64), from the [latest release](https://github.com/heka-vault/ghost/releases/latest):
 
 1. **Download** `heka-ghost-desktop_<version>_amd64.deb` (or the `.AppImage`, below).
 2. **Install** it: open it with App Center, or
@@ -112,9 +113,18 @@ On Ubuntu 24.04 or 26.04 (x86-64), from the [latest release](https://github.com/
    OpenAI, or a local Ollama or LM Studio), the microphone, the wake word, a voice, an app, an
    agent and a first question. Each step can be skipped.
 
-**The AppImage** runs on other distributions too: `chmod +x heka-ghost-desktop_*.AppImage`
-and run it. It needs FUSE 2 (`libfuse2t64` on Ubuntu 24.04); without it, run it with
-`--appimage-extract-and-run`.
+**The AppImage** is for other distributions (Arch, Fedora, …): `chmod +x
+heka-ghost-desktop_*.AppImage` and run it. It carries what Ghost needs that a distribution
+may not have or keeps elsewhere (eSpeak NG and its data, ONNX Runtime, WebKitGTK); from the
+system it needs an ordinary desktop: PipeWire, ALSA, X11 or XWayland, Mesa and fonts. To run it
+it needs FUSE 2 (`libfuse2t64` on Ubuntu, `fuse2` on Arch: `sudo pacman -S fuse2`); without it,
+run it with `--appimage-extract-and-run`. It puts no `ghostd` on your PATH by itself:
+Settings › General › **Install the ghostd command** (or `./heka-ghost-desktop_*.AppImage ghostd
+command install`) writes `~/.local/bin/ghostd`, which runs the AppImage, so every `ghostd`
+command in these docs works.
+
+**Debian 12 and older** are not supported: Ghost is built on Ubuntu 24.04, and its binaries
+need the newer C library (glibc 2.39) that Debian 13 has and Debian 12 does not.
 
 **No microphone?** Ghost still works typed: skip the first run's microphone and wake steps
 and type to it (the box at the bottom of Today, or the last step). It still downloads its ears
@@ -151,7 +161,8 @@ ghostd uninstall             # asks about each kind; your data and passwords def
 (it asks once; `--yes` doesn't ask). It quits Ghost first, and ends with the one line that
 finishes: `sudo apt remove heka-ghost-desktop`, or which AppImage file to delete. The same
 list is in Settings › General, **Remove Ghost from this computer**, which quits the app and
-removes what you chose (from the AppImage, which puts no `ghostd` on your PATH, use that).
+removes what you chose (from the AppImage, use that, or install the `ghostd` command first:
+Settings › General).
 The kinds:
 
 1. **What keeps running or starts by itself**: the echo canceller's service (stopped; your
@@ -416,13 +427,21 @@ advanced pages (passwords, skills, outside tools, the audit log, notification ro
   devices but haven't been tested: a laptop's built-in microphone takes a noisy room's sound
   for yours, and open speakers without cancellation echo (see
   [Sound](#sound)). The Hearing test's recorder (`docs/hear-recording.md`) needs `ghost.mic`.
-- **Floating** needs X11 or XWayland and hides during screen sharing; there is no
-  native Wayland, KDE or wlroots version yet.
+- **Floating** needs X11 or XWayland and hides during screen sharing on GNOME only (it reads
+  GNOME's own record of a share; on other desktops it stays visible); there is no native
+  Wayland, KDE or wlroots version yet.
 - **The phone app** (`apps/mobile`, Android) needs your own build (`make android`, with the
   Android SDK and JDK 17) and pairing on your own network:
   [docs/phone-protocol.md](docs/phone-protocol.md).
-- **Linux only**, x86-64 checked. The release's .deb and AppImage are checked in clean
-  Ubuntu 24.04 and 26.04 containers, not yet on many people's machines.
+- **Linux only**, x86-64 checked. Each release's .deb is installed in clean Ubuntu 24.04 and
+  26.04 and Debian 13 containers, and its AppImage started in clean Arch and Fedora ones (the
+  daemon, its checks and its voice), not yet on many people's machines.
+- **Arch, Hyprland and other desktops** are untested on a real machine: floating needs
+  XWayland and may need window rules on Hyprland, the tray needs a StatusNotifier host (Waybar
+  has one), Start at login needs a desktop that reads `~/.config/autostart`, and the password
+  vault needs a Secret Service keyring (GNOME Keyring or KeePassXC; see [Connect a model](#connect-a-model)'s
+  keyring note for what Ghost does without one). [docs/omarchy-checklist.md](docs/omarchy-checklist.md) is what to
+  try.
 - **First-run sharp edges**: a provider's model list loads from the provider, so it needs the key
   first; an app that won't connect says so on the Apps page and in `make check`.
 
