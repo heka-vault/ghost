@@ -221,7 +221,9 @@ export function answeredHere(f: FloatFacts | null): string | null {
   if (!f) return null;
   if (f.support.kind === "no") {
     const why = (f.support.why ?? "").trim().replace(/\.$/, "");
-    return why ? `Ghost answered here. On this desktop it can’t float over your work: ${why.charAt(0).toLowerCase()}${why.slice(1)}.` : "Ghost answered here. On this desktop it can’t float over your work.";
+    // A sentence that starts with Ghost's name keeps its capital.
+    const said = /^Ghost\b/.test(why) ? why : `${why.charAt(0).toLowerCase()}${why.slice(1)}`;
+    return why ? `Ghost answered here. On this desktop it can’t float over your work: ${said}.` : "Ghost answered here. On this desktop it can’t float over your work.";
   }
   if (!f.settings.on) return "Ghost answered here, since floating is off. Settings › General turns it on.";
   const shared = f.sharing === "hidden" || f.sharing === "asking" || (!f.sharing && f.capture === "yes");

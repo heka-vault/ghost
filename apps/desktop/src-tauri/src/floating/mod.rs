@@ -162,7 +162,7 @@ pub fn support_from(
 ) -> Support {
     if !cfg!(target_os = "linux") {
         return Support::No {
-            why: "The floating room works on Linux desktops for now.".into(),
+            why: "Ghost floats on Linux desktops only, for now.".into(),
         };
     }
     let has = |v: Option<&str>| v.is_some_and(|s| !s.trim().is_empty());
@@ -171,10 +171,10 @@ pub fn support_from(
         (false, true) => Support::X11,
         (true, true) => Support::Xwayland,
         (true, false) => Support::No {
-            why: "The floating room needs XWayland, and this desktop isn't running it.".into(),
+            why: "Ghost needs XWayland to float, and this desktop isn't running it.".into(),
         },
         (false, false) => Support::No {
-            why: "The floating room needs a desktop to float over, and none is running.".into(),
+            why: "Ghost needs a desktop to float over, and none is running.".into(),
         },
     }
 }

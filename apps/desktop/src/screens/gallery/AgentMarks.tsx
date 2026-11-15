@@ -7,7 +7,7 @@ export function AgentMarks() {
   return (
     <section className="gal-block" id="gal-agents">
       <h2 className="gal-h2">Agents’ marks</h2>
-      <p className="gal-lead">Wisp’s family: each agent a small ghost with Wisp’s eyes, told apart by shape first and colour second. Every shape at 20 px (the rail, a row) and 200 px (the floating room), then each in every colour.</p>
+      <p className="gal-lead">Wisp’s family: each agent a small ghost with Wisp’s eyes, told apart by shape first and colour second. Every shape at 20 px (the rail, a row) and 200 px (floating), then each in every colour.</p>
       <div className="gal-marks">
         {AGENT_SHAPES.map((shape, i) => (
           <figure key={shape} className="gal-mark">

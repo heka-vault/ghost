@@ -964,7 +964,7 @@ export default function SettingsScreen({ params: route }: RouteProps) {
                 <StartAtLogin />
               </Card>
             </Section>
-            <Section id={sectionDomId("floating")} title="The floating room" description="Where Ghost appears when you call it: big and present over your work, or in this window." className="set-section">
+            <Section id={sectionDomId("floating")} title="Floating" description="Where Ghost appears when you call it: big and present over your work, or in this window." className="set-section">
               <FloatingRoomSettings />
             </Section>
             <ReachSection />

@@ -868,7 +868,7 @@ export function AgentDetail({ slug, manage = false }: { slug: string; manage?: b
             </Section>
 
             {!isGhost && (
-              <Section id="conv-look" title="How it looks" description="Its shape and colour, wherever it appears: the rail, Today, the floating room. Ghost is always Wisp.">
+              <Section id="conv-look" title="How it looks" description="Its shape and colour, wherever it appears: the rail, Today, over your desktop. Ghost is always Wisp.">
                 <LookPicker value={lookOf(slug, draft.look || null)} onChange={(l) => setDraft({ look: lookText(l) })} name={draft.name || name} disabled={readOnly} />
               </Section>
             )}

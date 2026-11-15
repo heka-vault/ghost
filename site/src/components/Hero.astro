@@ -41,7 +41,7 @@ const alt = "Ghost floating beside the work on a desktop at night, a beam out to
       <span data-hear-label>Hear it</span>
     </button>
     <span class="hero__live" aria-hidden="true"></span>
-    <span data-credit>A still of the floating room.</span>
+    <span data-credit>A still of Ghost floating.</span>
     <button type="button" class="hero__play" data-play hidden>Play it</button>
   </p>
 </section>
@@ -53,7 +53,7 @@ const alt = "Ghost floating beside the work on a desktop at night, a beam out to
   const play = root?.querySelector<HTMLButtonElement>("[data-play]");
   const reduced = matchMedia("(prefers-reduced-motion: reduce)");
   const stacked = matchMedia(root?.dataset.stackedQuery ?? "(max-width: 899px)");
-  const LIVE_QUIET = "Live: the app's own floating room on a made-up session. Nothing sent.";
+  const LIVE_QUIET = "Live: Ghost floating over a made-up session. Nothing sent.";
   const LIVE_SOUND = "Live, with sound: a made-up session, every voice synthetic. Nothing sent.";
 
   let frame: HTMLIFrameElement | null = null;
@@ -64,7 +64,7 @@ const alt = "Ghost floating beside the work on a desktop at night, a beam out to
     if (!float || frame) return;
     frame = document.createElement("iframe");
     frame.className = "hero__frame";
-    frame.title = "Ghost's floating room, playing a made-up session";
+    frame.title = "Ghost floating, playing a made-up session";
     frame.setAttribute("aria-hidden", "true");
     frame.tabIndex = -1;
     frame.src = `/float/?latency=0${stacked.matches ? "&placement=centre" : ""}`;

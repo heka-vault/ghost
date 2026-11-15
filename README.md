@@ -7,7 +7,7 @@
 
 [![ci](https://github.com/heka-vault/ghost/actions/workflows/ci.yml/badge.svg)](https://github.com/heka-vault/ghost/actions/workflows/ci.yml)
 
-**Ghost floats over your work when you call it.** With the floating room on, say "Ghost" and it comes forward beside
+**Ghost floats over your work when you call it.** With floating on, say "Ghost" and it comes forward beside
 whatever you are doing, with no window: you see it listen, a beam to each app and agent it
 reaches for, and its voice moving as it answers. When you are done it falls back to a thin line
 at the bottom of the screen.
@@ -25,7 +25,7 @@ conversation, what Ghost is watching and every change it made.
 
 ### Over your desktop
 
-The floating room shows what a voice can't: the state, where Ghost is looking, and a change or
+Floating, Ghost shows what a voice can't: the state, where Ghost is looking, and a change or
 a question that needs your answer, in a card with buttons. It shows no transcript, never takes
 the keyboard, and lets every click through except its own buttons. It is off until you turn it
 on in Settings › General, and it needs an X11 session or XWayland (GNOME on Wayland has it by
@@ -346,8 +346,8 @@ a second or two more before Ghost starts to answer; the model's own first word i
 With `make dev` running and the window open, the first run takes you to Ghost in three short
 steps: a model (one click when Ollama, LM Studio or a key is already on the computer; skip it and
 Ghost still meets you), its ears (no click when the microphone is fine; the speech models download
-from Welcome on), and "Hey Ghost". Ghost comes forward over your desktop in the floating room,
-says hello in its own words and answers. The floating room stays on after that; the switch is
+from Welcome on), and "Hey Ghost". Ghost comes forward over your desktop,
+says hello in its own words and answers. Floating stays on after that; the switch is
 right there. Its voice, an app, an agent and a first question follow, each optional.
 
 1. **Wake it.** Say "Hey Ghost". You hear a chime and a greeting; the window shows Listening.
@@ -371,8 +371,8 @@ right there. Its voice, an app, an agent and a first question follow, each optio
 5. **Make a schedule.** "Every weekday at nine, check what's open in the app repo and tell me",
    or **Watching › Add schedule**. The run happens with nobody there; its answer lands on
    **Today**. A change it would make that needs your yes waits there instead.
-6. **The floating room.** The first run turns it on when you first say "Hey Ghost";
-   **Settings › General › The floating room › Where Ghost appears** (or the rail, or the tray) turns it off and on.
+6. **Ghost floats.** The first run turns it on when you first say "Hey Ghost";
+   **Settings › General › Floating › Where Ghost appears** (or the rail, or the tray) turns it off and on.
    It shows Ghost over your work while you talk to it, without the window. It needs X11 or XWayland (GNOME on Wayland has XWayland
    by default). See [docs/floating-room.md](docs/floating-room.md).
 7. **Stop listening.** Ctrl+Shift+M, the switch by Ghost's name in the window, "Ghost, stop
@@ -400,7 +400,7 @@ routes). Nothing there is locked away: each is also a file or a command.
   devices but haven't been tested: a laptop's built-in microphone takes a noisy room's sound
   for yours, and open speakers without cancellation echo (see
   [Sound](#sound)). The Hearing test's recorder (`docs/hear-recording.md`) needs `ghost.mic`.
-- **The floating room** needs X11 or XWayland and hides during screen sharing; there is no
+- **Floating** needs X11 or XWayland and hides during screen sharing; there is no
   native Wayland, KDE or wlroots version yet.
 - **The phone app** (`apps/mobile`, Android) needs your own build (`make android`, with the
   Android SDK and JDK 17) and pairing on your own network:

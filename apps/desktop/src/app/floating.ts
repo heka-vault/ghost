@@ -64,7 +64,7 @@ function mockStatus(): FloatingStatus {
   const sh = p.get("sharing");
   const ws = p.get("while_shared");
   return {
-    support: f === "refused" ? { kind: "no", why: "The floating room needs XWayland, and this desktop isn't running it." } : { kind: "xwayland" },
+    support: f === "refused" ? { kind: "no", why: "Ghost needs XWayland to float, and this desktop isn't running it." } : { kind: "xwayland" },
     settings: { on: f === "on", monitor: "other", placement: "beside", captions: "off", while_shared: ws === "show" || ws === "ask" ? ws : "hide", offered: f === "on" || f === "off" },
     running: f === "on",
     capture: c === "yes" ? "yes" : c === "unknown" ? "unknown" : "no",

@@ -229,8 +229,8 @@ describe("answeredHere: the moment in this window (the room view removed, 2026-1
     expect(answeredHere(null)).toBeNull();
   });
   it("says why a desktop that can't float kept it here, in the shell's own words", () => {
-    expect(answeredHere({ ...ok, support: { kind: "no", why: "The floating room needs XWayland, and this desktop isn't running it." } })).toBe(
-      "Ghost answered here. On this desktop it can’t float over your work: the floating room needs XWayland, and this desktop isn't running it.",
+    expect(answeredHere({ ...ok, support: { kind: "no", why: "Ghost needs XWayland to float, and this desktop isn't running it." } })).toBe(
+      "Ghost answered here. On this desktop it can’t float over your work: Ghost needs XWayland to float, and this desktop isn't running it.",
     );
     expect(answeredHere({ ...ok, support: { kind: "no" } })).toBe("Ghost answered here. On this desktop it can’t float over your work.");
   });
