@@ -492,6 +492,8 @@ pub struct FakeSignIns {
     pub urls: Mutex<Vec<String>>,
     pub answer: ReturnFn,
     pub pending: Mutex<HashMap<String, String>>,
+    /// Where every app says it signs in (ADR 0076), or None for one that doesn't say.
+    pub issuer: Mutex<Option<String>>,
 }
 
 impl FakeSignIns {
@@ -508,6 +510,7 @@ impl FakeSignIns {
             urls: Mutex::new(Vec::new()),
             answer,
             pending: Mutex::new(HashMap::new()),
+            issuer: Mutex::new(Some("https://accounts.google.com".into())),
         }
     }
 
@@ -528,6 +531,10 @@ impl SignInPort for FakeSignIns {
 
     fn localhost_redirect_uri(&self) -> String {
         "http://localhost:47823/callback".into()
+    }
+
+    async fn issuer_of(&self, _url: &str) -> Result<Option<String>, AppError> {
+        Ok(self.issuer.lock().unwrap().clone())
     }
 
     async fn browser_return(

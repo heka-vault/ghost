@@ -10,6 +10,7 @@ import { useState } from "react";
 import { useDesign } from "../../design/context";
 import { errorText, useConfirm, useToast } from "../../ui";
 import { sentence } from "./model";
+import type { OwnClientBody } from "./OwnClient";
 import { expectSignIn, openSignIn } from "./signin";
 
 export interface AppProblem {
@@ -51,6 +52,33 @@ export function useAppActions({ onChanged, onDisconnected }: { onChanged: () => 
     }
   };
 
+  /** The person's own client for an app (ADR 0076), or null to take it back; then it signs in again. */
+  const giveClient = async (a: AppView, body: OwnClientBody) => {
+    if (busy) return false;
+    setBusy(a.name);
+    setProblem(null);
+    expectSignIn(a.name);
+    try {
+      const r = await client.setSignInClient(a.name, body);
+      const now = r.apps[0];
+      if (r.sign_in_url) {
+        await openSignIn(r.sign_in_url, { again: true, mock });
+        toast({ title: "Finish signing in in your browser", description: r.sign_in_code ? `Type ${r.sign_in_code} on the page Ghost opened.` : `Ghost opened ${a.title}’s sign-in page with your client ID.` });
+      } else if (now && (now.state === "needs_client" || now.state === "failed")) {
+        setProblem({ app: a.name, title: `${a.title} didn’t take it`, text: now.problem ? sentence(now.problem) : "Check the client ID and try again." });
+      } else {
+        toast({ title: body.client_id ? `${a.title} signs in with your client ID` : `${a.title} signs in as Ghost again` });
+      }
+      onChanged();
+      return true;
+    } catch (e) {
+      setProblem({ app: a.name, title: `Couldn’t give ${a.title} the client ID`, text: sentence(errorText(e)) });
+      return false;
+    } finally {
+      setBusy(null);
+    }
+  };
+
   /** Open a sign-in that's already waiting, again. */
   const reopen = async (a: AppView) => {
     if (!a.sign_in_url) return;
@@ -83,5 +111,5 @@ export function useAppActions({ onChanged, onDisconnected }: { onChanged: () => 
     }
   };
 
-  return { signIn, reopen, disconnect, busy, problem, clearProblem: () => setProblem(null), dialog };
+  return { signIn, giveClient, reopen, disconnect, busy, problem, clearProblem: () => setProblem(null), dialog };
 }

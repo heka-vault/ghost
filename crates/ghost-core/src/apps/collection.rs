@@ -100,6 +100,8 @@ pub struct Apps {
     auth_for: Option<Arc<dyn AuthFor>>,
     apps: RwLock<HashMap<String, Arc<App>>>,
     failed: RwLock<HashMap<String, String>>,
+    /// Apps whose sign-in needs a client the person registers (ADR 0076).
+    needs_client: RwLock<HashSet<String>>,
     connecting: RwLock<HashSet<String>>,
     /// Called after an app joins or leaves, or its tools change (the gate and the
     /// sessions follow).
@@ -124,6 +126,7 @@ impl Apps {
             auth_for,
             apps: RwLock::new(HashMap::new()),
             failed: RwLock::new(HashMap::new()),
+            needs_client: RwLock::new(HashSet::new()),
             connecting: RwLock::new(HashSet::new()),
             on_change: Arc::new(RwLock::new(Vec::new())),
             limits: Limits::default(),
@@ -227,7 +230,16 @@ impl Apps {
     async fn start(&self, spec: AppSpec, interactive: bool) -> Option<Arc<App>> {
         let name = spec.name.clone();
         let app = self.make(spec);
-        if let Err(e) = app.connect(interactive).await {
+        let result = app.connect(interactive).await;
+        {
+            let mut needs = self.needs_client.write().unwrap_or_else(|e| e.into_inner());
+            if matches!(result, Err(AppError::NeedsClient(_))) {
+                needs.insert(name.clone());
+            } else {
+                needs.remove(&name);
+            }
+        }
+        if let Err(e) = result {
             let why = e.reason();
             error!("app {name}: not connected: {why}");
             self.failed
@@ -254,7 +266,19 @@ impl Apps {
             || self.app(name).and_then(|a| a.failed()).as_deref() == Some("needs sign-in")
     }
 
-    /// connected, connecting, needs_sign_in, failed or stopped, for the operator.
+    /// The app's sign-in lets in only registered clients, and Ghost has none there: the
+    /// person gives one of their own (ADR 0076).
+    pub fn needs_client(&self, name: &str) -> bool {
+        self.failed().contains_key(name)
+            && self
+                .needs_client
+                .read()
+                .unwrap_or_else(|e| e.into_inner())
+                .contains(name)
+    }
+
+    /// connected, connecting, needs_sign_in, needs_client, failed or stopped, for the
+    /// operator.
     pub fn state(&self, name: &str) -> &'static str {
         let app = self.app(name);
         if app.as_ref().is_some_and(|a| a.connected()) {
@@ -270,6 +294,9 @@ impl Apps {
         }
         if self.needs_sign_in(name) {
             return "needs_sign_in";
+        }
+        if self.needs_client(name) {
+            return "needs_client";
         }
         if self.failed().contains_key(name) {
             return "failed";
@@ -626,7 +653,7 @@ impl Apps {
                 .read()
                 .unwrap_or_else(|e| e.into_inner())
                 .contains(name);
-            if connecting || self.needs_sign_in(name) {
+            if connecting || self.needs_sign_in(name) || self.needs_client(name) {
                 self.forget_wait(name); // the operator's to do; nothing to retry
                 continue;
             }

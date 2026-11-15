@@ -101,6 +101,14 @@
 .apps-form__how { margin: 0; }
 .apps-form__notice { margin: 0; }
 .apps-signin-url { margin: 0; overflow-wrap: anywhere; }
+/* A device sign-in's code, typed on the service's page (ADR 0076). */
+.apps-signin-code { display: grid; gap: var(--space-1); margin-block: var(--space-2); }
+.apps-signin-code p { margin: 0; }
+.apps-signin-code__code { font-size: var(--text-xl, var(--text-lg)); letter-spacing: 0.12em; user-select: all; }
+/* The person's own client: two fields and the vendor's page. */
+.apps-own-client { display: grid; gap: var(--space-3); margin-block: var(--space-2); }
+.apps-own-client p { margin: 0; }
+.apps-own-client__actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-2); }
 
 /* About this app, before connecting (#37): a two-column list, terms left. */
 .apps-about__list { display: flex; flex-direction: column; gap: var(--space-3); margin: 0; }

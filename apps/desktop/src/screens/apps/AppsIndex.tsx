@@ -178,6 +178,8 @@ function AppRow({ app: a, actions, twins }: { app: AppView; actions: ReturnType<
       <span className="apps-row__state">Connecting…</span>
     ) : a.state === "needs_sign_in" ? (
       <span className="apps-row__state is-danger">Needs you to sign in again</span>
+    ) : a.state === "needs_client" ? (
+      <span className="apps-row__state is-danger">Needs a client ID of yours to sign in</span>
     ) : (
       <span className="apps-row__state is-danger" data-user-content>
         <span title={a.problem ?? undefined}>Not connected · {afterDot(problemWords(a.problem))}</span>
@@ -192,6 +194,10 @@ function AppRow({ app: a, actions, twins }: { app: AppView; actions: ReturnType<
     ) : a.state === "needs_sign_in" ? (
       <Button size="sm" variant="secondary" loading={busy} disabled={!online} onClick={() => void actions.signIn(a)}>
         Sign in
+      </Button>
+    ) : a.state === "needs_client" ? (
+      <Button size="sm" variant="secondary" href={hrefFor(`/apps/${encodeURIComponent(a.name)}`)}>
+        Give it a client ID
       </Button>
     ) : a.state === "failed" || a.state === "stopped" ? (
       <Button size="sm" variant="secondary" leadingIcon={<RotateCw />} loading={busy} disabled={!online} onClick={() => void actions.signIn(a)}>

@@ -35,6 +35,7 @@ impl AuthFor for NoBrowser {
     async fn auth_for(
         &self,
         spec: &AppSpec,
+        _own: Option<crate::signin_clients::OwnClient>,
         _http: reqwest::Client,
         _interactive: bool,
         _fresh: bool,
@@ -838,6 +839,46 @@ async fn no_tool_reads_or_writes_the_other_tools_on_this_computer() {
             "{n}: {about}"
         );
     }
+}
+
+#[tokio::test]
+async fn no_tool_sets_a_sign_in_client() {
+    // ADR 0076: which client Ghost signs in as is Ghost's table and the operator's own
+    // client ID, given on an app's page. No agent, run or outside client (served a part of
+    // these same tools, ADR 0048) names one or its secret: a hostile app's text would
+    // otherwise point a sign-in at a client of its choosing.
+    let w = world_with(
+        "[permissions]\nallow = [\"ghost.app_connect\"]\n",
+        Runner::default(),
+    )
+    .await;
+    for t in w.server.tools() {
+        let n = t.name.to_lowercase();
+        let schema = serde_json::to_string(&t.input_schema)
+            .unwrap()
+            .to_lowercase();
+        for word in ["client_id", "client_secret", "clientid", "client id"] {
+            assert!(!n.contains(word) && !schema.contains(word), "{n}: {schema}");
+        }
+    }
+    // Passed anyway, the change is refused before anything is written.
+    let op = w.gate.operation(NAME, "app_connect").unwrap();
+    let mut args = json!({"app": "https://acme.example/mcp", "name": "acme",
+                          "client_id": "attacker-client", "client_secret": "attacker-secret"})
+    .as_object()
+    .cloned()
+    .unwrap();
+    args.insert(CALLER_ARG.into(), json!("ledger"));
+    args.insert(SESSION_ARG.into(), json!("s1"));
+    let Err(refused) = (op.prepare)(args).await else {
+        panic!("an argument the tool has no field for is refused");
+    };
+    assert!(
+        refused.to_string().contains("no argument client_id"),
+        "{refused}"
+    );
+    let text = std::fs::read_to_string(w.cfg.join("apps.json")).unwrap();
+    assert!(!text.contains("attacker"), "{text}");
 }
 
 #[tokio::test]

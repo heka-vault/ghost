@@ -33,7 +33,7 @@ use serde_json::{Map, Value};
 use tokio::task::JoinHandle;
 use tracing::{info, warn};
 
-use crate::provenance::{Maker, Publisher, key, maker_of, publisher_of, url_host};
+use crate::provenance::{Evidence, Maker, Publisher, key, maker_of, publisher_of, url_host};
 use crate::time;
 
 pub const REGISTRY: &str = "https://registry.modelcontextprotocol.io";
@@ -61,6 +61,138 @@ pub const FEATURED: [&str; 12] = [
     "net.todoist/mcp",
     "com.zapier/mcp",
 ];
+/// First-party apps the public registry does not list (ADR 0076), checked by hand against
+/// each vendor's own documentation: they appear in Apps like any entry, after
+/// [`FEATURED`]. Their names start `ghost/`, which no registry name can (a registry
+/// namespace is reverse DNS or `io.github.<account>`), so the registry never shadows one.
+pub const NOT_IN_REGISTRY: &[InTree] = &[
+    InTree {
+        name: "ghost/gmail",
+        title: "Gmail",
+        description: "Search, read and draft email in your Gmail. Google's own app, in \
+                      Google's Workspace Developer Preview.",
+        url: "https://gmailmcp.googleapis.com/mcp/v1",
+        issuer: "https://accounts.google.com",
+        website: "https://developers.google.com/workspace/gmail/api/guides/configure-mcp-server",
+        product: "Gmail",
+        domains: &["google.com", "googleapis.com"],
+        scopes: &[
+            "https://www.googleapis.com/auth/gmail.readonly",
+            "https://www.googleapis.com/auth/gmail.compose",
+        ],
+    },
+    InTree {
+        name: "ghost/google-calendar",
+        title: "Google Calendar",
+        description: "Your calendars and events, and when people are free. Google's own \
+                      app, in Google's Workspace Developer Preview.",
+        url: "https://calendarmcp.googleapis.com/mcp/v1",
+        issuer: "https://accounts.google.com",
+        website: "https://developers.google.com/workspace/calendar/api/guides/configure-mcp-server",
+        product: "Google Calendar",
+        domains: &["google.com", "googleapis.com"],
+        scopes: &[
+            "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+            "https://www.googleapis.com/auth/calendar.events.freebusy",
+            "https://www.googleapis.com/auth/calendar.events.readonly",
+        ],
+    },
+    InTree {
+        name: "ghost/google-drive",
+        title: "Google Drive",
+        description: "Find and read files in your Google Drive. Google's own app, in \
+                      Google's Workspace Developer Preview.",
+        url: "https://drivemcp.googleapis.com/mcp/v1",
+        issuer: "https://accounts.google.com",
+        website: "https://developers.google.com/workspace/drive/api/guides/configure-mcp-server",
+        product: "Google Drive",
+        domains: &["google.com", "googleapis.com"],
+        scopes: &[
+            "https://www.googleapis.com/auth/drive.readonly",
+            "https://www.googleapis.com/auth/drive.file",
+        ],
+    },
+    InTree {
+        name: "ghost/slack",
+        title: "Slack",
+        description: "Search and read your Slack, and send messages as you. Slack's own app.",
+        url: "https://mcp.slack.com/mcp",
+        issuer: "https://mcp.slack.com",
+        website: "https://docs.slack.dev/ai/slack-mcp-server/",
+        product: "Slack",
+        domains: &["slack.com"],
+        // What Slack's app advertises is what it asks for.
+        scopes: &[],
+    },
+];
+
+/// One app of [`NOT_IN_REGISTRY`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InTree {
+    pub name: &'static str,
+    pub title: &'static str,
+    pub description: &'static str,
+    /// Where it is, exactly; the sign-in finds the entry by it.
+    pub url: &'static str,
+    /// Its authorization server, as its metadata names it: the row of
+    /// [`crate::signin_clients::KNOWN_SERVERS`] that says how to make a client for it.
+    pub issuer: &'static str,
+    /// The vendor's own page about it.
+    pub website: &'static str,
+    pub product: &'static str,
+    /// The maker's own domains: the host above is under one.
+    pub domains: &'static [&'static str],
+    /// What the sign-in asks for, when the app advertises more than its own guide asks
+    /// a client to request. Empty: what the app advertises.
+    pub scopes: &'static [&'static str],
+}
+
+impl InTree {
+    /// The entry Apps shows: one way to connect, signing in, with nothing to fill in.
+    pub fn entry(&self) -> CatalogEntry {
+        let option = ConnectOption {
+            id: "remote-0".into(),
+            kind: Kind::SignIn,
+            label: "Sign in".into(),
+            settings: Vec::new(),
+            url: Some(self.url.into()),
+            headers: Vec::new(),
+            runner: None,
+            package: None,
+            runtime_args: Vec::new(),
+            package_args: Vec::new(),
+            registry: None,
+            identifier: None,
+        };
+        CatalogEntry {
+            name: self.name.into(),
+            title: self.title.into(),
+            description: self.description.into(),
+            version: String::new(),
+            website: Some(self.website.into()),
+            repository: None,
+            icon: None,
+            options: vec![option],
+            featured: true,
+            updated: None,
+            // Not the registry's: nobody's namespace was checked, so no publisher is said.
+            publisher: None,
+            maker: Some(Maker {
+                product: self.product.into(),
+                evidence: vec![Evidence::Listed, Evidence::Remote],
+                domains: self.domains.iter().map(|d| d.to_string()).collect(),
+                keys: [key(self.product), key(self.title)].into_iter().collect(),
+            }),
+            in_tree: true,
+        }
+    }
+}
+
+/// The in-tree app at exactly this address, for the sign-in's scopes.
+pub fn in_tree_at(url: &str) -> Option<&'static InTree> {
+    NOT_IN_REGISTRY.iter().find(|t| t.url == url)
+}
+
 const STATUS: &str = "io.modelcontextprotocol.registry/official";
 static VAR: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\{([A-Za-z_][A-Za-z0-9_]*)\}").unwrap());
@@ -316,6 +448,8 @@ pub struct CatalogEntry {
     pub publisher: Option<Publisher>,
     /// Set when it is the product maker's own (`ghost_core.provenance`).
     pub maker: Option<Maker>,
+    /// From Ghost's own list ([`NOT_IN_REGISTRY`]), not the registry.
+    pub in_tree: bool,
 }
 
 impl CatalogEntry {
@@ -692,6 +826,7 @@ pub fn parse_entry(raw: &Value) -> Option<CatalogEntry> {
         maker,
         title,
         options,
+        in_tree: false,
     })
 }
 
@@ -838,7 +973,13 @@ fn featured_rank(e: &CatalogEntry) -> usize {
     FEATURED
         .iter()
         .position(|n| *n == e.name)
-        .unwrap_or(FEATURED.len())
+        .or_else(|| {
+            NOT_IN_REGISTRY
+                .iter()
+                .position(|t| t.name == e.name)
+                .map(|i| FEATURED.len() + i)
+        })
+        .unwrap_or(FEATURED.len() + NOT_IN_REGISTRY.len())
 }
 
 /// One search result: an entry, and other publishers' entries for the same product
@@ -1141,6 +1282,11 @@ fn build_index(records: &BTreeMap<String, Arc<Value>>) -> Index {
             entries.insert(e.name.clone(), Arc::new(e));
         }
     }
+    for t in NOT_IN_REGISTRY {
+        entries
+            .entry(t.name.to_string())
+            .or_insert_with(|| Arc::new(t.entry()));
+    }
     let searchable = entries
         .values()
         .map(|e| {
@@ -1288,7 +1434,8 @@ impl Catalog {
     /// first-party apps of a first copy come in a second or two, the rest later.
     pub async fn wait(&self, secs: f64) {
         let deadline = Instant::now() + Duration::from_secs_f64(secs.max(0.0));
-        while self.refreshing() && self.entries().entries.is_empty() {
+        // Ghost's own list is always there; what is waited for is the registry's.
+        while self.refreshing() && lock(&self.copy).records.is_empty() {
             if Instant::now() >= deadline {
                 return;
             }
@@ -1871,6 +2018,46 @@ mod tests {
         assert!(secrets.is_empty());
     }
 
+    #[test]
+    fn apps_the_registry_lacks_are_listed_by_ghost_and_sign_in() {
+        // ADR 0076: Gmail, Calendar, Drive and Slack have first-party apps the public
+        // registry doesn't list. They show up first-party, with nothing to type, and say
+        // they come from Ghost's own list rather than a publisher the registry checked.
+        let dir = tempfile::tempdir().unwrap();
+        let cat = Catalog::new(dir.path().join("catalog.json"));
+        let (found, _) = cat.search("", 100, 0);
+        let names: Vec<&str> = found.iter().map(|f| f.entry.name.as_str()).collect();
+        for t in NOT_IN_REGISTRY {
+            assert!(names.contains(&t.name), "{} not offered: {names:?}", t.name);
+            let e = cat.get(t.name).unwrap();
+            assert!(e.in_tree && e.featured && e.publisher.is_none());
+            assert!(e.maker.is_some(), "{}", t.name);
+            assert!(!e.title.to_lowercase().contains("mcp"));
+            assert!(!e.description.to_lowercase().contains("mcp"));
+            assert!(!e.description.to_lowercase().contains("server"));
+            let host = url_host(t.url).unwrap();
+            assert!(
+                t.domains.iter().any(|d| host.ends_with(&format!(".{d}"))),
+                "{host} is not the maker's"
+            );
+            let (spec, secrets) = connect(&e, "remote-0", &e.app_name(), &vals(&[])).unwrap();
+            assert!(spec.sign_in && spec.url.as_deref() == Some(t.url));
+            assert!(secrets.is_empty());
+            assert_eq!(in_tree_at(t.url).map(|x| x.name), Some(t.name));
+            // Ghost knows how a client is made for each, so connecting one says so
+            assert!(
+                crate::signin_clients::known_server(t.issuer).is_some(),
+                "{}",
+                t.issuer
+            );
+            // no registry name can be one of these
+            assert!(publisher_of(t.name).is_none() || !t.name.contains('.'));
+        }
+        let (gmail, _) = cat.search("gmail", 10, 0);
+        assert_eq!(gmail[0].entry.name, "ghost/gmail");
+        assert!(in_tree_at("https://gmailmcp.googleapis.com/mcp/v1/x").is_none());
+    }
+
     /// `urllib.parse.unquote`.
     fn unquote(s: &str) -> String {
         let bytes = s.as_bytes();
@@ -1987,7 +2174,7 @@ mod tests {
                 ..CatalogOptions::default()
             },
         );
-        assert!(cat.stale() && cat.search("", 40, 0).1 == 0);
+        assert!(cat.stale() && cat.search("", 40, 0).1 == NOT_IN_REGISTRY.len());
         assert_eq!(cat.refresh().await.unwrap(), 7); // two first-party ones on their own, then five
         let singles = recorded(&urls, "/versions/latest");
         assert_eq!(singles.len(), 12);
@@ -1996,7 +2183,19 @@ mod tests {
         assert!(pages[0].contains("version=latest") && pages[1].contains("cursor=c1"));
         let (featured, total) = cat.search("", 40, 0);
         let titles: Vec<&str> = featured.iter().map(|f| f.entry.title.as_str()).collect();
-        assert!(titles == vec!["GitHub", "Linear"] && total == 2);
+        // the registry's first-party apps, then Ghost's own list of the ones it lacks
+        assert_eq!(
+            titles,
+            vec![
+                "GitHub",
+                "Linear",
+                "Gmail",
+                "Google Calendar",
+                "Google Drive",
+                "Slack"
+            ]
+        );
+        assert_eq!(total, 2 + NOT_IN_REGISTRY.len());
         let (hits, _) = cat.search("notes", 40, 0);
         let names: Vec<&str> = hits.iter().map(|f| f.entry.name.as_str()).collect();
         assert_eq!(names, vec!["io.github.someone/notes-mcp"]);

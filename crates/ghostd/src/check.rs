@@ -296,7 +296,7 @@ pub fn check_models(
 /// What `ghost_problems` needs of the apps: each as declared, and how it is now.
 pub trait AppStates {
     fn specs(&self) -> Vec<AppSpec>;
-    /// connected, connecting, needs_sign_in, failed or stopped.
+    /// connected, connecting, needs_sign_in, needs_client, failed or stopped.
     fn state(&self, name: &str) -> &'static str;
     fn problem(&self, name: &str) -> Option<String>;
 }
@@ -332,9 +332,18 @@ pub fn ghost_problems(
             continue;
         }
         if state == "needs_sign_in" {
+            // Its own key: the waiting list's one action for it is Sign in again.
             out.push((
-                format!("app:{name}"),
+                format!("app:{name}:sign-in"),
                 format!("{} needs you to sign in again", spec.shown()),
+            ));
+        } else if state == "needs_client" {
+            // The sign-in's own sentence: which service, and what to do (ADR 0076).
+            out.push((
+                format!("app:{name}:client"),
+                apps.problem(name).unwrap_or_else(|| {
+                    format!("{} needs a client ID of your own to sign in", spec.shown())
+                }),
             ));
         } else {
             let why = apps
@@ -918,7 +927,7 @@ mod tests {
         };
         let out = ghost_problems(&apps, &["watches.json: bad json".to_string()], &[]);
         let keys: Vec<&str> = out.iter().map(|(k, _)| k.as_str()).collect();
-        assert_eq!(keys, ["app:figma", "app:linear", "folder"]);
+        assert_eq!(keys, ["app:figma", "app:linear:sign-in", "folder"]);
         assert_eq!(out[1].1, "Linear needs you to sign in again");
         assert!(out[0].1.contains("FIGMA_TOKEN"));
         assert_eq!(
@@ -931,13 +940,34 @@ mod tests {
         );
         assert_eq!(
             ghost_problems(&apps, &[], &[]).last().unwrap().0,
-            "app:linear"
+            "app:linear:sign-in"
         );
         let passwords = vec![("passwords:locked".to_string(), "Unlock".to_string())];
         assert_eq!(
             ghost_problems(&apps, &[], &passwords)[0].0,
             "passwords:locked"
         );
+    }
+
+    #[test]
+    fn an_app_that_needs_a_client_says_what_to_do_not_an_errors_kind() {
+        // ADR 0076: the waiting list carries the sign-in's own sentence.
+        let mut gh = AppSpec::at("github", "https://api.githubcopilot.com/mcp/");
+        gh.title = "GitHub".into();
+        gh.sign_in = true;
+        let said = ghost_core::signin_clients::needs_a_client(
+            "GitHub",
+            ghost_core::signin_clients::known_server("https://github.com/login/oauth"),
+        );
+        let leaked: &'static str = Box::leak(said.clone().into_boxed_str());
+        let apps = FakeApps {
+            specs: vec![gh],
+            states: HashMap::from([("github", "needs_client")]),
+            problems: HashMap::from([("github", leaked)]),
+        };
+        let out = ghost_problems(&apps, &[], &[]);
+        assert_eq!(out, vec![("app:github:client".to_string(), said)]);
+        assert!(!out[0].1.contains("RegistrationFailed") && !out[0].1.contains("isn't connected"));
     }
 
     /// A temp home with every model where `ghostd run` would read it: the four small files

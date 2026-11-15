@@ -29,17 +29,26 @@ const SECTIONS: Record<string, string> = {
   "voice:realtime": "/settings/sound/voice-mode",
 };
 
-/** An app's own note (`app:<name>`): its page, where Sign in again is. */
-const APP_KEY = /^app:([A-Za-z0-9_-]{1,64})$/;
+/**
+ * An app's own note (`app:<name>`, `app:<name>:sign-in`, `app:<name>:client`): its page. A
+ * sign-in that lapsed is one action, Sign in again, right there (`signIn`); one that needs the
+ * person's own client ID leads to the page that asks for it (ADR 0076).
+ */
+const APP_KEY = /^app:([A-Za-z0-9_-]{1,64})(?::(sign-in|client))?$/;
 
 /** The route and words for an item's place, or null. */
-export function placeOf(item: Pick<WaitingItemView, "place"> & { key?: string }): { path: string; label: string } | null {
+export function placeOf(item: Pick<WaitingItemView, "place"> & { key?: string }): { path: string; label: string; signIn?: string } | null {
   const p = item.place;
   if (!p || !Object.prototype.hasOwnProperty.call(PLACES, p)) return null;
   const base = PLACES[p as Place];
   const key = item.key ?? "";
   const app = p === "apps" ? APP_KEY.exec(key) : null;
-  if (app) return { path: `/apps/${encodeURIComponent(app[1])}`, label: "Open the app" };
+  if (app) {
+    const path = `/apps/${encodeURIComponent(app[1])}`;
+    if (app[2] === "sign-in") return { path, label: "Sign in again", signIn: app[1] };
+    if (app[2] === "client") return { path, label: "Give it a client ID" };
+    return { path, label: "Open the app" };
+  }
   const section = SECTIONS[key];
   return section && section.startsWith(base.path) ? { path: section, label: base.label } : base;
 }

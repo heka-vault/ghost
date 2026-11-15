@@ -26,6 +26,10 @@ describe("where a waiting item leads", () => {
     expect(resolve("/apps/github_heka")?.route.id).toBe("apps");
     // a key that isn't one app's name: the list
     expect(placeOf({ place: "apps", key: "app:../x" })?.path).toBe("/apps");
+    // a lapsed sign-in is one action, right on the list; a refused one asks for a client ID
+    expect(placeOf({ place: "apps", key: "app:linear:sign-in" })).toEqual({ path: "/apps/linear", label: "Sign in again", signIn: "linear" });
+    expect(placeOf({ place: "apps", key: "app:github:client" })).toEqual({ path: "/apps/github", label: "Give it a client ID" });
+    expect(placeOf({ place: "apps", key: "app:x:other" })?.path).toBe("/apps");
   });
 
   it("leads each place to its own route", () => {

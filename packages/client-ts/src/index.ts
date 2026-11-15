@@ -59,6 +59,7 @@ export type AppView = Schemas["AppView"];
 export type AppAction = Schemas["AppAction"];
 export type AppLimits = Schemas["AppLimits"];
 export type AppConnect = Schemas["AppConnect"];
+export type SignInClientView = Schemas["SignInClientView"];
 export type AppConnectResult = Schemas["AppConnectResult"];
 export type CatalogPage = Schemas["CatalogPage"];
 export type CatalogEntryView = Schemas["CatalogEntryView"];
@@ -426,6 +427,11 @@ export class GhostClient {
   }
   signIn(name: string) {
     return unwrap(this.api.POST("/apps/{name}/sign-in", { params: { path: { name } } }));
+  }
+  /** The person's own client for signing in to an app (ADR 0076), or null to take it back; then
+   *  it signs in again. The secret goes into the vault and never comes back out. */
+  setSignInClient(name: string, body: Schemas["SignInClientUpdate"]) {
+    return unwrap(this.api.PUT("/apps/{name}/sign-in-client", { params: { path: { name } }, body }));
   }
   disconnectApp(name: string) {
     return unwrap(this.api.DELETE("/apps/{name}", { params: { path: { name } } }));

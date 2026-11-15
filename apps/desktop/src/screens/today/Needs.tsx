@@ -13,6 +13,8 @@ import { BellOff, ExternalLink } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { placeOf } from "../../app/places";
+import { useDesign } from "../../design/context";
+import { expectSignIn, openSignIn } from "../apps/signin";
 import { hrefFor } from "../../app/router";
 import { nameOf, useToday } from "../../app/today";
 import { Button, IconButton, Input, LineGlyph, Menu, PendingChange, alwaysDone, cx, errorText, relativeTime, useLive, useToast } from "../../ui";
@@ -52,6 +54,8 @@ export function Now({ pending = null, question = null }: { pending?: PendingProp
   const { client } = useGhost();
   const { online } = useLive();
   const { busy, act } = useAct();
+  const design = useDesign();
+  const mock = import.meta.env.DEV && !!design;
   const { decide, answer, know } = withoutLive(liveNeeds(today.needs, pending), pending, question);
   const many = changesOnScreen(today.needs, pending) > 1;
   const clear = !decide.length && !answer.length && !know.length;
@@ -106,10 +110,33 @@ export function Now({ pending = null, question = null }: { pending?: PendingProp
                   </p>
                 </div>
                 <span className="now-know__actions">
-                  {placeOf(i) && (
-                    <Button size="sm" variant="secondary" href={hrefFor(placeOf(i)!.path)}>
-                      {placeOf(i)!.label}
+                  {placeOf(i)?.signIn ? (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      loading={busy === i.key}
+                      disabled={!online}
+                      onClick={() => {
+                        const app = placeOf(i)!.signIn!;
+                        expectSignIn(app);
+                        void act(
+                          i.key,
+                          async () => {
+                            const r = await client.signIn(app);
+                            if (r.sign_in_url) await openSignIn(r.sign_in_url, { again: true, mock });
+                          },
+                          { title: "Finish signing in in your browser", description: "It shows as connected under Apps once you’re done." },
+                        );
+                      }}
+                    >
+                      Sign in again
                     </Button>
+                  ) : (
+                    placeOf(i) && (
+                      <Button size="sm" variant="secondary" href={hrefFor(placeOf(i)!.path)}>
+                        {placeOf(i)!.label}
+                      </Button>
+                    )
                   )}
                   {i.link && <IconButton size="sm" variant="ghost" label="Open" icon={<ExternalLink />} href={i.link} />}
                   <Menu

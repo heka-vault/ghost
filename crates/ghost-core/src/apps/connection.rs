@@ -43,6 +43,7 @@ use super::spec::{AppSpec, fill_secrets};
 use super::tools::{self, ToolInfo, ToolKind, hashed_tool_name, model_tool_name, result_to_dict};
 use super::{AppError, Environ};
 use crate::redact::{child_env, redact_json, redact_text};
+use crate::signin_clients::OwnClient;
 
 /// Listing an app's tools again after it said they changed.
 const RELIST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -354,9 +355,13 @@ pub trait AuthFor: Send + Sync {
     /// operator's browser and wait for it; otherwise one that needs the browser fails
     /// as `AppError::NeedsSignIn`. `fresh`: the app refused the stored tokens, so sign in
     /// again. Stored tokens are used and refreshed either way.
+    ///
+    /// `own` is the person's own client for this app (ADR 0076), its secret taken from
+    /// the vault: the only place a client secret's value is held.
     async fn auth_for(
         &self,
         spec: &AppSpec,
+        own: Option<OwnClient>,
         http: reqwest::Client,
         interactive: bool,
         fresh: bool,
@@ -962,8 +967,23 @@ impl App {
         let http = reqwest::Client::builder()
             .build()
             .map_err(|_| AppError::Connect("ClientBuild".into()))?;
+        let own = match &spec.client_id {
+            Some(id) if spec.sign_in => Some(OwnClient {
+                client_id: id.clone(),
+                client_secret: spec
+                    .client_secret
+                    .as_deref()
+                    .map(|s| fill_secrets(s, &*self.environ))
+                    .transpose()?,
+                issuer: spec.client_issuer.clone(),
+            }),
+            _ => None,
+        };
         let auth = match &self.auth_for {
-            Some(a) if spec.sign_in => a.auth_for(spec, http.clone(), interactive, false).await?,
+            Some(a) if spec.sign_in => {
+                a.auth_for(spec, own.clone(), http.clone(), interactive, false)
+                    .await?
+            }
             _ => None,
         };
         let Some(auth) = auth else {
@@ -990,7 +1010,7 @@ impl App {
                     .auth_for
                     .as_ref()
                     .expect("sign-in path")
-                    .auth_for(spec, http, true, true)
+                    .auth_for(spec, own, http, true, true)
                     .await?
                     .ok_or_else(|| AppError::Connect("NoSignIn".into()))?;
                 let transport = StreamableHttpClientTransport::with_client(auth, config());

@@ -16,8 +16,9 @@ offers one or more ways to connect:
 
 - **Sign in.** Ghost opens your browser at the app's own sign-in page and keeps what it
   gets back. There is nothing to copy or paste. When the app later wants you to sign in
-  again, it waits on your list ("Linear needs you to sign in again") until you press
-  Sign in.
+  again, it waits on your list ("Linear needs you to sign in again") with one button,
+  Sign in again. A few services let in only apps registered with them
+  ([below](#when-an-app-wants-a-client-id-of-your-own)).
 - **Use a password.** Paste the app's API key or token once. It is a *password* to Ghost:
   it goes into Ghost's vault (ADR 0036) and never comes back out, of the control API or
   anything else. `apps.json` only names it. Disconnecting the app forgets it. While your
@@ -36,6 +37,47 @@ The catalog is the registry's text, shown to you as it is. Ghost removes only th
 protocol's name from it. None of it reaches the model, and nothing the registry fixes (a
 header, an argument, an address) can name one of Ghost's passwords: only the settings you
 fill in are.
+
+### When an app wants a client ID of your own
+
+Signing in, Ghost has to be an app the service knows (ADR 0076). Most services let Ghost
+introduce itself; GitHub, Google (Gmail, Calendar, Drive) and Slack let in only apps
+registered with them beforehand. Ghost tries, in order:
+
+1. **Your own client ID** for that app, if you gave one, and only at the service the app
+   named when you gave it: if the app later names another, Ghost says so and sends nothing
+   there until you give it again;
+2. **Ghost's own** for that service, once Ghost's maker has registered one, and only for
+   that service's own apps (GitHub's at `api.githubcopilot.com`, Google's three, Slack's), so
+   an app elsewhere can't borrow it;
+3. **introducing itself** (registering), for a service that allows it;
+4. **Ghost's public description of itself** (`https://heyghost.app/oauth/client.json`),
+   for a service that reads one and doesn't take registration, when Ghost signs in on its
+   usual port.
+
+When none works, the app says so instead of failing with a code: "GitHub only lets in apps
+registered with it, and Ghost isn't yet. Register one of your own with GitHub, then give
+Ghost its client ID and secret on GitHub's page and sign in again." Its page has a button to
+the service's own page for making one, and two fields: the client ID, and the client secret
+where the service wants one. The secret is a password: it goes into Ghost's vault and is
+never shown again. Leaving the secret empty when you change the client ID keeps the one
+stored; **Remove the stored secret** takes it away. Connecting, the same two fields are under **I have my own client ID**.
+Neither is a field anyone else sees, and no agent, run, outside tool or the phone can set
+them.
+
+| Service | Where you make one | What Ghost needs | Notes |
+|---|---|---|---|
+| GitHub | github.com › Settings › Developer settings › OAuth Apps | client ID and secret | callback `http://127.0.0.1:47823/callback` |
+| Google | Google Cloud console › Google Auth Platform › Clients | client ID and secret | a Web application client, "Use this client for an AI-powered agent" ticked, redirect `http://127.0.0.1:47823/callback`; the Workspace apps are in Google's Developer Preview |
+| Slack | api.slack.com › Your apps | client ID (a secret if your app has one to give) | an internal app or one in the Marketplace, approved by your workspace's admin; redirect `http://127.0.0.1:47823/callback` |
+
+### Apps the registry doesn't list
+
+Gmail, Google Calendar, Google Drive and Slack have first-party apps the public registry
+doesn't carry. Ghost lists them itself (`catalog::NOT_IN_REGISTRY`), with their addresses
+checked against the vendors' own guides; their cards say they come from Ghost's list, not a
+publisher the registry checked. They sign in like any other app, and today each wants a
+client ID of your own.
 
 ### From the AI tools already on this computer
 
@@ -299,9 +341,13 @@ connect or disconnect; you can edit it by hand too.
   environment: those named passwords, as environment variables, are the one place a value
   leaves the vault. A name the vault doesn't have can come from Ghost's environment
   (`settings.env`), for a setting that isn't secret.
+- **Your own client** for an app that signs in is `client_id` beside `sign_in`, and its
+  secret `client_secret` as `${NAME}`, a password in the vault; a value written there is
+  not used (ADR 0076). A client in a pasted config is not taken.
 - **Sign-in tokens** live in `~/.local/share/ghost/apps/<name>/oauth.json` (0600).
   Disconnecting forgets them. The browser comes back to `http://127.0.0.1:47823/callback`
-  (`GHOST_SIGNIN_PORT`), which listens only while a sign-in is open.
+  (`GHOST_SIGNIN_PORT`), which listens only while a sign-in is open. Ghost's public
+  description of itself names that port; a service that reads it may refuse another one.
 - **The catalog's copy** is `~/.cache/ghost/catalog.json`. The first copy fetches the
   first-party apps in a second or two, then the rest of the registry in the background,
   which takes a few minutes and is searchable as it comes in. After that, only what
@@ -389,6 +435,7 @@ harness (`make perf`) runs on it.
   0.45 s of it for who published each app and which are the maker's own. The daemon does
   it once at start, and after each refresh in a thread so the voice loop isn't held; a
   search takes about 35 ms. Nothing of it is on a turn.
+- **Signing in.** Choosing a client is made at sign-in, never on a turn (ADR 0076).
 
 ## For developers
 
@@ -398,7 +445,9 @@ settings, `with_cancel` for the turn a call belongs to, `Asker` for an app's que
 `Connector` for an app opened some other way than `apps.json` says), `ghost_core::catalog` the registry
 copy, `ghost_core::provenance` who publishes a catalog entry, whether it is the maker's own
 and where it runs (`KNOWN_MAKERS` and `SHARED_HOSTS` are the hand-kept lists),
-`ghost_core::signin` the OAuth client storage and loopback, and
+`ghost_core::signin` the OAuth client storage, loopback and device flow,
+`ghost_core::signin_clients` which client a sign-in uses (`KNOWN_SERVERS`, the one table to
+add Ghost's own client ID to, and `choose`), and
 `ghost_core::permissions` the rules. Nothing in the daemon or the pipeline knows a
 connected app by name: never add a capability by editing them, and never write a bespoke
 client for a service. Connect an app. Ghost's own functions are the one exception, and

@@ -45,7 +45,9 @@ export function makerWhy(e: CatalogEntryView): string | null {
   const m = e.maker;
   if (!m) return null;
   const p = e.publisher;
-  const first = m.evidence.includes("listed")
+  const first = e.listed_by_ghost
+    ? `The public app registry doesn’t list it; Ghost lists it itself, from ${m.product}’s own guide.`
+    : m.evidence.includes("listed")
     ? `Ghost’s own list of makers names ${p ? (p.verified === "github" ? `the GitHub account ${p.name}` : p.name) : "its publisher"} as ${m.product}’s maker.`
     : p?.verified === "github"
       ? `Published by the GitHub account ${p.name}, the same name as the product.`

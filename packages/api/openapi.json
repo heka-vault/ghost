@@ -218,6 +218,20 @@
               "null"
             ]
           },
+          "client_id": {
+            "description": "The person's own client ID for signing in (ADR 0076), for a catalog entry or an\naddress. Not read from a pasted config.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "client_secret": {
+            "description": "Its secret, where the service wants one: into the vault, never apps.json.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "config": {
             "type": [
               "string",
@@ -277,6 +291,13 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "sign_in_code": {
+            "description": "The code to type on the service's page, for a device sign-in.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "sign_in_url": {
             "type": [
@@ -439,6 +460,24 @@
             },
             "type": "array"
           },
+          "sign_in_client": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SignInClientView",
+                "description": "The client it signs in as (ADR 0076), for an app that signs in: the person's own\nclient ID when they gave one, and whether it has a secret; never the secret."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sign_in_code": {
+            "description": "The code to type on the service's page, while a device sign-in waits for it.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "sign_in_url": {
             "description": "Waiting for the operator's browser.",
             "type": [
@@ -451,6 +490,7 @@
               "connected",
               "connecting",
               "needs_sign_in",
+              "needs_client",
               "failed",
               "stopped"
             ],
@@ -713,6 +753,10 @@
               "null"
             ]
           },
+          "listed_by_ghost": {
+            "description": "From Ghost's own list of first-party apps the registry lacks (ADR 0076), not the\nregistry.",
+            "type": "boolean"
+          },
           "maker": {
             "oneOf": [
               {
@@ -801,6 +845,7 @@
           "options",
           "suggested_name",
           "connected",
+          "listed_by_ghost",
           "others"
         ],
         "type": "object"
@@ -1158,6 +1203,15 @@
           "clients"
         ],
         "type": "object"
+      },
+      "ClientSecretNeed": {
+        "description": "Whether a service wants a client's secret: none, optional or required (ADR 0076).",
+        "enum": [
+          "none",
+          "optional",
+          "required"
+        ],
+        "type": "string"
       },
       "ClientView": {
         "description": "A tool the operator connected to Ghost. Never its token.",
@@ -6900,6 +6954,69 @@
         ],
         "type": "object"
       },
+      "SignInClientUpdate": {
+        "description": "The person's own client for an app (ADR 0076). The secret goes into Ghost's vault and\nnever comes back out; a null client ID clears the client and its secret. A secret left\nempty keeps the one stored; `forget_secret` takes it away.",
+        "properties": {
+          "client_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "client_secret": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "forget_secret": {
+            "description": "Take the stored secret away; only with no new one.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "SignInClientView": {
+        "description": "How an app signs in, for its page (ADR 0076).",
+        "properties": {
+          "client_id": {
+            "description": "The person's own client ID for this app, when they gave one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "has_secret": {
+            "description": "A secret for it is kept in the vault.",
+            "type": "boolean"
+          },
+          "make_a_client": {
+            "description": "The vendor's page where the person makes a client of their own.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "secret": {
+            "$ref": "#/components/schemas/ClientSecretNeed"
+          },
+          "service": {
+            "description": "The service its sign-in belongs to, when Ghost knows it (\"GitHub\").",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "has_secret",
+          "secret"
+        ],
+        "type": "object"
+      },
       "SkillAdd": {
         "properties": {
           "name": {
@@ -9019,6 +9136,58 @@
           }
         },
         "summary": "Sign In",
+        "tags": [
+          "apps"
+        ]
+      }
+    },
+    "/apps/{name}/sign-in-client": {
+      "put": {
+        "description": "Give an app the person's own client for signing in (ADR 0076), or take it back\nwith null, then sign in again. The secret goes into the vault and never comes back out.",
+        "operationId": "set_sign_in_client_apps__name__sign_in_client_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignInClientUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppConnectResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Sign In Client",
         "tags": [
           "apps"
         ]

@@ -33,10 +33,11 @@ use crate::error::{ApiError, ApiResult, Body, HTTPValidationError, check_len, ch
 use crate::models::{
     Ack, AppAction, AppConnect, AppConnectResult, AppKind, AppLimits, AppLimitsUpdate, AppState,
     AppView, CatalogEntryView, CatalogMaker, CatalogOption, CatalogOptionKind, CatalogPage,
-    CatalogPublisher, CatalogSetting, HostOwner, Level, MakerEvidence, PermissionsUpdate,
-    PermissionsView, Registry, Verified,
+    CatalogPublisher, CatalogSetting, ClientSecretNeed, HostOwner, Level, MakerEvidence,
+    PermissionsUpdate, PermissionsView, Registry, SignInClientUpdate, SignInClientView, Verified,
 };
 use crate::passwords::{check_passwords, save_passwords};
+use ghost_core::signin_clients::{SecretNeed, client_id_problem, known_server};
 
 /// How long POST /apps waits for a connection or a sign-in address.
 pub const CONNECT_WAIT_SECS: f64 = 10.0;
@@ -76,6 +77,7 @@ fn state_of(s: &str) -> AppState {
         "connected" => AppState::Connected,
         "connecting" => AppState::Connecting,
         "needs_sign_in" => AppState::NeedsSignIn,
+        "needs_client" => AppState::NeedsClient,
         "stopped" => AppState::Stopped,
         _ => AppState::Failed,
     }
@@ -131,6 +133,7 @@ pub fn app_view(deps: &Deps, name: &str) -> ApiResult<AppView> {
         _ => None,
     };
     let url = deps.signins.as_ref().and_then(|s| s.pending_url(name));
+    let code = deps.signins.as_ref().and_then(|s| s.pending_code(name));
     Ok(AppView {
         name: name.to_string(),
         title: spec.shown(),
@@ -141,8 +144,41 @@ pub fn app_view(deps: &Deps, name: &str) -> ApiResult<AppView> {
         icon: entry.and_then(|e| e.icon.clone()),
         actions: action_views(deps, name),
         sign_in_url: url,
+        sign_in_code: code,
+        sign_in_client: sign_in_client_view(deps, &spec),
         settings: spec.secrets(),
         limits: limits_view(&spec),
+    })
+}
+
+/// How an app signs in (ADR 0076): the person's own client ID and whether a secret is
+/// kept for it, and, where Ghost knows the service, where a client is made and whether it
+/// needs its secret. Never the secret.
+fn sign_in_client_view(deps: &Deps, spec: &AppSpec) -> Option<SignInClientView> {
+    if !spec.sign_in {
+        return None;
+    }
+    let server = deps
+        .signins
+        .as_ref()
+        .and_then(|s| s.needs_client(&spec.name))
+        .flatten()
+        .or_else(|| {
+            spec.url
+                .as_deref()
+                .and_then(catalog::in_tree_at)
+                .and_then(|t| known_server(t.issuer))
+        });
+    Some(SignInClientView {
+        client_id: spec.client_id.clone(),
+        has_secret: spec.client_secret.is_some(),
+        service: server.map(|s| s.service.to_string()),
+        make_a_client: server.map(|s| s.make_a_client.to_string()),
+        secret: match server.map(|s| s.own_secret) {
+            Some(SecretNeed::None) => ClientSecretNeed::None,
+            Some(SecretNeed::Required) => ClientSecretNeed::Required,
+            _ => ClientSecretNeed::Optional,
+        },
     })
 }
 
@@ -364,6 +400,7 @@ fn entry_view(
             .as_ref()
             .filter(|o| o.name != e.name)
             .map(|o| o.name.clone()),
+        listed_by_ghost: e.in_tree,
         others: others.iter().map(|o| entry_view(deps, o, &[])).collect(),
     }
 }
@@ -602,6 +639,13 @@ fn specs_from(deps: &Deps, req: &AppConnect) -> ApiResult<Asked> {
         let mut specs = Vec::new();
         let mut secrets = BTreeMap::new();
         for spec in &parsed.apps {
+            // A client named in another tool's config is that tool's (ADR 0068, ADR 0076):
+            // the person gives their own on the app's page.
+            let spec = &AppSpec {
+                client_id: None,
+                client_secret: None,
+                ..spec.clone()
+            };
             let (moved, found) = extract_secrets(spec);
             specs.push(moved);
             secrets.extend(found);
@@ -642,12 +686,13 @@ fn specs_from(deps: &Deps, req: &AppConnect) -> ApiResult<Asked> {
             );
             headers.insert("Authorization".to_string(), format!("${{{env}}}"));
         }
-        let spec = AppSpec {
+        let mut spec = AppSpec {
             title: values.get("title").cloned().unwrap_or_default(),
             headers,
             sign_in: key.is_empty(),
             ..base
         };
+        own_client(&mut spec, &mut secrets, req)?;
         return Ok(Asked {
             specs: vec![spec],
             secrets,
@@ -671,13 +716,107 @@ fn specs_from(deps: &Deps, req: &AppConnect) -> ApiResult<Asked> {
         }
         None => free_name(deps, &entry.app_name()),
     };
-    let (spec, secrets) = catalog::connect(&entry, option, &name, &values)
+    let (mut spec, mut secrets) = catalog::connect(&entry, option, &name, &values)
         .map_err(|e| ApiError::unprocessable(e.to_string()))?;
+    own_client(&mut spec, &mut secrets, req)?;
     Ok(Asked {
         specs: vec![spec],
         secrets,
         notes: Vec::new(),
     })
+}
+
+/// The person's own client for an app that signs in (ADR 0076): the ID into apps.json,
+/// the secret into the vault under the app's own name and `${NAME}` in the file.
+fn own_client(
+    spec: &mut AppSpec,
+    secrets: &mut BTreeMap<String, String>,
+    req: &AppConnect,
+) -> ApiResult<()> {
+    set_own_client(
+        spec,
+        secrets,
+        req.client_id.as_deref(),
+        req.client_secret.as_deref(),
+        false,
+    )
+}
+
+/// A secret left empty keeps the one the entry names (an empty field is not "none");
+/// `forget_secret` takes it away, and only with no new one.
+fn set_own_client(
+    spec: &mut AppSpec,
+    secrets: &mut BTreeMap<String, String>,
+    client_id: Option<&str>,
+    client_secret: Option<&str>,
+    forget_secret: bool,
+) -> ApiResult<()> {
+    let id = client_id.map(str::trim).filter(|s| !s.is_empty());
+    let secret = client_secret.map(str::trim).filter(|s| !s.is_empty());
+    let Some(id) = id else {
+        if secret.is_some() {
+            return Err(ApiError::unprocessable(
+                "a client secret goes with a client ID",
+            ));
+        }
+        spec.client_id = None;
+        spec.client_secret = None;
+        return Ok(());
+    };
+    if !spec.sign_in {
+        return Err(ApiError::unprocessable(
+            "a client ID is for an app Ghost signs in to",
+        ));
+    }
+    if let Some(why) = client_id_problem(id) {
+        return Err(ApiError::unprocessable(why));
+    }
+    if let Some(secret) = secret {
+        if forget_secret {
+            return Err(ApiError::unprocessable(
+                "give a new client secret or forget the stored one, not both",
+            ));
+        }
+        check_len(&["body", "client_secret"], secret, 1, 500)?;
+    }
+    spec.client_id = Some(id.to_string());
+    match secret {
+        Some(value) => {
+            let env = secret_name(&spec.name, "client_secret");
+            secrets.insert(env.clone(), value.to_string());
+            spec.client_secret = Some(format!("${{{env}}}"));
+        }
+        None if forget_secret => spec.client_secret = None,
+        None => {} // the stored one stays
+    }
+    Ok(())
+}
+
+/// Bind the person's client to the server the app names now (ADR 0076): its sign-in sends
+/// the client there and nowhere else. An app that names none can't be given one.
+async fn bind_client(deps: &Deps, spec: &mut AppSpec) -> ApiResult<()> {
+    if spec.client_id.is_none() {
+        spec.client_issuer = None;
+        return Ok(());
+    }
+    let signins = deps
+        .signins
+        .as_ref()
+        .ok_or_else(|| ApiError::unavailable("signing in is not available"))?;
+    let url = spec.url.clone().unwrap_or_default();
+    let shown = spec.shown();
+    match signins.issuer_of(&url).await {
+        Ok(Some(issuer)) => {
+            spec.client_issuer = Some(issuer);
+            Ok(())
+        }
+        Ok(None) => Err(ApiError::unprocessable(format!(
+            "{shown} doesn't say where it signs in, so Ghost can't keep a client ID for it."
+        ))),
+        Err(_) => Err(ApiError::unprocessable(format!(
+            "Ghost couldn't reach {shown} to check where it signs in. Try again when it answers."
+        ))),
+    }
 }
 
 /// Connect these apps: every check first, then `apps.json` (the one writer, `edit_apps`),
@@ -721,8 +860,35 @@ pub(crate) async fn connect_specs(
         .map(|(k, v)| (k.clone(), Some(v.clone())))
         .collect();
     check_passwords(&as_values)?; // a refused password changes nothing either
+    // Connecting again over an entry: the passwords Ghost kept for the old one that the new
+    // one no longer names (a client secret given before and not now) leave the vault.
+    let orphaned: BTreeMap<String, Option<String>> = if replace {
+        specs
+            .iter()
+            .filter_map(|spec| apps.spec(&spec.name).map(|old| (old, spec)))
+            .flat_map(|(old, spec)| {
+                let still = spec.secrets();
+                own_secrets(deps, &old)
+                    .into_iter()
+                    .filter(move |k| !still.contains(k))
+            })
+            .filter(|k| !secrets.contains_key(k))
+            .filter(|k| deps.passwords.as_ref().is_some_and(|v| v.contains(k)))
+            .map(|k| (k, None))
+            .collect()
+    } else {
+        BTreeMap::new()
+    };
+    if !orphaned.is_empty() && !deps.passwords.as_ref().is_some_and(|v| v.is_open()) {
+        return Err(ApiError::locked(
+            "Your keyring is locked. Unlock it, then connect again.",
+        ));
+    }
     save(deps, specs, None)?; // first: a file that won't take the entry changes nothing
     keep_secrets(deps, secrets)?;
+    if !orphaned.is_empty() {
+        save_passwords(deps, &orphaned)?;
+    }
     let url = start(deps, specs).await;
     let views = specs
         .iter()
@@ -744,14 +910,19 @@ async fn connect_app(
 ) -> ApiResult<Json<AppConnectResult>> {
     need_apps(&deps)?;
     let Asked {
-        specs,
+        mut specs,
         secrets,
         notes,
     } = specs_from(&deps, &req)?;
+    for spec in &mut specs {
+        bind_client(&deps, spec).await?;
+    }
     let (views, url) = connect_specs(&deps, &specs, &secrets, req.replace.unwrap_or(false)).await?;
+    let code = views.iter().find_map(|v| v.sign_in_code.clone());
     Ok(Json(AppConnectResult {
         apps: views,
         sign_in_url: url,
+        sign_in_code: code,
         problems: notes,
     }))
 }
@@ -776,8 +947,74 @@ async fn sign_in(
         signins.forget(&name); // a fresh registration and tokens
     }
     let url = start(&deps, std::slice::from_ref(&spec)).await;
+    let view = app_view(&deps, &name)?;
     Ok(Json(AppConnectResult {
-        apps: vec![app_view(&deps, &name)?],
+        sign_in_code: view.sign_in_code.clone(),
+        apps: vec![view],
+        sign_in_url: url,
+        problems: Vec::new(),
+    }))
+}
+
+/// Give an app the person's own client for signing in (ADR 0076), or take it back with
+/// null, then sign in again. The secret goes into the vault and never comes back out; the
+/// operator's route only: no tool, model, run, outside client or the phone reaches it.
+#[utoipa::path(put, path = "/apps/{name}/sign-in-client", operation_id = "set_sign_in_client_apps__name__sign_in_client_put",
+    tag = "apps", summary = "Set Sign In Client",
+    description = "Give an app the person's own client for signing in (ADR 0076), or take it back\nwith null, then sign in again. The secret goes into the vault and never comes back out.",
+    params(("name" = String, Path)),
+    request_body = SignInClientUpdate,
+    responses((status = 200, description = "Successful Response", body = AppConnectResult),
+              (status = 422, description = "Validation Error", body = HTTPValidationError)))]
+async fn set_sign_in_client(
+    State(deps): State<SharedDeps>,
+    PathArg(name): PathArg<String>,
+    Body(req): Body<SignInClientUpdate>,
+) -> ApiResult<Json<AppConnectResult>> {
+    let apps = need_apps(&deps)?;
+    let old = apps
+        .spec(&name)
+        .ok_or_else(|| ApiError::not_found(format!("no app called {}", py_repr(&name))))?;
+    let mut spec = old.clone();
+    let mut secrets = BTreeMap::new();
+    set_own_client(
+        &mut spec,
+        &mut secrets,
+        req.client_id.as_deref(),
+        req.client_secret.as_deref(),
+        req.forget_secret.unwrap_or(false),
+    )?;
+    // A secret the entry no longer names goes from the vault; a new one replaces it.
+    let env = secret_name(&name, "client_secret");
+    let mut changes: BTreeMap<String, Option<String>> = secrets
+        .iter()
+        .map(|(k, v)| (k.clone(), Some(v.clone())))
+        .collect();
+    if spec.client_secret.is_none()
+        && old.client_secret.is_some()
+        && deps.passwords.as_ref().is_some_and(|v| v.contains(&env))
+    {
+        changes.insert(env, None);
+    }
+    if !changes.is_empty() && !deps.passwords.as_ref().is_some_and(|v| v.is_open()) {
+        return Err(ApiError::locked(
+            "Your keyring is locked. Unlock it, then give the client again.",
+        ));
+    }
+    bind_client(&deps, &mut spec).await?;
+    check_passwords(&changes)?;
+    save(&deps, std::slice::from_ref(&spec), None)?;
+    if !changes.is_empty() {
+        save_passwords(&deps, &changes)?;
+    }
+    if let Some(signins) = &deps.signins {
+        signins.forget(&name); // signed in as another client: those tokens are not this one's
+    }
+    let url = start(&deps, std::slice::from_ref(&spec)).await;
+    let view = app_view(&deps, &name)?;
+    Ok(Json(AppConnectResult {
+        sign_in_code: view.sign_in_code.clone(),
+        apps: vec![view],
         sign_in_url: url,
         problems: Vec::new(),
     }))
@@ -909,6 +1146,7 @@ pub fn router() -> OpenApiRouter<SharedDeps> {
         .routes(routes!(list_apps, connect_app))
         .routes(routes!(get_app, disconnect))
         .routes(routes!(sign_in))
+        .routes(routes!(set_sign_in_client))
         .routes(routes!(set_limits))
         .routes(routes!(catalog_page))
         .routes(routes!(get_permissions, put_permissions))

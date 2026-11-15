@@ -68,7 +68,7 @@ import { MockWakeTakes } from "./wakeTakes";
 import { isConnectionKey, isModelOnly, MockModel } from "./model";
 import { MockOtherTools } from "./otherTools";
 import { MockSchedules, askedSchedule } from "./schedules";
-import { type AppFixture, type CatalogSeed, DEFAULT_LIMITS, GENERIC_TOOLS, TOOLS_BY_CATALOG } from "./fixtures/apps";
+import { type AppFixture, type CatalogSeed, DEFAULT_LIMITS, GENERIC_TOOLS, TOOLS_BY_CATALOG, githubDeviceSignIn, gmailNeedsClient, needsClientSentence } from "./fixtures/apps";
 import type { AgentRecord } from "./fixtures/conversations";
 import { CONFIG_DIR } from "./fixtures/folder";
 import type { Fixtures } from "./fixtures";
@@ -177,6 +177,8 @@ export interface MockOptions {
    * hasn't arrived yet and doesn't for 8 seconds. First run is `slow` without asking.
    */
   catalog?: "slow" | "problem" | "empty" | null;
+  /** Sign-ins that need the person's own client (?signin=client, ADR 0076). */
+  signIn?: "client" | null;
   /** The skills catalog (?skillsearch=down, #35): skills.sh doesn't answer, so a search says so. */
   skillSearch?: "down" | null;
   /** The phone pairs this many ms after a code is issued (?phone=pairs). 0: it never does. */
@@ -329,6 +331,7 @@ export class MockDaemon {
     this.watching = f.watching;
     this.voices = f.conversations.voices;
     this.apps = f.apps;
+    if (options.signIn === "client") this.apps = [...this.apps.filter((a) => a.view.name !== "github"), githubDeviceSignIn(), gmailNeedsClient()];
     this.catalog = f.catalog;
     this.sources = f.sources;
     this.policy = f.policy;
@@ -1702,9 +1705,10 @@ export class MockDaemon {
     return `${base}-${n}`;
   }
   private entryView(e: CatalogSeed): CatalogEntryView {
-    const { app, ...rest } = structuredClone(e);
+    const { app, needs_client, ...rest } = structuredClone(e);
     return {
       ...rest,
+      listed_by_ghost: e.listed_by_ghost ?? false,
       version: e.version ?? "1.0.0",
       website: e.website ?? null,
       repository: e.repository ?? null,
@@ -1800,8 +1804,10 @@ export class MockDaemon {
       for (const s of option.settings) if (s.required && !(values[s.key] ?? "").trim() && !s.default) throw new HttpError(422, `${s.label} is required to connect ${entry.title}`);
       const name = b.name || this.freeName(entry.app);
       const env = name.toUpperCase().replace(/-/g, "_");
+      const mine = (b.client_id ?? "").trim();
+      const client = entry.needs_client ? { ...entry.needs_client, client_id: mine || null, has_secret: !!(b.client_secret ?? "").trim() } : option.kind === "sign_in" ? { client_id: mine || null, has_secret: !!(b.client_secret ?? "").trim(), service: null, make_a_client: null, secret: "optional" as const } : null;
       made.push({
-        view: { name, title: entry.title, kind: option.kind, state: "connecting", problem: null, catalog: entry.name, icon: entry.icon ?? null, sign_in_url: null, settings: option.settings.filter((s) => s.secret).map((s) => `GHOST_APP_${env}_${s.key.toUpperCase()}`) },
+        view: { name, title: entry.title, kind: option.kind, state: "connecting", problem: null, catalog: entry.name, icon: entry.icon ?? null, sign_in_url: null, sign_in_client: client, settings: option.settings.filter((s) => s.secret).map((s) => `GHOST_APP_${env}_${s.key.toUpperCase()}`) },
         tools: TOOLS_BY_CATALOG[entry.name] ?? GENERIC_TOOLS,
       });
       website = entry.website ?? null;
@@ -1821,6 +1827,12 @@ export class MockDaemon {
     let url: string | null = null;
     for (const f of made) {
       this.apps = [...this.apps.filter((a) => a.view.name !== f.view.name), f];
+      const c = f.view.sign_in_client;
+      if (c?.service && !c.client_id) {
+        // Its sign-in lets in only registered apps (ADR 0076): the person's own client is asked for.
+        Object.assign(f.view, { state: "needs_client", problem: needsClientSentence(f.view.title, c) });
+        continue;
+      }
       if (f.view.kind === "sign_in") {
         url = f.view.sign_in_url = this.signInUrl(f.view.name, website);
         this.settle(f, 7000);
@@ -1945,6 +1957,25 @@ export class MockDaemon {
     } else this.settle(f, 1500, { problem });
     this.appsChanged(f.view.name, url);
     return { apps: [this.appView(f)], sign_in_url: url, problems: [] };
+  }
+  /** PUT /apps/{name}/sign-in-client (ADR 0076): the person's own client, then a sign-in with it. */
+  private setSignInClient(f: AppFixture, b: { client_id?: string | null; client_secret?: string | null; forget_secret?: boolean | null }): AppConnectResult {
+    if (f.view.kind !== "sign_in") throw new HttpError(422, "a client ID is for an app Ghost signs in to");
+    const id = (b.client_id ?? "").trim();
+    const secret = (b.client_secret ?? "").trim();
+    if (!id && secret) throw new HttpError(422, "a client secret goes with a client ID");
+    if (secret && b.forget_secret) throw new HttpError(422, "give a new client secret or forget the stored one, not both");
+    if (/\s/.test(id)) throw new HttpError(422, "a client ID has no spaces in it");
+    const was = f.view.sign_in_client ?? { client_id: null, has_secret: false, service: null, make_a_client: null, secret: "optional" as const };
+    // An empty secret keeps the stored one; only forget_secret takes it away (as the daemon).
+    const hasSecret = !id ? false : secret ? true : b.forget_secret ? false : was.has_secret;
+    f.view.sign_in_client = { ...was, client_id: id || null, has_secret: hasSecret };
+    if (!id && was.service) {
+      Object.assign(f.view, { state: "needs_client", problem: needsClientSentence(f.view.title, was), sign_in_url: null });
+      this.appsChanged(f.view.name);
+      return { apps: [this.appView(f)], sign_in_url: null, problems: [] };
+    }
+    return this.signIn(f);
   }
   /** PUT /permissions: the mode, whole lists, or one rule moved; only [permissions] is rewritten. */
   private updatePermissions(u: PermissionsUpdate): PermissionsView {
@@ -2085,12 +2116,13 @@ export class MockDaemon {
     if (method === "GET" && path === "/sources") return this.sourceList();
     if (method === "GET" && path === "/apps") return this.apps.map((a) => this.appView(a));
     if (method === "POST" && path === "/apps") return this.connect(b as AppConnect);
-    if ((r = m(/^\/apps\/([^/]+)(\/sign-in|\/limits)?$/))) {
+    if ((r = m(/^\/apps\/([^/]+)(\/sign-in-client|\/sign-in|\/limits)?$/))) {
       const name = decodeURIComponent(r[1]);
       const f = this.apps.find((a) => a.view.name === name);
       if (!f) throw new HttpError(404, `no app called '${name}'`);
       if (method === "GET" && !r[2]) return this.appView(f);
       if (method === "POST" && r[2] === "/sign-in") return this.signIn(f);
+      if (method === "PUT" && r[2] === "/sign-in-client") return this.setSignInClient(f, b as { client_id?: string | null; client_secret?: string | null });
       if (method === "PUT" && path.endsWith("/limits")) return this.setLimits(f, b);
       if (method === "DELETE" && !r[2]) return this.disconnect(f);
     }

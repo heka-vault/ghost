@@ -11,6 +11,7 @@ import { type FormEvent, useEffect, useId, useState } from "react";
 
 import { useDesign } from "../../design/context";
 import { Button, Dialog, Disclosure, Field, Input, Notice, SegmentedControl, Textarea, errorText, useLive, useToast } from "../../ui";
+import { navigate } from "../../app/router";
 import { Connected, connectOutcome, failedText } from "./ConnectDialog";
 import { sentence } from "./model";
 import { expectSignIn, openSignIn } from "./signin";
@@ -80,11 +81,16 @@ export function AddOwnDialog({ open, onClose, onConnected }: { open: boolean; on
       for (const a of r.apps) expectSignIn(a.name);
       onConnected();
       const names = r.apps.map((a) => a.title || a.name);
-      const { failed, connecting } = connectOutcome(r.apps);
+      const { failed, connecting, needsClient } = connectOutcome(r.apps);
       // What Ghost noticed about a paste that still connected (a key it moved, an entry it
       // left out): said with the result, never dropped.
       const notes = r.problems.length ? ` ${r.problems.map(sentence).join(" ")}` : "";
-      if (failed) {
+      if (needsClient) {
+        // Its page asks for the person's own client ID (ADR 0076).
+        toast({ title: `${needsClient.title} needs a client ID of your own`, description: needsClient.problem ? sentence(needsClient.problem) : undefined });
+        onClose();
+        navigate(`/apps/${needsClient.name}`);
+      } else if (failed) {
         setSaved(true);
         setError({ title: `Ghost couldn’t connect to ${failed.title || failed.name}`, text: failedText(failed), taken: false, failed: true });
       } else if (r.sign_in_url) {
