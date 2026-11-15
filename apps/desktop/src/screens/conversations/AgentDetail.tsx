@@ -71,10 +71,6 @@ const TURN_LIMIT = 200;
 const PERSONA_KEYS: DraftKey[] = ["name", "aliases", "job", "voice", "speed", "persona", "look"];
 const MEMORY_KEYS: DraftKey[] = ["memory", "notes"];
 
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-
-const times = (n: number) => (n === 1 ? "once" : n === 2 ? "twice" : `${n} times`);
-
 /** "persona, voice and wake phrases" */
 const sayList = (w: string[]) => (w.length <= 1 ? w.join("") : `${w.slice(0, -1).join(", ")} and ${w[w.length - 1]}`);
 
@@ -607,10 +603,7 @@ export function AgentDetail({ slug, manage = false }: { slug: string; manage?: b
     else if (detail.job) meta.push(detail.job);
     if (retired) meta.push(`retired ${relativeTime(retired)}`);
     if (!live) meta.push(detail.last_active_at ? `last used ${relativeTime(detail.last_active_at)}` : "not used yet");
-    if (detail.turn_count) {
-      meta.push(plural(detail.turn_count, "turn"));
-      meta.push(detail.compactions ? `compacted ${times(detail.compactions)}` : "never compacted");
-    }
+    // How many turns and compactions are its memory's facts: on Memory, not in the header.
   }
   // The page status is the agent's own state while it is live, in the sidebar's words
   // ("Waiting on your okay" in amber while a change waits here, else "Live · listening"), and
@@ -891,9 +884,7 @@ export function AgentDetail({ slug, manage = false }: { slug: string; manage?: b
                         <span className="conv-playing">Playing on your speakers…</span>
                       ) : (
                         <>
-                          {voice && voiceKind(voice)}
-                          <span className="t-3"> · </span>
-                          <span className="t-mono t-3">{heardId}</span>
+                          <span title={heardId}>{voice && voiceKind(voice)}</span>
                           {!draft.voice && !isGhost && <span className="t-3"> · Ghost’s</span>}
                         </>
                       )}

@@ -129,6 +129,8 @@ export function AgentsIndex() {
   const hired = working.filter((l) => !l.is_ghost);
   // With only Ghost, the empty state below the list carries the one call to action.
   const onlyGhost = agents != null && hired.length === 0;
+  // The way to reach one, said with a real agent's name: never an agent that isn't there.
+  const example = hired[0] ? agentName(hired[0].slug, hired[0].name).toLowerCase() : null;
 
   const switchTo = async (l: ConversationView) => {
     const name = agentName(l.slug, l.name);
@@ -220,7 +222,8 @@ export function AgentsIndex() {
       title="Agents"
       description={
         <>
-          Who works for you, what each is doing and what it does next. Say {quoted("transfer me to brand")} to talk to one.
+          Who works for you, what each is doing and what it does next.
+          {example && <> Say {quoted(`transfer me to ${example}`)} in a session to talk to one.</>}
         </>
       }
       actions={
@@ -286,7 +289,7 @@ export function AgentsIndex() {
             <EmptyState
               icon={<MessagesSquare />}
               title="Hire an agent for each part of your work"
-              description={<>Brand design, the Q3 audit, a morning standup: each agent keeps its own persona, job and memory, and works with Ghost’s rules, skills and apps. Hire one here, then say {quoted("transfer me to brand")} in any session.</>}
+              description={<>Brand design, the Q3 audit, a morning standup: each agent keeps its own persona, job and memory, and works with Ghost’s rules, skills and apps. Hire one here, then say “transfer me to” and its name in any session.</>}
               actions={
                 <Button variant="primary" leadingIcon={<Plus />} disabled={!online} onClick={() => setCreating(true)}>
                   New agent
@@ -294,11 +297,10 @@ export function AgentsIndex() {
               }
             />
           )}
-          {hired.length > 0 && (
+          {/* Switch is on a row only in a session; out of one there is nothing here to explain. */}
+          {hired.length > 0 && inSession && (
             <p className="conv-foot t-small t-3">
-              {inSession
-                ? `Ghost is with ${liveSlug === "ghost" ? "Ghost" : agentName(liveSlug, sorted.find((l) => l.slug === liveSlug)?.name)}. Switch transfers the session; Ghost says so out loud.`
-                : "Switch works while a session is live. Wake Ghost, then switch here or say it."}
+              {`Ghost is with ${liveSlug === "ghost" ? "Ghost" : agentName(liveSlug, sorted.find((l) => l.slug === liveSlug)?.name)}. Switch on a row transfers the session; Ghost says so out loud.`}
             </p>
           )}
           {retiredAgents.length > 0 && (

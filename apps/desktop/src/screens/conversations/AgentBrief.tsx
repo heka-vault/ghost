@@ -13,12 +13,13 @@ import { useEffect, useState } from "react";
 import { Link } from "../../app/router";
 import { useToday } from "../../app/today";
 import { Button, cx, formatTime, relativeTime, useLive } from "../../ui";
-import { clock, type Moment } from "../today/model";
+import { clock } from "../today/model";
+import { rowSentence } from "../today/Timeline";
+import { appWords } from "../../ui/always";
 import { bytes, count, reachSentence } from "../today/telemetry";
 import { whenWords } from "../watching/model";
 import { briefOf } from "./brief";
 
-const VERB: Record<Moment["kind"], string> = { change: "changed", run: "ran", watch: "found", question: "asked", answer: "was answered", note: "noted" };
 /** Its day as shown here before “and N more”. */
 const TODAY_SHOWN = 6;
 
@@ -56,8 +57,8 @@ export function AgentBrief({ slug, name, detail, voiceTitle, onPersona, onMemory
               </span>
             </p>
             {b.touching && (
-              <p className="conv-brief__touch">
-                now <code>{b.touching.app}.{b.touching.tool}</code>
+              <p className="conv-brief__touch" title={`${b.touching.app}.${b.touching.tool}`}>
+                now in {appWords(b.touching.app)}
               </p>
             )}
           </>
@@ -66,6 +67,8 @@ export function AgentBrief({ slug, name, detail, voiceTitle, onPersona, onMemory
         )}
       </div>
 
+      {/* The figures only once there is something to count: three zeros say less than the sentence. */}
+      {b.reach.calls > 0 && (
       <dl className="conv-brief__figures">
         <div>
           <dt>items read today</dt>
@@ -84,7 +87,8 @@ export function AgentBrief({ slug, name, detail, voiceTitle, onPersona, onMemory
           <dd className="t-num">{count(b.today.length)}</dd>
         </div>
       </dl>
-      <p className="conv-brief__sentence">{b.reach.calls ? `${reachSentence(b.reach)} today${b.reach.apps.length ? `: ${b.reach.apps.join(", ")}` : ""}.` : "It hasn’t read anything today."}</p>
+      )}
+      <p className="conv-brief__sentence">{b.reach.calls ? `${reachSentence(b.reach)} today${b.reach.apps.length ? `: ${b.reach.apps.map(appWords).join(", ")}` : ""}.` : b.today.length ? `It hasn’t read anything today; ${b.today.length === 1 ? "one thing" : `${b.today.length} things`} below.` : "It hasn’t read anything today."}</p>
 
       <div className="conv-brief__grid">
         <section className="conv-brief__part" aria-labelledby={`brief-day-${slug}`}>
@@ -93,15 +97,19 @@ export function AgentBrief({ slug, name, detail, voiceTitle, onPersona, onMemory
           </h2>
           {b.today.length ? (
             <ol className="conv-brief__day">
-              {b.today.slice(0, TODAY_SHOWN).map((m) => (
-                <li key={m.id} className={cx("conv-brief__moment", `is-${m.kind}`, `tone-${m.tone}`)}>
-                  <span className="conv-brief__time">{formatTime(m.at)}</span>
-                  <span className="conv-brief__mark" aria-hidden />
-                  <span className="conv-brief__words">
-                    <span className="conv-brief__verb">{m.tone === "failed" ? "couldn’t finish" : m.tone === "running" ? "is running" : VERB[m.kind]}</span> <span data-user-content>{m.title}</span>
-                  </span>
-                </li>
-              ))}
+              {b.today.slice(0, TODAY_SHOWN).map((m) => {
+                // The timeline's own sentence, so a row reads the same here and on Today.
+                const s = rowSentence(m, name);
+                return (
+                  <li key={m.id} className={cx("conv-brief__moment", `is-${m.kind}`, `tone-${m.tone}`)} title={m.mono ?? undefined}>
+                    <span className="conv-brief__time">{formatTime(m.at)}</span>
+                    <span className="conv-brief__mark" aria-hidden />
+                    <span className="conv-brief__words">
+                      {s.verb && <span className="conv-brief__verb">{s.verb}</span>} <span data-user-content>{s.what}</span>
+                    </span>
+                  </li>
+                );
+              })}
             </ol>
           ) : (
             <p className="conv-brief__empty">Nothing yet today. What it does on its own, and what it changes, shows here.</p>
