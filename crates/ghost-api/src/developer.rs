@@ -199,6 +199,13 @@ pub const SWITCHES: &[Switch] = &[
         "0.2",
         3.0,
     ),
+    choice(
+        "GHOST_ROOM_GATE",
+        "Hold back the room",
+        "In a desk session, Ghost holds back speech far under your own level unless it says Ghost's name (ADR 0072); auto decides by the microphone (on, except on the tested array).",
+        "auto",
+        &["auto", "on", "off"],
+    ),
     flag(
         "GHOST_ACK",
         "Acknowledgments",

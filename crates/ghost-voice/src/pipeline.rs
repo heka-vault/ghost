@@ -434,6 +434,9 @@ pub struct SessionHooks {
     /// Each segment's read as numbers, level and word count (`crate::stt::OnRead`): the
     /// microphone's health (ADR 0064). Never the words or the audio.
     pub on_read: Option<crate::stt::OnRead>,
+    /// Told once a session that the room is too loud to tell the person from it
+    /// (`crate::stt::OnTooLoud`, ADR 0072): the microphone's health note says so.
+    pub on_too_loud: Option<crate::stt::OnTooLoud>,
 }
 
 /// How a session opens.
@@ -673,6 +676,7 @@ pub fn build_session(p: SessionParams) -> GhostSession {
     let on_said = p.hooks.on_said;
     let on_result = p.hooks.on_result;
     let on_read = p.hooks.on_read;
+    let on_too_loud = p.hooks.on_too_loud;
 
     let runtime = p.conversations.map(|convs| {
         sources.push(ghost_core::conversations::conversations_source(&convs));
@@ -925,6 +929,19 @@ pub fn build_session(p: SessionParams) -> GhostSession {
             )),
         ));
     }
+    let wake_phrases: Vec<String> = p
+        .wake_phrases
+        .unwrap_or_else(|| DEFAULT_WAKE_PHRASES.iter().map(|s| s.to_string()).collect());
+    // The person or the room (ADR 0072): where the daemon turned it on for this microphone.
+    let room = (settings.room_gate == Some(true)).then(|| {
+        crate::stt::RoomGuard::new(
+            settings.room(),
+            wake_phrases.clone(),
+            p.wake_fuzzy,
+            on_too_loud,
+        )
+        .with_person(settings.room_person_db)
+    });
     let interim = if settings.barge_in_min_words > 0 {
         settings.barge_in_interim_secs
     } else {
@@ -944,18 +961,12 @@ pub fn build_session(p: SessionParams) -> GhostSession {
             .with_speaking(speaking.clone())
             .with_early_read(settings.stt_early_read)
             .with_early_read_after(settings.stt_early_read_after_secs)
-            .with_on_read(on_read),
+            .with_on_read(on_read)
+            .with_room(room),
         ),
     ));
-    let hold_gate = HoldGate::new(
-        on_resume,
-        Some(
-            p.wake_phrases
-                .unwrap_or_else(|| DEFAULT_WAKE_PHRASES.iter().map(|s| s.to_string()).collect()),
-        ),
-        p.wake_fuzzy,
-    )
-    .with_state(hold_state.clone());
+    let hold_gate =
+        HoldGate::new(on_resume, Some(wake_phrases), p.wake_fuzzy).with_state(hold_state.clone());
     stages.push((None, Box::new(hold_gate))); // on hold, nothing below hears the room (ADR 0021)
     stages.push((None, Box::new(SharedEcho(echo.clone()))));
     stages.push((

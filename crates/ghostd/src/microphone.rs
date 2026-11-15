@@ -326,6 +326,16 @@ impl Plan {
     pub fn echo_warmup(&self) -> bool {
         self.session.is_canceller() || !matches!(self.case, Case::OnChip | Case::Headset)
     }
+
+    /// Whether a desk session holds back speech far under the person's own level (ADR
+    /// 0072, `ghost_voice::room`). Off on an array whose chip cancels Ghost's own output
+    /// (the reSpeaker XVF3800 Ghost is tested with): it aims at the talker, its own gain
+    /// control sits between the person and Ghost, and it must not change. On everywhere
+    /// else: a laptop's built-in microphone, a webcam, a headset, or a path Ghost could not
+    /// read, where the room comes in nearly as loud as the person.
+    pub fn room_gate(&self) -> bool {
+        self.case != Case::OnChip
+    }
 }
 
 /// The case's own choice of input, given the hardware.
@@ -657,6 +667,9 @@ pub const DEAF_READS: usize = 3;
 pub const DEAF_SPAN: Duration = Duration::from_secs(20 * 60);
 /// An automatic repair at most this often.
 pub const AUTO_REPAIR_EVERY: Duration = Duration::from_secs(60 * 60);
+/// A room too loud for the microphone stays a note this long after the session that said
+/// so.
+pub const NOISY_HOLD: Duration = Duration::from_secs(30 * 60);
 
 /// What is wrong with the input.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -666,6 +679,10 @@ pub enum Problem {
     Dropping { zero_share: f64 },
     /// Loud stretches read as nothing, again and again.
     Deaf { reads: usize },
+    /// The room is too loud for this microphone: a session let the room's speech go again
+    /// and again, or the room was as loud as the person (ADR 0072). Only where the room
+    /// gate runs, so never on the tested array.
+    Noisy,
 }
 
 /// The input's health over time, from the meter and the wake checks.
@@ -677,6 +694,7 @@ pub struct Health {
     deaf: VecDeque<Instant>,
     last_repair: Option<Instant>,
     pub repairs: u64,
+    noisy: Option<Instant>,
 }
 
 impl Health {
@@ -717,6 +735,11 @@ impl Health {
         }
     }
 
+    /// A session found the room too loud to tell the person from it (ADR 0072).
+    pub fn noisy(&mut self, now: Instant) {
+        self.noisy = Some(now);
+    }
+
     pub fn problem(&self, now: Instant) -> Option<Problem> {
         if let Some(zero_share) = self.dropping {
             return Some(Problem::Dropping { zero_share });
@@ -726,7 +749,12 @@ impl Health {
             .iter()
             .filter(|t| now.duration_since(**t) <= DEAF_SPAN)
             .count();
-        (recent >= DEAF_READS).then_some(Problem::Deaf { reads: recent })
+        if recent >= DEAF_READS {
+            return Some(Problem::Deaf { reads: recent });
+        }
+        self.noisy
+            .filter(|t| now.saturating_duration_since(*t) <= NOISY_HOLD)
+            .map(|_| Problem::Noisy)
     }
 
     /// After a repair: forget the deafness (the stream is new); a chopped link is the
@@ -775,6 +803,14 @@ pub fn note(problem: &Problem, plan: &Plan) -> String {
                 "Ghost has stopped hearing well: {reads} loud stretches in the last 20 minutes \
                  read as no words. {through}{better}"
             )
+        }
+        Problem::Noisy => {
+            let _ = plan;
+            "The room is too loud for this microphone: Ghost kept hearing people and sound \
+             around you as well as you, and set what came from across the room aside. A \
+             headset, or the microphone Ghost is tested with (the reSpeaker XVF3800 array, \
+             with the speakers on its output), would help."
+                .to_string()
         }
     }
 }
@@ -1323,6 +1359,20 @@ mod tests {
     }
 
     #[test]
+    fn the_room_gate_is_left_off_on_the_tested_array_and_on_everywhere_else() {
+        // ADR 0072: the array aims at the talker and cancels its own output, with its own
+        // gain control between Ghost and the room: a level of the person's means less there,
+        // and it is the setup Ghost is tested with. Leave it exactly as it was.
+        assert!(!plan(None, None, None, Some(&array_desk(false))).room_gate());
+        assert!(!plan(Some("ghost.mic"), None, None, Some(&array_desk(true))).room_gate());
+        assert!(plan(None, None, None, Some(&laptop(true))).room_gate());
+        assert!(plan(None, None, None, Some(&laptop(false))).room_gate());
+        assert!(plan(None, None, None, Some(&webcam())).room_gate());
+        assert!(plan(None, None, None, Some(&headset())).room_gate());
+        assert!(plan(None, None, None, None).room_gate()); // unknown: a laptop, most likely
+    }
+
+    #[test]
     fn a_headset_a_puck_and_a_webcam_each_get_their_case() {
         let p = plan(None, None, None, Some(&headset()));
         assert_eq!(p.case, Case::Headset);
@@ -1574,6 +1624,43 @@ mod tests {
         assert!(!deaf.contains("canceller"));
         let drop = note(&Problem::Dropping { zero_share: 0.6 }, &direct);
         assert!(drop.contains("60%") && drop.contains("not a hub"));
+    }
+
+    #[test]
+    fn a_room_too_loud_for_the_microphone_is_a_note_for_half_an_hour() {
+        let t0 = Instant::now();
+        let mut h = Health::default();
+        assert_eq!(h.problem(t0), None);
+        h.noisy(t0);
+        assert_eq!(
+            h.problem(t0 + Duration::from_secs(60)),
+            Some(Problem::Noisy)
+        );
+        assert_eq!(h.problem(t0 + NOISY_HOLD + Duration::from_secs(1)), None);
+        // Deafness says more, and a repair can help it; a loud room it can't.
+        h.noisy(t0);
+        for i in 0..DEAF_READS {
+            h.check(-20.0, 0, true, t0 + Duration::from_secs(i as u64));
+        }
+        assert!(matches!(
+            h.problem(t0 + Duration::from_secs(10)),
+            Some(Problem::Deaf { .. })
+        ));
+        let mut only_noisy = Health::default();
+        only_noisy.noisy(t0);
+        assert!(!only_noisy.auto_repair_due(t0));
+    }
+
+    #[test]
+    fn the_loud_room_note_says_so_once_in_plain_words_and_what_would_help() {
+        let laptop = plan(None, None, None, Some(&laptop(false)));
+        let n = note(&Problem::Noisy, &laptop);
+        assert!(n.contains("too loud"), "{n}");
+        assert!(n.contains("headset"), "{n}");
+        assert!(n.contains("reSpeaker XVF3800"), "{n}");
+        for word in ["MCP", "server", "dB", "VAD", "gate"] {
+            assert!(!n.contains(word), "{word} in {n}");
+        }
     }
 
     #[test]

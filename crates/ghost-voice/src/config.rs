@@ -164,6 +164,21 @@ pub struct VoiceSettings {
     /// (`ghostd::microphone::Plan::echo_warmup`); `GHOST_ECHO_WARMUP` overrides it for
     /// debugging. Unset and unfilled (the phone, a test): on.
     pub echo_warmup: Option<bool>,
+    /// Whether a desk session holds back speech far under the person's own level, unless it
+    /// calls Ghost by name (ADR 0072, `crate::room`). A property of the microphone, which
+    /// the daemon fills (`ghostd::microphone::Plan::room_gate`: on, except on the tested
+    /// array, which aims at the talker and cancels its own output); `GHOST_ROOM_GATE`
+    /// overrides it. Unset and unfilled (the phone, a test, the harness): off.
+    pub room_gate: Option<bool>,
+    /// `GHOST_ROOM_MARGIN_DB`, `GHOST_ROOM_LATE_MARGIN_DB`, `GHOST_ROOM_WINDOW_SECS`: how far
+    /// under the person's level is the room, right after Ghost spoke and once the
+    /// follow-up window has passed, and how long that window is.
+    pub room_margin_db: f64,
+    pub room_late_margin_db: f64,
+    pub room_window_secs: f64,
+    /// The person's level from the segment that woke Ghost, when the wake heard the session's
+    /// input (`ghostd`, ADR 0072); never from the environment.
+    pub room_person_db: Option<f64>,
     pub turn_grace_secs: f64,
     /// `GHOST_TURN_CONFIDENT_GRACE_SECS`, `GHOST_TURN_CONFIDENT_PROB` (ADR 0049): the grace
     /// when Smart Turn is at least this sure and the words end a sentence. A grace at or
@@ -425,6 +440,11 @@ impl VoiceSettings {
             barge_in_interim_secs: f64_or("GHOST_BARGE_IN_INTERIM_SECS", 0.3)?,
             echo_window_secs: f64_or("GHOST_ECHO_WINDOW_SECS", 3.0)?,
             echo_warmup: text("GHOST_ECHO_WARMUP").and_then(|v| parse_bool(&v)),
+            room_gate: text("GHOST_ROOM_GATE").and_then(|v| parse_bool(&v)),
+            room_margin_db: f64_or("GHOST_ROOM_MARGIN_DB", 8.0)?,
+            room_late_margin_db: f64_or("GHOST_ROOM_LATE_MARGIN_DB", 6.0)?,
+            room_window_secs: f64_or("GHOST_ROOM_WINDOW_SECS", 8.0)?,
+            room_person_db: None,
             turn_grace_secs: f64_or("GHOST_TURN_GRACE_SECS", 1.2)?,
             turn_confident_grace_secs: f64_or("GHOST_TURN_CONFIDENT_GRACE_SECS", 0.35)?,
             turn_confident_prob: f64_or("GHOST_TURN_CONFIDENT_PROB", 0.9)? as f32,
@@ -578,6 +598,15 @@ impl VoiceSettings {
         ghost_infer::ParakeetPaths::huggingface_cache().unwrap_or(cached)
     }
 
+    /// The person-or-room gate's settings (ADR 0072).
+    pub fn room(&self) -> crate::room::RoomSettings {
+        crate::room::RoomSettings {
+            margin_db: self.room_margin_db,
+            late_margin_db: self.room_late_margin_db,
+            window_secs: self.room_window_secs,
+        }
+    }
+
     pub fn vad_params(&self) -> ghost_infer::VadParams {
         ghost_infer::VadParams {
             confidence: self.vad_confidence,
@@ -688,6 +717,20 @@ mod tests {
         assert!(forced.prerender());
         let off = VoiceSettings::from_vars(vars(&[("GHOST_TTS_PRERENDER", "false")])).unwrap();
         assert!(!off.prerender());
+    }
+
+    #[test]
+    fn the_room_gate_is_the_microphones_unless_overridden() {
+        let unset = VoiceSettings::from_vars(vars(&[])).unwrap();
+        assert_eq!(unset.room_gate, None);
+        assert_eq!(unset.room(), crate::room::RoomSettings::default());
+        let on = VoiceSettings::from_vars(vars(&[
+            ("GHOST_ROOM_GATE", "on"),
+            ("GHOST_ROOM_MARGIN_DB", "14"),
+        ]))
+        .unwrap();
+        assert_eq!(on.room_gate, Some(true));
+        assert_eq!(on.room().margin_db, 14.0);
     }
 
     #[test]

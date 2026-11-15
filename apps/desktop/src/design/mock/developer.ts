@@ -28,6 +28,7 @@ function switches(): SwitchView[] {
     sw("GHOST_FIRST_SOUND_SECS", "Wait before “One sec.”", "Seconds after a turn's reply begins before Ghost says “One sec.” when the model has written nothing; unset chooses it from the connection's measured first word, 0 never says it.", "number", "", { max: 10 }),
     sw("GHOST_TURN_GRACE_SECS", "Turn grace", "Seconds Ghost waits after you stop before it takes your turn as finished.", "number", "1.2", { value: "0.9", source: "environment" }),
     sw("GHOST_BARGE_IN_MIN_WORDS", "Words to cut Ghost off", "How many words of yours stop Ghost while it speaks.", "number", "2", { max: 10 }),
+    sw("GHOST_ROOM_GATE", "Hold back the room", "In a desk session, Ghost holds back speech far under your own level unless it says Ghost's name (ADR 0072); auto decides by the microphone (on, except on the tested array).", "choice", "auto", { choices: ["auto", "on", "off"] }),
     sw("GHOST_ACK", "Acknowledgments", "Ghost says a short acknowledgment before a slow call.", "flag", "on"),
     sw("GHOST_LATENCY", "Timing records", "Ghost keeps each turn's timings (numbers only) in latency.jsonl, for ghostd latency and the diagnostic report.", "flag", "on"),
   ];

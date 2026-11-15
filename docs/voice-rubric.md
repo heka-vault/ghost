@@ -136,6 +136,23 @@ while you are not talking (music residue opening segments). Wakes: `detector hea
 (`detector hit not confirmed: "..."`): under music it writes the phrase as "a ghost", "it
 goes", "there it goes" (#13).
 
+## Part I: a noisy room (ADR 0072)
+
+Two people talk across the room (or a podcast plays from a speaker a few metres away) for
+the whole part; the operator stays at the desk at their usual level. On the reSpeaker
+XVF3800 the room gate is off by design: run I1–I4 to see that nothing changed. On any other
+microphone (`ghostd check` names the case) it is on, and the debug log shows `room:` lines.
+
+| | Do | Pass |
+|---|---|---|
+| I1 | "Hey Ghost, what needs me?", listen to the answer, say nothing more | The session ends 45 s after Ghost's last words. Fail: Ghost answers the room ("Sorry, I didn't catch that"), or the session is still open after a minute. Look for `room: let go a 1.2s segment at -4x dBFS` while the room talks. |
+| I2 | A question, then a follow-up a second after the answer | Both answered, the follow-up as its own turn, no room words in it (the screen's bubble, F1). |
+| I3 | While Ghost answers: "Stop." | It stops, as in E1. And while it answers, nobody near the desk speaks: Ghost is never cut off by the room. |
+| I4 | From across the room, quietly: "Ghost, what time is it?" | Answered (`room: a quiet segment calls Ghost by name`). The same words without the name, across the room: not answered. |
+| I5 | Turn the room up until Ghost can't tell (people talking near the laptop) | Settings › Sound and the waiting list show once that the room is too loud for this microphone and what would help. Not on the XVF3800. |
+
+Five minutes. Run it with `GHOST_DEBUG_AUDIO=1` in a terminal, never in a committed file.
+
 ## Reading the results
 
 The checker prints, per part, the lines above with counts, and for part D one line per

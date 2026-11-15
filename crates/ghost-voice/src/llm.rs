@@ -1682,7 +1682,7 @@ impl ModelPort for ScriptedModel {
 /// `done` runs when the last event has been taken: a stream dropped before that was a
 /// speculation that never became the answer. With `rate`, each event after the first
 /// waits the time its tokens take to write.
-fn async_stream_words(
+pub(crate) fn async_stream_words(
     words: Vec<String>,
     calls: Vec<ToolCall>,
     ttfb: std::time::Duration,

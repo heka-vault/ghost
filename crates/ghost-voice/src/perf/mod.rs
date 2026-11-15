@@ -20,6 +20,7 @@ pub mod micro;
 pub mod providers;
 pub mod realtime;
 pub mod report;
+pub mod room;
 pub mod scenarios;
 pub mod shaped;
 pub mod turns;

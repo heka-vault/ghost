@@ -1470,6 +1470,7 @@ struct AggregatorSink {
     turns: Arc<TurnControl>,
     /// The store's and the gate's record of the turn (`crate::tap::TurnRecord`).
     record: Mutex<OnTurnRecord>,
+    idle: Arc<IdleClock>,
 }
 
 impl AggregatorSink {
@@ -1504,6 +1505,9 @@ impl TurnStopSink for AggregatorSink {
             // nothing would stop.
             debug::audio(|| "turn: closed with no words; nothing to answer".into());
             out.push(Frame::ThinkingStop).await;
+            // Nothing to answer, so no reply will start the clock again: it goes on from
+            // where it was, and sound that came to nothing does not keep the session open.
+            self.idle.resume();
             return;
         }
         self.closed(&text).await;
@@ -1525,6 +1529,8 @@ impl TurnStopSink for AggregatorSink {
         out.push(Frame::UserStopped).await;
         if !text.trim().is_empty() {
             self.closed(&text).await;
+        } else if !confirms_speculation {
+            self.idle.resume();
         }
         if confirms_speculation {
             self.turns.answering(&text);
@@ -1713,6 +1719,83 @@ async fn read_whole(model: &SharedRecognizer, audio: Vec<i16>) -> Option<String>
 
 pub type OnIdle = Arc<dyn Fn() -> BoxFuture<'static, ()> + Send + Sync>;
 
+/// The session's idle clock: it ends the session once nothing has happened for the
+/// timeout. It runs from when Ghost last stopped speaking (or the session started); a turn
+/// stops it while the person talks; a turn that closes with words is answered, and the
+/// answer's end starts it afresh. A turn that closes with no words (sound the VAD took for
+/// speech and Parakeet read as nothing: a noisy room) resumes it from where it was, so the
+/// room never keeps a session open (2026-11-14).
+pub struct IdleClock {
+    inner: Mutex<IdleInner>,
+}
+
+struct IdleInner {
+    timeout: Option<Duration>,
+    on_idle: Option<OnIdle>,
+    held: Arc<dyn Fn() -> bool + Send + Sync>,
+    speaking: Speaking,
+    turns: Option<Arc<TurnControl>>,
+    task: Option<JoinHandle<()>>,
+    /// When the clock last started from zero.
+    since: tokio::time::Instant,
+}
+
+impl IdleClock {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            inner: Mutex::new(IdleInner {
+                timeout: None,
+                on_idle: None,
+                held: Arc::new(|| false),
+                speaking: Speaking::new(),
+                turns: None,
+                task: None,
+                since: tokio::time::Instant::now(),
+            }),
+        })
+    }
+
+    /// Start from zero now.
+    pub fn arm(&self) {
+        let mut i = self.inner.lock().unwrap();
+        i.since = tokio::time::Instant::now();
+        Self::schedule(&mut i);
+    }
+
+    /// Go on from when it last started from zero.
+    pub fn resume(&self) {
+        Self::schedule(&mut self.inner.lock().unwrap());
+    }
+
+    pub fn disarm(&self) {
+        if let Some(t) = self.inner.lock().unwrap().task.take() {
+            t.abort();
+        }
+    }
+
+    fn schedule(i: &mut IdleInner) {
+        let (Some(timeout), Some(on_idle)) = (i.timeout, i.on_idle.clone()) else {
+            return;
+        };
+        if let Some(t) = i.task.take() {
+            t.abort();
+        }
+        let held = i.held.clone();
+        let speaking = i.speaking.clone();
+        let turns = i.turns.clone();
+        let at = i.since + timeout;
+        i.task = Some(tokio::spawn(async move {
+            tokio::time::sleep_until(at).await;
+            // Still talking (the BotStarted that disarms this is behind the TTS stage):
+            // the BotStopped that follows arms it again. Still waiting on an app (a call
+            // may take minutes, ADR 0046): the reply that follows speaks, and arms it too.
+            if !held() && !speaking.is_on() && !turns.is_some_and(|t| t.calling()) {
+                on_idle().await;
+            }
+        }));
+    }
+}
+
 /// Pipecat's user aggregator with Ghost's strategies: the VAD's segments, the barge-in
 /// rule, the patient stop, the turn's pieces, and the model run.
 pub struct UserAggregator {
@@ -1723,10 +1806,7 @@ pub struct UserAggregator {
     turns: Arc<TurnControl>,
     bot_speaking: bool,
     speaking: Speaking,
-    idle_timeout: Option<Duration>,
-    on_idle: Option<OnIdle>,
-    idle: Option<JoinHandle<()>>,
-    held: Arc<dyn Fn() -> bool + Send + Sync>,
+    idle: Arc<IdleClock>,
     /// The VAD's state, and the last stop's `stop_secs`: a turn a final transcript opens
     /// after the VAD stopped (a barge-in on a final) is judged on the spot.
     vad_on: bool,
@@ -1752,11 +1832,14 @@ impl UserAggregator {
         turns: Arc<TurnControl>,
     ) -> Self {
         let state = Arc::new(Mutex::new(Aggregation::default()));
+        let idle = IdleClock::new();
+        idle.inner.lock().unwrap().turns = Some(turns.clone());
         let sink = Arc::new(AggregatorSink {
             out: Mutex::new(None),
             state: state.clone(),
             turns: turns.clone(),
             record: Mutex::new(no_record()),
+            idle: idle.clone(),
         });
         let mut stop = PatientTurnStopStrategy::new(analyzer, grace_secs, speculate, sink.clone());
         let s = state.clone();
@@ -1769,10 +1852,7 @@ impl UserAggregator {
             turns,
             bot_speaking: false,
             speaking: Speaking::new(),
-            idle_timeout: None,
-            on_idle: None,
-            idle: None,
-            held: Arc::new(|| false),
+            idle,
             vad_on: false,
             vad_stop_secs: 0.2,
             tape: TurnTape::default(),
@@ -1821,21 +1901,25 @@ impl UserAggregator {
     pub fn with_speaking(mut self, speaking: Speaking) -> Self {
         self.start.set_speaking(speaking.clone());
         self.stop.set_speaking(speaking.clone());
+        self.idle.inner.lock().unwrap().speaking = speaking.clone();
         self.speaking = speaking;
         self
     }
 
     pub fn with_idle(
-        mut self,
+        self,
         timeout_secs: f64,
         on_idle: OnIdle,
         held: Arc<dyn Fn() -> bool + Send + Sync>,
     ) -> Self {
-        if timeout_secs > 0.0 {
-            self.idle_timeout = Some(Duration::from_secs_f64(timeout_secs));
-            self.on_idle = Some(on_idle);
+        {
+            let mut i = self.idle.inner.lock().unwrap();
+            if timeout_secs > 0.0 {
+                i.timeout = Some(Duration::from_secs_f64(timeout_secs));
+                i.on_idle = Some(on_idle);
+            }
+            i.held = held;
         }
-        self.held = held;
         self
     }
 
@@ -1849,30 +1933,11 @@ impl UserAggregator {
     }
 
     fn arm_idle(&mut self) {
-        let (Some(timeout), Some(on_idle)) = (self.idle_timeout, self.on_idle.clone()) else {
-            return;
-        };
-        if let Some(t) = self.idle.take() {
-            t.abort();
-        }
-        let held = self.held.clone();
-        let speaking = self.speaking.clone();
-        let turns = self.turns.clone();
-        self.idle = Some(tokio::spawn(async move {
-            tokio::time::sleep(timeout).await;
-            // Still talking (the BotStarted that disarms this is behind the TTS stage):
-            // the BotStopped that follows arms it again. Still waiting on an app (a call
-            // may take minutes, ADR 0046): the reply that follows speaks, and arms it too.
-            if !held() && !speaking.is_on() && !turns.calling() {
-                on_idle().await;
-            }
-        }));
+        self.idle.arm();
     }
 
     fn disarm_idle(&mut self) {
-        if let Some(t) = self.idle.take() {
-            t.abort();
-        }
+        self.idle.disarm();
     }
 
     async fn turn_started(&mut self, out: &Out) {
@@ -3063,6 +3128,97 @@ mod tests {
         assert!(Arc::ptr_eq(fork.model(), turn.model()));
         assert_eq!(fork.buffered(), 0);
         assert!(!fork.speech_triggered());
+    }
+
+    // --- the session's idle clock ------------------------------------------------------
+
+    /// An aggregator whose idle timeout counts its firings.
+    fn idling(timeout: f64) -> (UserAggregator, Arc<Mutex<usize>>) {
+        let fired = Arc::new(Mutex::new(0usize));
+        let f = fired.clone();
+        let on_idle: OnIdle = Arc::new(move || {
+            let f = f.clone();
+            Box::pin(async move {
+                *f.lock().unwrap() += 1;
+            })
+        });
+        let agg = UserAggregator::new(
+            0,
+            None,
+            0.1,
+            false,
+            TurnControl::new(CancellationToken::new()),
+        )
+        .with_idle(timeout, on_idle, Arc::new(|| false));
+        (agg, fired)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_a_turn_that_closed_with_no_words_lets_the_session_end() {
+        // A noisy room, 2026-11-14: sound the VAD took for speech and Parakeet read as
+        // nothing opened a turn, which stopped the idle clock; the turn closed with nothing
+        // to answer, so no reply came to start the clock again, and the session never ended.
+        let (mut agg, fired) = idling(5.0);
+        let (out, _rx) = Out::capture();
+        agg.started(&out).await;
+        agg.process(Frame::BotStarted, Direction::Down, &out).await;
+        agg.process(Frame::BotStopped, Direction::Down, &out).await;
+        sleep(1.0).await;
+        agg.process(vad_start(), Direction::Down, &out).await;
+        agg.process(room(0.6), Direction::Down, &out).await;
+        agg.process(vad_stop(), Direction::Down, &out).await;
+        sleep(10.0).await;
+        assert_eq!(*fired.lock().unwrap(), 1, "the session ended");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_a_turn_that_closed_with_no_words_does_not_extend_the_session() {
+        let (mut agg, fired) = idling(5.0);
+        let (out, _rx) = Out::capture();
+        agg.started(&out).await;
+        agg.process(Frame::BotStarted, Direction::Down, &out).await;
+        agg.process(Frame::BotStopped, Direction::Down, &out).await;
+        // The room, again and again, never in words.
+        for _ in 0..3 {
+            sleep(1.0).await;
+            agg.process(vad_start(), Direction::Down, &out).await;
+            agg.process(room(0.4), Direction::Down, &out).await;
+            agg.process(vad_stop(), Direction::Down, &out).await;
+        }
+        // The last sound was 3 s after Ghost stopped; 5.5 s after it stopped the session
+        // has ended, where a clock started again by that sound would run to 8 s.
+        sleep(2.5).await;
+        assert_eq!(
+            *fired.lock().unwrap(),
+            1,
+            "ended five seconds after Ghost stopped, not after the room's last sound"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_a_turn_with_words_restarts_the_clock_when_the_reply_ends() {
+        let (mut agg, fired) = idling(5.0);
+        let (out, _rx) = Out::capture();
+        agg.started(&out).await;
+        agg.process(Frame::BotStopped, Direction::Down, &out).await;
+        sleep(4.0).await;
+        agg.process(vad_start(), Direction::Down, &out).await;
+        agg.process(room(0.6), Direction::Down, &out).await;
+        agg.process(vad_stop(), Direction::Down, &out).await;
+        agg.process(said("what about the other one"), Direction::Down, &out)
+            .await;
+        sleep(0.5).await;
+        agg.process(Frame::BotStarted, Direction::Down, &out).await;
+        sleep(2.0).await;
+        agg.process(Frame::BotStopped, Direction::Down, &out).await;
+        sleep(4.0).await;
+        assert_eq!(
+            *fired.lock().unwrap(),
+            0,
+            "the person spoke: a fresh five seconds"
+        );
+        sleep(1.5).await;
+        assert_eq!(*fired.lock().unwrap(), 1);
     }
 
     // --- the aggregator ------------------------------------------------------------

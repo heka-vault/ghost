@@ -24,6 +24,14 @@
 //! the frames it makes are the same, `VadStarted` and `VadStopped`, and every stage below
 //! sees them in order with the audio. Transcripts are logged only under
 //! `GHOST_DEBUG_AUDIO` (`debug`).
+//!
+//! In a desk session on a microphone that is not the tested array (ADR 0072,
+//! `with_room`), a segment far under the person's own level is held here: no `VadStarted`
+//! goes on for it, no interim, no early read. If it grows to the person's level it opens
+//! late; if it ends held it is read once and goes on whole only when it begins with Ghost's
+//! name; otherwise it is let go where it was heard, its words never leaving this stage. The
+//! person's own segment ends on its level too when the room goes on under it
+//! (`room::LevelStop`), so the turn closes when the person stops, not when the room does.
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -37,7 +45,128 @@ use tracing::warn;
 
 use crate::debug;
 use crate::frames::{Direction, Frame, Metric, Out, Stage};
+use crate::room::{Judgement, LevelStop, RoomGate, RoomSettings, segment_level};
 use crate::speaking::Speaking;
+
+/// Told once a session that the room is too loud for this microphone (ADR 0072): Ghost has
+/// let the room's speech go `ROOM_NOTE_DROPS` times, or the room's steady level has
+/// reached the person's. The microphone's health note says so (ADR 0064).
+pub type OnTooLoud = Arc<dyn Fn() + Send + Sync>;
+
+/// How many segments let go in one session make the room too loud to mention.
+pub const ROOM_NOTE_DROPS: usize = 5;
+/// How many frames' levels are kept before a segment starts, for its onset.
+const RECENT_FRAMES: usize = 25;
+/// A held segment grows to the person's level over this many frames (half a second), not
+/// on one loud syllable of the room's.
+const GROW_FRAMES: usize = 25;
+/// A segment whose onset is this far over the line is the person's at once: no wait.
+const CLEAR_DB: f64 = 6.0;
+/// A segment that opens late keeps this much from before it grew (0.3 s), so the person's
+/// first syllable is not cut.
+const GROW_LEAD_FRAMES: usize = 15;
+/// Once the person's level is known, a segment is judged on this many frames from its start
+/// (0.4 s), or on all of it if it ends sooner ("Stop."): its first 0.2 s alone let a talker
+/// 12 dB under the person through about one segment in three (2026-11-14).
+const JUDGE_FRAMES: usize = 20;
+/// A held segment shorter than this is not read for the name.
+const NAME_MIN_SECS: f64 = 0.3;
+
+/// A segment read with words, as one number: its level as the room's gate measures it
+/// (`room::segment_level` of its 20 ms frames). The passive stage reports it so a session
+/// opened by that segment knows how loud the person is (ADR 0072); never the words or the
+/// audio, kept in memory only.
+pub type OnLevel = Arc<dyn Fn(f64) + Send + Sync>;
+
+/// A segment's level as the room's gate measures it, leaving out the VAD's pre-roll (the
+/// room before the speech: "Hey Ghost." after a second of it read 10 dB under the person,
+/// 2026-11-14) when the segment is longer than it.
+pub fn gate_level(segment: &[i16]) -> Option<f64> {
+    let pre = (PRE_ROLL_SECS * f64::from(SAMPLE_RATE)) as usize;
+    let speech = if segment.len() > pre + 320 * 10 {
+        &segment[pre..]
+    } else {
+        segment
+    };
+    let frames: Vec<f64> = speech.chunks(320).map(level_dbfs).collect();
+    segment_level(&frames)
+}
+
+/// The person-or-room gate of one session, with what it needs besides the levels.
+pub struct RoomGuard {
+    gate: Option<RoomGate>,
+    /// The person's level from the segment that woke Ghost.
+    seed: Option<f64>,
+    settings: RoomSettings,
+    phrases: Vec<String>,
+    fuzzy: f64,
+    on_too_loud: Option<OnTooLoud>,
+    told: bool,
+    /// The levels of the last frames before and during the segment.
+    recent: VecDeque<f64>,
+    /// The levels of the open segment's frames, from its start.
+    frames: Vec<f64>,
+    /// The open segment is held: not yet judged, or too quiet to be the person so far.
+    held: bool,
+    /// ... and it has been judged (on its first `JUDGE_FRAMES`).
+    judged: bool,
+    stop: LevelStop,
+    frames_seen: usize,
+}
+
+impl RoomGuard {
+    pub fn new(
+        settings: RoomSettings,
+        phrases: Vec<String>,
+        fuzzy: f64,
+        on_too_loud: Option<OnTooLoud>,
+    ) -> Self {
+        Self {
+            gate: None,
+            seed: None,
+            settings,
+            phrases,
+            fuzzy,
+            on_too_loud,
+            told: false,
+            recent: VecDeque::new(),
+            frames: Vec::new(),
+            held: false,
+            judged: true,
+            stop: LevelStop::default(),
+            frames_seen: 0,
+        }
+    }
+
+    /// The person's level from the wake (ADR 0072), when the wake heard this input.
+    pub fn with_person(mut self, level: Option<f64>) -> Self {
+        self.seed = level;
+        self
+    }
+
+    fn gate(&mut self) -> &mut RoomGate {
+        let (settings, seed) = (self.settings, self.seed);
+        self.gate.get_or_insert_with(|| {
+            let mut g = RoomGate::new(settings, Instant::now());
+            if let Some(level) = seed {
+                g.heard_person(level);
+            }
+            g
+        })
+    }
+
+    fn tell(&mut self, why: &str) {
+        if self.told {
+            return;
+        }
+        self.told = true;
+        debug::audio(|| format!("room: too loud for this microphone ({why})"));
+        tracing::info!("room: too loud to tell the person from it ({why})");
+        if let Some(f) = &self.on_too_loud {
+            f();
+        }
+    }
+}
 
 pub const SAMPLE_RATE: u32 = 16_000;
 /// Audio kept before the VAD's start, so the first word isn't clipped: the VAD fires its
@@ -177,6 +306,9 @@ pub struct ParakeetStt {
     early_after_secs: f64,
     /// Each segment's read as numbers (the microphone's health, ADR 0064).
     on_read: Option<OnRead>,
+    /// The person or the room (ADR 0072); None takes every segment, as before.
+    room: Option<RoomGuard>,
+    on_level: Option<OnLevel>,
 }
 
 /// A segment's read as numbers: its level in dBFS and how many words were read. Never the
@@ -261,6 +393,226 @@ impl ParakeetStt {
             early_tried: false,
             early_after_secs: 0.0,
             on_read: None,
+            room: None,
+            on_level: None,
+        }
+    }
+
+    /// Report each segment read with words as its level (the passive stage, ADR 0072).
+    pub fn with_on_level(mut self, on_level: Option<OnLevel>) -> Self {
+        self.on_level = on_level;
+        self
+    }
+
+    /// Hold the room's speech back from the turn (ADR 0072).
+    pub fn with_room(mut self, room: Option<RoomGuard>) -> Self {
+        self.room = room;
+        self
+    }
+
+    fn held(&self) -> bool {
+        self.room.as_ref().is_some_and(|r| r.held)
+    }
+
+    /// A frame's level, for the room's gate: before a segment, its onset; in one, whether
+    /// it grows to the person's level or the person has stopped under the room.
+    async fn room_frame(&mut self, samples: &[i16], out: &Out) -> bool {
+        let speaking = self.user_speaking;
+        let own_vad = self.vad.is_some();
+        let mode = self.mode;
+        let Some(r) = self.room.as_mut() else {
+            return false;
+        };
+        let level = level_dbfs(samples);
+        r.recent.push_back(level);
+        while r.recent.len() > RECENT_FRAMES {
+            r.recent.pop_front();
+        }
+        let now = Instant::now();
+        let secs = samples.len() as f64 / f64::from(SAMPLE_RATE);
+        if !speaking || r.held {
+            r.gate().room_frame(level);
+        }
+        r.frames_seen += 1;
+        if r.frames_seen % 50 == 0 && r.gate().too_loud() == Some(true) {
+            r.tell("the room's own level is near the person's");
+        }
+        if !speaking {
+            return false;
+        }
+        r.frames.push(level);
+        if r.held && !r.judged && r.frames.len() >= JUDGE_FRAMES {
+            r.judged = true;
+            let judged = segment_level(&r.frames).unwrap_or(-120.0);
+            if r.gate().judge(judged, now) == Judgement::Person {
+                r.held = false;
+                r.stop.reset();
+                let start_secs = r.frames.len() as f32 * 0.02;
+                out.push(Frame::VadStarted { start_secs }).await;
+            } else {
+                let person = r.gate().person();
+                debug::audio(|| {
+                    format!(
+                        "room: held a segment at {judged:.0} dBFS (the person {})",
+                        person.map_or("not yet heard".into(), |p| format!("{p:.0} dBFS"))
+                    )
+                });
+            }
+            return false;
+        }
+        if r.held && r.judged {
+            let tail = &r.frames[r.frames.len().saturating_sub(GROW_FRAMES)..];
+            let loud = segment_level(tail).unwrap_or(-120.0);
+            if r.gate().judge(loud, now) == Judgement::Person {
+                r.held = false;
+                r.stop.reset();
+                // The VAD never stopped between the room and the person: the segment starts
+                // where it grew, with a little before it, not with the room's words.
+                let keep = GROW_FRAMES + GROW_LEAD_FRAMES;
+                let cut = r.frames.len().saturating_sub(keep);
+                r.frames.drain(..cut);
+                let start_secs = r.frames.len() as f32 * 0.02;
+                debug::audio(|| {
+                    format!("room: a segment grew to the person's level ({loud:.0} dBFS)")
+                });
+                let samples = keep * 320;
+                if self.segment.len() > samples {
+                    self.segment.drain(..self.segment.len() - samples);
+                }
+                out.push(Frame::VadStarted { start_secs }).await;
+            }
+            return false;
+        }
+        // The person's segment, with the room going on under it: it ends when they stop.
+        if own_vad && mode == VadMode::Room {
+            let line = r.gate().line(now);
+            if r.stop.frame(level, line, secs) {
+                debug::audio(|| "room: the person stopped under the room; the segment ends".into());
+                return true;
+            }
+        }
+        false
+    }
+
+    /// A segment starts: the person's, or held.
+    fn room_onset(&mut self, start_secs: f32) -> bool {
+        let Some(r) = self.room.as_mut() else {
+            return false;
+        };
+        // The frames that made the VAD start are the segment's first.
+        let n = (f64::from(start_secs) / 0.02).round() as usize + 1;
+        let onset: Vec<f64> = r.recent.iter().rev().take(n).copied().collect();
+        r.frames = onset.into_iter().rev().collect();
+        r.stop.reset();
+        let now = Instant::now();
+        if r.gate().person().is_none() {
+            // No level to go on: in the window it opens at once, as every segment did;
+            // later only the name takes it.
+            r.held = r.gate().judge(0.0, now) == Judgement::Doubt;
+            r.judged = true;
+            if r.held {
+                debug::audio(|| {
+                    "room: held a segment late in the session, the person's level not yet heard"
+                        .into()
+                });
+            }
+        } else {
+            // Clearly the person's (in a quiet room, every segment): it opens at once, as
+            // before. Otherwise judged on its first 0.4 s (`JUDGE_FRAMES`); it opens then,
+            // or at its end.
+            let onset = segment_level(&r.frames).unwrap_or(-120.0);
+            let clear = r
+                .gate()
+                .line(now)
+                .is_some_and(|line| onset >= line + CLEAR_DB);
+            r.held = !clear;
+            r.judged = clear;
+        }
+        r.held
+    }
+
+    /// A held segment ended: read it once, and let it on whole only if it calls Ghost by
+    /// name. True when it went on.
+    async fn room_end_held(&mut self, out: &Out) -> bool {
+        let Some(r) = self.room.as_mut() else {
+            return false;
+        };
+        r.held = false;
+        let level = segment_level(&r.frames).unwrap_or(-120.0);
+        if !r.judged {
+            // Over before it was judged ("Stop.", "Yes."): judged whole, and the person's
+            // goes on as any segment does.
+            r.judged = true;
+            if r.gate().judge(level, Instant::now()) == Judgement::Person {
+                let secs = self.segment.len() as f64 / f64::from(SAMPLE_RATE);
+                out.push(Frame::VadStarted {
+                    start_secs: secs as f32,
+                })
+                .await;
+                out.push(Frame::VadStopped {
+                    stop_secs: self.active_params().stop_secs,
+                })
+                .await;
+                let words = self.final_(out).await;
+                self.room_heard(words);
+                return true;
+            }
+        }
+        let segment = std::mem::take(&mut self.segment);
+        let secs = segment.len() as f64 / f64::from(SAMPLE_RATE);
+        let mut text = String::new();
+        if secs >= NAME_MIN_SECS {
+            let mut audio = segment.clone();
+            audio.extend(std::iter::repeat_n(
+                0i16,
+                (TRAILING_SECS * f64::from(SAMPLE_RATE)) as usize,
+            ));
+            let audio = ghost_infer::audio::to_f32(&audio);
+            let model = self.model.clone();
+            text = tokio::task::spawn_blocking(move || recognize(&model, &audio, true))
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+        }
+        let Some(r) = self.room.as_mut() else {
+            return false;
+        };
+        if !text.is_empty() && crate::hold::addressed(&text, &r.phrases, r.fuzzy).is_some() {
+            debug::audio(|| format!("room: a quiet segment calls Ghost by name: {text:?}"));
+            out.push(Frame::VadStarted {
+                start_secs: secs as f32,
+            })
+            .await;
+            out.push(Frame::VadStopped {
+                stop_secs: self.active_params().stop_secs,
+            })
+            .await;
+            out.push(Frame::Transcript(text)).await;
+            return true;
+        }
+        r.gate().dropped += 1;
+        let dropped = r.gate().dropped;
+        debug::audio(|| {
+            format!("room: let go a {secs:.1}s segment at {level:.0} dBFS ({dropped} this session)")
+        });
+        if dropped >= ROOM_NOTE_DROPS {
+            r.tell("its speech let go again and again");
+        }
+        false
+    }
+
+    /// The person's segment was read: their level follows it.
+    fn room_heard(&mut self, words: usize) {
+        let ghost = self.bot_speaking || self.speaking.is_on() || self.mode == VadMode::OverGhost;
+        if let Some(r) = self.room.as_mut() {
+            if words > 0
+                && !ghost
+                && let Some(level) = segment_level(&r.frames)
+            {
+                r.gate().heard_person(level);
+            }
+            r.frames.clear();
         }
     }
 
@@ -306,7 +658,11 @@ impl ParakeetStt {
     /// The operator went quiet (the VAD's first quiet frame after speech): read what was
     /// said, with silence for the stop the VAD has still to wait.
     pub(crate) fn silence_began(&mut self, out: &Out) {
-        if self.early_read == EarlyReadMode::Off || !self.user_speaking || self.segment.is_empty() {
+        if self.early_read == EarlyReadMode::Off
+            || !self.user_speaking
+            || self.segment.is_empty()
+            || self.held()
+        {
             return;
         }
         self.drop_early();
@@ -413,6 +769,9 @@ impl ParakeetStt {
     /// TTS stage.
     fn sync_speaking(&mut self) {
         let on = self.bot_speaking || self.speaking.is_on();
+        if let Some(r) = self.room.as_mut() {
+            r.gate().ghost(on, Instant::now());
+        }
         {
             let mut schedule = self.schedule.lock().unwrap();
             if on {
@@ -502,10 +861,11 @@ impl ParakeetStt {
         self.schedule.lock().unwrap().vad_started();
         self.user_speaking = true;
         self.segment = self.pre_roll.drain(..).collect(); // only audio since the last segment seeds the next
-        out.push(Frame::VadStarted {
-            start_secs: self.active_params().start_secs,
-        })
-        .await;
+        let start_secs = self.active_params().start_secs;
+        if self.room_onset(start_secs) {
+            return;
+        }
+        out.push(Frame::VadStarted { start_secs }).await;
     }
 
     async fn vad_stopped(&mut self, out: &Out) {
@@ -514,20 +874,27 @@ impl ParakeetStt {
         self.schedule.lock().unwrap().vad_stopped();
         let stop_secs = self.active_params().stop_secs;
         self.segment_ended();
+        if self.held() {
+            self.drop_early();
+            self.room_end_held(out).await;
+            return;
+        }
         out.push(Frame::VadStopped { stop_secs }).await;
-        self.final_(out).await;
+        let words = self.final_(out).await;
+        self.room_heard(words);
     }
 
     /// The segment's transcript: waits for an interim in flight, then takes the model.
     /// With an early read under way, its words, waited for.
-    async fn final_(&mut self, out: &Out) {
+    /// How many words the segment was read as.
+    async fn final_(&mut self, out: &Out) -> usize {
         let mut segment = std::mem::take(&mut self.segment);
         let early = self.early.take();
         if segment.is_empty() {
             if let Some(e) = early {
                 e.task.abort();
             }
-            return;
+            return 0;
         }
         let early = match early {
             // Its words have gone on, or will not now: the stop's read starts at once
@@ -579,10 +946,11 @@ impl ParakeetStt {
                 debug::audio(|| format!("heard: {text:?} (read early)"));
                 out.push(Frame::Transcript(text.clone())).await;
             }
-            return;
+            return text.split_whitespace().count();
         }
         let secs = segment.len() as f64 / f64::from(SAMPLE_RATE);
         let level = level_dbfs(&segment);
+        let gate_db = self.on_level.as_ref().and_then(|_| gate_level(&segment));
         segment.extend(std::iter::repeat_n(
             0i16,
             (TRAILING_SECS * f64::from(SAMPLE_RATE)) as usize,
@@ -615,7 +983,13 @@ impl ParakeetStt {
             }))
             .await;
         }
-        self.report_read(level, text.split_whitespace().count());
+        let words = text.split_whitespace().count();
+        self.report_read(level, words);
+        if let (Some(f), Some(db)) = (&self.on_level, gate_db)
+            && words > 0
+        {
+            f(db);
+        }
         if text.is_empty() {
             // 2026-10-30 19:28: a 2 s segment Smart Turn judged done (0.98) left no
             // line at all, and the turn closed on the words before it.
@@ -625,10 +999,11 @@ impl ParakeetStt {
             debug::audio(|| format!("heard: {text:?}"));
             out.push(Frame::Transcript(text)).await;
         }
+        words
     }
 
     fn maybe_interim(&mut self, out: &Out) {
-        if self.interim_secs <= 0.0 {
+        if self.interim_secs <= 0.0 || self.held() {
             return;
         }
         let busy = self.busy();
@@ -716,14 +1091,17 @@ impl Stage for ParakeetStt {
                             self.pre_roll.pop_front();
                         }
                     }
-                    if self.user_speaking && after == VadState::Quiet {
+                    let level_stop = self.room_frame(&audio.samples, out).await;
+                    if self.user_speaking && (after == VadState::Quiet || level_stop) {
                         out.forward(frame.clone(), direction).await;
                         self.vad_stopped(out).await;
                         return;
                     }
                 } else if self.user_speaking {
                     self.segment.extend_from_slice(&audio.samples);
+                    self.room_frame(&audio.samples, out).await;
                 } else {
+                    self.room_frame(&audio.samples, out).await;
                     self.pre_roll.extend(audio.samples.iter().copied());
                     let keep = (PRE_ROLL_SECS * f64::from(SAMPLE_RATE)) as usize;
                     while self.pre_roll.len() > keep {
@@ -734,18 +1112,26 @@ impl Stage for ParakeetStt {
                 self.maybe_interim(out);
             }
             // VAD frames from upstream (a transport with its own VAD, or a test).
-            Frame::VadStarted { .. } if self.vad.is_none() => {
+            Frame::VadStarted { start_secs } if self.vad.is_none() => {
                 self.schedule.lock().unwrap().vad_started();
                 self.user_speaking = true;
                 self.segment = self.pre_roll.drain(..).collect(); // only audio since the last segment seeds the next
+                if self.room_onset(*start_secs) {
+                    return;
+                }
                 out.forward(frame, direction).await;
                 return;
             }
             Frame::VadStopped { .. } if self.vad.is_none() => {
                 self.schedule.lock().unwrap().vad_stopped();
                 self.segment_ended();
+                if self.held() {
+                    self.room_end_held(out).await;
+                    return;
+                }
                 out.forward(frame, direction).await;
-                self.final_(out).await;
+                let words = self.final_(out).await;
+                self.room_heard(words);
                 return;
             }
             Frame::BotStarted => {
@@ -979,6 +1365,222 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    // --- the person or the room (ADR 0072) -------------------------------------------
+
+    /// Speech at a steady `amp` (3000 is about -21 dBFS, 300 about -41).
+    fn speech_at(secs: f64, amp: i16) -> Vec<Step> {
+        let mut out = Vec::new();
+        for _ in 0..((secs / 0.02).round() as usize) {
+            out.push(Step::F(Frame::AudioIn(Audio::new(vec![amp; 320], RATE))));
+        }
+        out
+    }
+
+    fn segment_at(secs: f64, amp: i16) -> Vec<Step> {
+        seq(vec![
+            speech_at(0.2, amp),
+            vec![vad_start()],
+            speech_at(secs, amp),
+            vec![vad_stop()],
+            speech_at(0.3, 0),
+        ])
+    }
+
+    fn gated(text: &str, reads: Option<OnRead>, too_loud: Option<OnTooLoud>) -> ParakeetStt {
+        model(text, 0.0)
+            .fork(0.0)
+            .with_on_read(reads)
+            .with_room(Some(RoomGuard::new(
+                crate::room::RoomSettings::default(),
+                vec!["hey ghost".into()],
+                0.0,
+                too_loud,
+            )))
+    }
+
+    fn opened(down: &[Frame]) -> usize {
+        down.iter()
+            .filter(|f| matches!(f, Frame::VadStarted { .. }))
+            .count()
+    }
+
+    #[tokio::test]
+    async fn test_speech_far_under_the_persons_level_never_reaches_the_turn() {
+        let down = run(
+            gated("did you see the game last night", None, None),
+            seq(vec![segment_at(1.0, 3000), segment_at(1.0, 300)]),
+        )
+        .await;
+        assert_eq!(
+            opened(&down),
+            1,
+            "the person's segment opens, the room's never does"
+        );
+        assert_eq!(finals(&down).len(), 1);
+        assert_eq!(
+            down.iter()
+                .filter(|f| matches!(f, Frame::VadStopped { .. }))
+                .count(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn test_without_the_gate_every_segment_reaches_the_turn_as_before() {
+        let down = run(
+            model("did you see the game last night", 0.0).fork(0.0),
+            seq(vec![segment_at(1.0, 3000), segment_at(1.0, 300)]),
+        )
+        .await;
+        assert_eq!(opened(&down), 2);
+        assert_eq!(finals(&down).len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_a_quiet_segment_that_begins_with_the_name_is_taken() {
+        let down = run(
+            gated("Ghost, what time is it?", None, None),
+            seq(vec![segment_at(1.0, 3000), segment_at(1.0, 300)]),
+        )
+        .await;
+        assert_eq!(opened(&down), 2);
+        assert_eq!(finals(&down), vec!["Ghost, what time is it?"; 2]);
+    }
+
+    #[tokio::test]
+    async fn test_a_segment_that_grows_to_the_persons_level_opens_late() {
+        let down = run(
+            gated("so what I meant was the other one", None, None),
+            seq(vec![
+                segment_at(1.0, 3000),
+                speech_at(0.2, 300),
+                vec![vad_start()],
+                speech_at(0.3, 300),
+                speech_at(0.6, 3000),
+                vec![vad_stop()],
+            ]),
+        )
+        .await;
+        assert_eq!(opened(&down), 2);
+        assert_eq!(finals(&down).len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_the_rooms_segments_are_not_counted_for_the_microphones_health() {
+        let reads = Arc::new(Mutex::new(Vec::new()));
+        let r = reads.clone();
+        let on_read: OnRead = Arc::new(move |db, words| r.lock().unwrap().push((db, words)));
+        run(
+            gated("did you see the game", Some(on_read), None),
+            seq(vec![segment_at(1.0, 3000), segment_at(1.0, 300)]),
+        )
+        .await;
+        assert_eq!(reads.lock().unwrap().len(), 1, "the person's read only");
+    }
+
+    #[tokio::test]
+    async fn test_with_the_persons_level_from_the_wake_the_room_is_held_from_the_start() {
+        // A noisy room, 2026-11-14: before the person had said a word in the session, the
+        // room talked over the greeting, was taken for them, and set their level.
+        let stt = model("did you see the game last night", 0.0)
+            .fork(0.0)
+            .with_room(Some(
+                RoomGuard::new(
+                    crate::room::RoomSettings::default(),
+                    vec!["hey ghost".into()],
+                    0.0,
+                    None,
+                )
+                .with_person(Some(-21.0)),
+            ));
+        let down = run(stt, seq(vec![segment_at(1.0, 300), segment_at(1.0, 3000)])).await;
+        assert_eq!(opened(&down), 1, "the room first, then the person");
+        assert_eq!(finals(&down).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_a_word_at_the_persons_level_shorter_than_the_judging_still_goes_on() {
+        // "Stop." over Ghost, or "Yes." to a question: over before 0.4 s of it was heard.
+        // At the person's level: it opens at once, as before.
+        let down = run(
+            gated("Stop.", None, None),
+            seq(vec![
+                segment_at(1.0, 3000),
+                vec![bot_started()],
+                segment_at(0.1, 3000),
+            ]),
+        )
+        .await;
+        assert_eq!(opened(&down), 2);
+        assert_eq!(finals(&down), vec!["Stop."; 2]);
+        // 6 dB softer: judged on all of it at its end, and it goes on.
+        let down = run(
+            gated("Stop.", None, None),
+            seq(vec![
+                segment_at(1.0, 3000),
+                vec![bot_started()],
+                segment_at(0.1, 1500),
+            ]),
+        )
+        .await;
+        assert_eq!(opened(&down), 2);
+        assert_eq!(finals(&down), vec!["Stop."; 2]);
+        let at = down
+            .iter()
+            .rposition(|f| matches!(f, Frame::VadStarted { .. }))
+            .unwrap();
+        assert!(
+            matches!(down[at + 1], Frame::VadStopped { .. }),
+            "opened and closed in order, then its words"
+        );
+    }
+
+    #[test]
+    fn test_the_wakes_level_leaves_out_the_room_before_it() {
+        // "Hey Ghost." as the passive stage hears it: a second of the room, then the person.
+        let mut segment = vec![300i16; 16_000];
+        segment.extend(vec![3000i16; 8_000]);
+        let level = gate_level(&segment).unwrap();
+        assert!((level + 20.8).abs() < 0.5, "{level}");
+        // A short segment has no pre-roll to leave out.
+        assert!(gate_level(&[3000i16; 4_000]).is_some());
+    }
+
+    #[tokio::test]
+    async fn test_the_passive_stage_reports_the_level_of_a_segment_with_words_only() {
+        let levels = Arc::new(Mutex::new(Vec::new()));
+        let l = levels.clone();
+        let on_level: OnLevel = Arc::new(move |db| l.lock().unwrap().push(db));
+        run(
+            model("hey ghost", 0.0)
+                .fork(0.0)
+                .with_on_level(Some(on_level.clone())),
+            segment_at(1.0, 3000),
+        )
+        .await;
+        run(
+            model("", 0.0).fork(0.0).with_on_level(Some(on_level)),
+            segment_at(1.0, 3000),
+        )
+        .await;
+        let levels = levels.lock().unwrap().clone();
+        assert_eq!(levels.len(), 1);
+        assert!((levels[0] + 20.8).abs() < 0.5, "{levels:?}");
+    }
+
+    #[tokio::test]
+    async fn test_the_room_let_go_again_and_again_is_said_once() {
+        let said = Arc::new(Mutex::new(0usize));
+        let s = said.clone();
+        let too_loud: OnTooLoud = Arc::new(move || *s.lock().unwrap() += 1);
+        let mut steps = segment_at(1.0, 3000);
+        for _ in 0..(ROOM_NOTE_DROPS + 3) {
+            steps.extend(segment_at(0.5, 300));
+        }
+        run(gated("did you see the game", None, Some(too_loud)), steps).await;
+        assert_eq!(*said.lock().unwrap(), 1);
     }
 
     // --- when they are made -------------------------------------------------------
