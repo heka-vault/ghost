@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 
 import { Button, cx, type GhostPhase, Progress as Bar, Skeleton, VoicePresence } from "../../ui";
 import type { Speech } from "./speech";
-import { MEET, type Progress, type StepDef, STEPS, type StepId, stepIndex, taskNumber, TASKS } from "./state";
+import { countLine, type Progress, type StepDef, STEPS, type StepId, stepIndex, taskNumber, TASKS } from "./state";
 
 /* -------------------------------------------------------------------------------- rail */
 
@@ -54,11 +54,7 @@ export function Rail({ current, progress, checking, onGo, speech }: RailProps) {
           <Skeleton width={56} height={12} className="onb-rail__count-skel" />
         ) : (
           <p className="t-small t-2 t-num">
-            {progress.done === progress.total
-              ? "All done"
-              : progress.met
-                ? `You’ve met Ghost · ${progress.done} of ${progress.total} done`
-                : `${MEET.filter((m) => progress.state[m.id] === "done").length} of ${MEET.length} to meet Ghost`}
+            {countLine(progress)}
             {unknown && " · start Ghost to check the rest"}
           </p>
         )}
@@ -289,6 +285,22 @@ export function StepFrame({ id, title, description, lead, children, notices, pri
 }
 
 /* ------------------------------------------------------------------------- small parts */
+
+/** The window's short-height break (the minimum window, 720×480): the moment's mark shrinks so its words show. */
+export const SHORT_WINDOW = "(max-height: 600px)";
+
+export function useShortWindow(): boolean {
+  const media = () => (typeof window !== "undefined" && typeof window.matchMedia === "function" ? window.matchMedia(SHORT_WINDOW) : null);
+  const [short, setShort] = useState(() => media()?.matches ?? false);
+  useEffect(() => {
+    const query = media();
+    if (!query) return;
+    const on = () => setShort(query.matches);
+    query.addEventListener("change", on);
+    return () => query.removeEventListener("change", on);
+  }, []);
+  return short;
+}
 
 /** A padded row inside a Card list, for rows that aren't a ListRow (a field, a meter). */
 export function Row({ children, className }: { children: ReactNode; className?: string }) {
