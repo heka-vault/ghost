@@ -121,7 +121,7 @@ body {
   display: grid;
   place-items: center;
   color: var(--flt-ink);
-  scale: var(--flt-pulse, 1);
+  /* Its pulse is `scale`, set on it each frame (Floating.tsx). */
   will-change: transform;
 }
 .flt-under {
@@ -181,6 +181,9 @@ body {
 /* ---------------------------------------------------------------- reach: where Ghost is looking */
 .flt-node {
   position: absolute;
+  /* At the place's point by `translate` (Floating.tsx), centred on it by the transform. */
+  left: 0;
+  top: 0;
   transform: translate(-50%, -50%);
   pointer-events: none;
   white-space: nowrap;
