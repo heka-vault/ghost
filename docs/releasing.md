@@ -73,7 +73,7 @@ highest `vYYYY.M.N` tag of this month, or `.0` when this month has none.
 3. **Check the published release before telling anyone.** On the release page: the four
    files and `latest.json` are there; `latest.json` names this version, and its two URLs
    open (`curl -sIL <url> | head -1`). Then, on a machine with the previous release
-   installed, Settings › General › Check now offers it, and Update and restart ends on the
+   installed, Settings › About › Check now offers it, and Update and restart ends on the
    new version with `ghostd version` saying the tagged commit.
 
 ### A dry run
@@ -310,8 +310,8 @@ It reads the same everywhere:
   test reads the tagged commit from it. `ghostd check` and the daemon's first log line
   start with it, and `make deploy` shows it from the build's check.
 - The desktop's sidebar footer: `Ghost 2026.10.0 · dev a1b2c3d`. A release shows the version
-  alone, since its version is its tag; General shows its commit.
-- Settings › General: the version, the build in words, and the desktop app's own version.
+  alone, since its version is its tag; About shows its commit.
+- Settings › About: the version, the build in words, and the desktop app's own version.
 
 The desktop app's version is its `package.json`'s, the same as every other copy, and its
 commit is the checkout's `HEAD` (and whether tracked files were dirty) when Vite built the

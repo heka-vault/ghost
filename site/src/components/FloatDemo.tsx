@@ -1,5 +1,5 @@
 /**
- * The hero's float: the desktop app's own floating room (apps/desktop/src/floating, ADR 0059)
+ * The hero's float: the desktop app's own floating view (apps/desktop/src/floating, ADR 0059)
  * driven by its in-memory mock daemon's `floating-site` scenario, one turn on the clock of the
  * site's sound (site/audio/turn.json). Nothing here is drawn for the site: if the app's floating
  * room changes, so does this. Synthetic words only, no network. The page's own address carries

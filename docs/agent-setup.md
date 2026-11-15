@@ -239,7 +239,7 @@ Read the `status` in the answer and say it plainly:
 Tell the person:
 
 1. Say **"Hey Ghost"** and ask something; "that's all" sends it away. Typing works too.
-2. Turn on **the floating room** (Settings › General): Ghost floats beside their work when
+2. Turn on **Floating** (Settings › General › Floating, **Over your work**): Ghost floats beside their work when
   called, with no window.
 3. **Connect an app** (Apps › Add an app), such as GitHub or their calendar.
 

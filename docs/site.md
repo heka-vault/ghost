@@ -6,7 +6,7 @@ page links to them.
 
 ## What it is made of
 
-- **The hero is the app's own floating room over the README's desktop.** The first screen is
+- **The hero is the app's own floating view over the README's desktop.** The first screen is
   that desktop edge to edge, with the words over its quiet left side; on a phone (or any screen
   taller than wide) the float takes the top of the screen, centred, with the words under it.
   `site/src/pages/float.astro` mounts `FloatingRoom` from `apps/desktop/src/floating` with the
@@ -65,7 +65,7 @@ page links to them.
   float page: `pnpm --dir site site:build && pnpm --dir site site:stills` (Chrome or Chromium
   and ImageMagick, like `make screenshots`). The still is the live float caught at one moment,
   so when the live one takes its place Wisp's body doesn't change: take the stills again
-  whenever the floating room's drawing does.
+  whenever the floating view's drawing does.
 - **The mark** (docs/design-system.md, The mark): the nav and the footer carry the lockup
   (`Wordmark.astro`: the 32 px chip from `markSvg`, inlined, and "Ghost" in Inter 800 at
   −0.035 em). The icons and the social card are the mark's own files, not stills:

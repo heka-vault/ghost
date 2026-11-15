@@ -13,7 +13,7 @@ in the [README](../README.md#over-your-desktop).*
 
 ## Turning it on
 
-Settings › General › The floating room › **Float over the desktop**, the rail's floating
+Settings › General › Floating › **Where Ghost appears** (**Over your work** or **In the window**), the rail's floating
 switch above the microphone, or the tray's **Float over the desktop**. Off by default, until the first run's wake beat turns it on once (below). Under it, **Ghost appears on**: the other monitor (default), a
 named monitor, or where I am; **Where on the screen**: beside your work (default: the owner,
 seeing it come forward on the other monitor in a column rather than over the whole screen, "I
@@ -30,8 +30,8 @@ by itself.
 
 ## The first run's moment (2026-11-14)
 
-The first run's third beat, “Say “Hey Ghost””, is where a newcomer first sees the floating room
-(ADR 0059 as amended 2026-11-14). When that beat first opens the shell turns the floating room
+The first run's third beat, “Say “Hey Ghost””, is where a newcomer first sees the floating view
+(ADR 0059 as amended 2026-11-14). When that beat first opens the shell turns Floating
 on, once (`floating::offer`; `offered` in `floating.json`), and the beat shows the switch with one
 line, so the choice is visible and can be undone right there; it is never turned on again after
 that, and an install that finished the first run before this is not offered it.
@@ -54,7 +54,7 @@ window is in use; `?mock=firstrun&heyghost=2500#/welcome` plays the whole moment
 
 ## Where it works
 
-| Desktop | Floating room |
+| Desktop | Floating |
 |---|---|
 | X11 session | Yes |
 | GNOME on Wayland with XWayland (the default) | Yes: only this window goes through XWayland, the main window stays native |
@@ -125,15 +125,15 @@ is shown at all.
 
 ## Screen sharing
 
-While the floating room is on, the shell asks mutter every two seconds whether a screen-cast
+While Floating is on, the shell asks mutter every two seconds whether a screen-cast
 or remote-desktop session exists (D-Bus introspection of `/org/gnome/Mutter/ScreenCast/Session`
 and `/org/gnome/Mutter/RemoteDesktop/Session`: a child node is a session). Every capture on
 GNOME goes through one: a browser's meeting through the portal, OBS, GNOME's own recorder,
 remote desktop. Not seen: a program that grabs XWayland's pixels itself (`ffmpeg -f x11grab`)
 and any desktop other than GNOME; Settings says so when it can't tell, and the tray switch
-turns the floating room off at once.
+turns Floating off at once.
 
-What it does then is the operator's choice, Settings › General › The floating room › **While my screen
+What it does then is the operator's choice, Settings › General › Floating › **While my screen
 is shared** (`floating.json`'s `while_shared`, `src-tauri/src/floating/share.rs`):
 
 - **Hide Ghost** (the default, and what it always did): the surface draws nothing at all, not
@@ -151,7 +151,7 @@ Whatever the choice, the tray's **Show Ghost in this share** (usable only during
 Ghost in or takes it out for that share only; the card's answer is the same. Both are forgotten
 when the share ends, and the next share starts from the setting again.
 
-**Sharing one window never includes the floating room**: a window share is that window's own
+**Sharing one window never includes the floating view**: a window share is that window's own
 picture, and the surface is another window. To show Ghost with a window share, share the
 stage (below).
 
@@ -187,16 +187,15 @@ stream with `pipewiresrc`.
 
 ## Ghost on stage
 
-The tray's **Ghost on stage**, or Settings › General › The floating room › **Open the stage**: the floating
-room drawn in an ordinary window titled **Ghost · Stage** (`stage.html`,
+The tray's **Ghost on stage** (off Settings since ADR 0073): what floats, drawn in an ordinary window titled **Ghost · Stage** (`stage.html`,
 `src-tauri/src/floating/stage.rs`), on an opaque designed backdrop, driven by the same live
-events as the floating room. In a meeting, share that window; or record it. It shows what the
+events as the floating view. In a meeting, share that window; or record it. It shows what the
 floating room shows (Wisp, the state, where Ghost is looking, a yes or a question) in the
 middle of a dark stage; at rest Ghost waits there with “Say “Ghost”” rather than as a line; a
 session comes forward whichever window has the keyboard; Ghost's own words are captioned for
 people who may not hear it (never the operator's); and it has no Open in Ghost or Done. It
 never hides from a share: it was opened to be seen. It is a window of the main process,
-native wherever the main window is, and works where the floating room can't (it needs no X11).
+native wherever the main window is, and works where the floating view can't (it needs no X11).
 Close it like any window. `stage.html?mock=floating` on the dev server plays the mock session
 on it.
 
@@ -316,7 +315,7 @@ in once on Wayland, then `gnome-extensions enable ghost-desktop@heka.dev`. Remov
 `gnome-extensions uninstall ghost-desktop@heka.dev`. GNOME turns off an extension whose
 `shell-version` doesn't list the running release, so a GNOME upgrade disables it until the
 list is bumped; it uses only `global.get_pointer`, the focus window's frame and the workspace
-manager, which have been stable across releases. The floating room works the same without it,
+manager, which have been stable across releases. The floating view works the same without it,
 less the "where I am" part.
 
 ## Workspaces
@@ -342,7 +341,7 @@ held still by a mock scenario for 8 s. Intel UHD 750, two 1920×1080 monitors, d
 | The same before Wisp was capped (this branch, first build) | 25–28% | 7% | 19–20% | 74–81% @ 670–920 MHz |
 | The spike, XWayland (PR #84) | 32–51% | 9–17% | 20–29% | 81–84% @ 840–1000 MHz |
 
-Again after the floating room lost its text and gained the reach (2026-11-12, the same method
+Again after the floating view lost its text and gained the reach (2026-11-12, the same method
 and machine, debug build, the page from the dev server; the GPU's clock rose and fell with the
 rest of the desktop, so compare its busy share):
 
@@ -414,7 +413,7 @@ Things this session could not do without your hand. With the dev page served
    it takes the click. Type in a text field: the letters go there. The Yes and No buttons take
    a click (the mock answers).
 5. **Screen sharing.** Start a share (a browser meeting's "present", or Ctrl+Alt+Shift+R), run
-   the check: `"capture": "yes"`. With the floating room on in the real app and While my
+   the check: `"capture": "yes"`. With Floating on in the real app and While my
    screen is shared at Hide Ghost, Ghost disappears within two seconds and comes back when the
    share ends. At Ask each time, the card appears instead; Show puts Ghost in with the Screen
    shared mark; the tray's Show Ghost in this share flips it; a new share asks again. At Show
@@ -424,7 +423,7 @@ Things this session could not do without your hand. With the dev page served
    the stage is open. Pick the floating one: expected Ghost on black. Pick the stage: the
    stage as you see it.
 9. **The stage.** Tray › Ghost on stage, call Ghost: it comes forward on the stage, captioned,
-   while the floating room does what it does.
+   while the floating view does what it does.
 10. **Audio.** With headphones, `make demo-audio`, a meeting with "Ghost and your microphone"
     as its microphone and a second device in the call: call Ghost; the second device hears you
     and Ghost. Ctrl+C the helper and switch the microphone back.
