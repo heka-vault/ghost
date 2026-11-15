@@ -1,7 +1,12 @@
+# Written by Ghost (ghost-echo-cancel, form 2). Ghost rewrites this file when it starts, so
+# a change made here is kept only once this line is removed. `ghostd uninstall` removes it.
 [Unit]
 Description=Ghost echo-cancelled microphone (ghost.mic)
 After=pipewire.service wireplumber.service
 Requires=pipewire.service
+# Ghost keeps this link pointing at its installed ghostd (or its AppImage): once Ghost is
+# removed the link dangles and the canceller does not start (#147).
+ConditionPathExists=%S/ghost/installed
 
 [Service]
 Type=simple

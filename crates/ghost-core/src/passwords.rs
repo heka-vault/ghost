@@ -194,6 +194,14 @@ pub trait Keyring: Send + Sync {
 
     /// Ask the keyring to unlock (it may show its own prompt). True when it is.
     fn unlock(&self) -> Result<bool, PasswordsError>;
+
+    /// Delete the vault's key: only when the person removes Ghost from this computer
+    /// (`ghostd uninstall`, #147), never otherwise. False when there was none.
+    fn delete_key(&self) -> Result<bool, PasswordsError> {
+        Err(PasswordsError::KeyringUnavailable(
+            "this keyring cannot delete".into(),
+        ))
+    }
 }
 
 /// The vault's key in the default collection of Secret Service (GNOME Keyring's login
@@ -345,6 +353,23 @@ impl Keyring for SecretServiceKeyring {
             Ok(!collection.is_locked().map_err(ss_error)?)
         })
     }
+
+    fn delete_key(&self) -> Result<bool, PasswordsError> {
+        self.with_collection(|collection| {
+            if collection.is_locked().map_err(ss_error)? {
+                collection.unlock().map_err(ss_error)?;
+            }
+            // Ghost's own item only: found by both its attributes.
+            let items = collection
+                .search_items(Self::attributes())
+                .map_err(ss_error)?;
+            let any = !items.is_empty();
+            for item in items {
+                item.delete().map_err(ss_error)?;
+            }
+            Ok(any)
+        })
+    }
 }
 
 /// A keyring for tests and tools: holds the key in memory, can be locked or absent.
@@ -433,6 +458,11 @@ impl Keyring for MemoryKeyring {
             self.set_locked(false);
         }
         Ok(available && !self.locked.load(Ordering::SeqCst))
+    }
+
+    fn delete_key(&self) -> Result<bool, PasswordsError> {
+        self.check()?;
+        Ok(lock(&self.key).take().is_some())
     }
 }
 

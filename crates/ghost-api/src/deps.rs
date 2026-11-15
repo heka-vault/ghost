@@ -437,6 +437,8 @@ pub struct Deps {
     pub wake_takes: Option<Arc<dyn crate::wake_takes::WakeTakesPort>>,
     /// Error reports (ADR 0067): the operator's switch and what was sent.
     pub reports: Option<Arc<dyn crate::reports::ReportsPort>>,
+    /// What Ghost left on this computer, for removing it (#147).
+    pub uninstall: Option<Arc<dyn crate::uninstall::UninstallPort>>,
     /// The speech models the bundle does not carry, and their download (ADR 0066).
     pub speech_models: Option<Arc<dyn crate::speech_models::SpeechModelsPort>>,
     /// The schedules and their runs (ADR 0047); None in a daemon without them.
@@ -500,6 +502,7 @@ impl Deps {
             hear: None,
             wake_takes: None,
             reports: None,
+            uninstall: None,
             speech_models: None,
             schedules: None,
             clients: None,

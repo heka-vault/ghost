@@ -42,7 +42,8 @@
         "depends": ["libespeak-ng1", "pulseaudio-utils"],
         "recommends": ["pipewire-bin"],
         "section": "utils",
-        "desktopTemplate": "./ghost.desktop"
+        "desktopTemplate": "./ghost.desktop",
+        "preRemoveScript": "./prerm"
       }
     }
   },

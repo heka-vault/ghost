@@ -70,7 +70,7 @@ zbus = { version = "5", default-features = false, features = ["tokio"] }
 schemars = "1"
 rand = "0.9"
 # The phone listener's networks (ADR 0020): which interface holds an address, from getifaddrs.
-nix = { version = "0.31", features = ["net", "hostname"] }
+nix = { version = "0.31", features = ["net", "hostname", "signal"] }
 tower = { version = "0.5", features = ["util"] }
 # The audio engine (crates/ghost-audio): PipeWire through the project's own binding, a
 # realtime-safe ring between its thread and tokio, WAV assets.

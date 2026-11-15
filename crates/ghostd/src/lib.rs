@@ -35,6 +35,7 @@ pub mod schedules;
 pub mod session;
 pub mod setup_cli;
 pub mod speech_models;
+pub mod uninstall;
 pub mod wake;
 pub mod wake_detectors;
 pub mod wake_takes;

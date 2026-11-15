@@ -10,13 +10,14 @@ import type { DevicesView, ModelConnectionView, SettingsView } from "@ghost/clie
  * section's page. `apps` and `skills` were sections of the one long page; they are pages of
  * their own now, and their old links land there.
  */
-export type SectionId = "setup" | "about" | "updates" | "reports" | "secrets" | "model" | "apps" | "skills" | "voice" | "audio" | "models" | "phone" | "privacy" | "sounds" | "wave" | "voice-mode";
+export type SectionId = "setup" | "about" | "updates" | "reports" | "remove" | "secrets" | "model" | "apps" | "skills" | "voice" | "audio" | "models" | "phone" | "privacy" | "sounds" | "wave" | "voice-mode";
 
 export const SECTION_TITLE: Record<SectionId, string> = {
   setup: "Finish setup",
   about: "About Ghost",
   updates: "Updates",
   reports: "Error reports",
+  remove: "Remove Ghost from this computer",
   secrets: "Passwords",
   model: "Model",
   apps: "Apps",
@@ -40,6 +41,7 @@ export const SECTION_PAGE: Record<SectionId, string> = {
   about: "general",
   updates: "general",
   reports: "general",
+  remove: "general",
   privacy: "general",
   model: "model",
   secrets: "passwords",

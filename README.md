@@ -136,6 +136,77 @@ restart** (the .deb asks for your password once; the AppImage replaces itself). 
 one request to GitHub carrying nothing about you; turn it off there. Your settings, agents
 and memory in `~/.config/ghost` and `~/.local/share/ghost` stay as they are.
 
+## Uninstall
+
+The package removes the app and nothing in your home folder: what Ghost keeps there (your
+settings, transcripts, recordings and passwords) is yours to remove, so run this first, as
+yourself, not with `sudo`:
+
+```bash
+ghostd uninstall --dry-run   # what Ghost left on this computer, by kind, with sizes
+ghostd uninstall             # asks about each kind; your data and passwords default to No
+```
+
+`--keep-data` removes everything but your data and passwords; `--all` removes those too
+(it asks once; `--yes` doesn't ask). It quits Ghost first, and ends with the one line that
+finishes: `sudo apt remove heka-ghost-desktop`, or which AppImage file to delete. The same
+list is in Settings › General, **Remove Ghost from this computer**, which quits the app and
+removes what you chose (from the AppImage, which puts no `ghostd` on your PATH, use that).
+The kinds:
+
+1. **What keeps running or starts by itself**: the echo canceller's service (stopped; your
+   microphone and speakers go back to what the system chooses), Start at login, and the
+   GNOME Shell helper if you installed it.
+2. **Ghost's entries in your other tools**: Ghost taken out of Cursor's, Codex's or Claude
+   Code's settings by their own command or from their file, the copies Ghost made of those
+   files, and the keys they used to reach Ghost. Ghost never writes Claude Code's
+   `~/.claude.json`; without `claude` installed it shows the command to run.
+3. **The speech models** Ghost downloaded (about 2.9 GB).
+4. **The app's own storage**: the window's storage and cache, its log and choices.
+5. **Your data**: Ghost's folder (settings, apps, rules, agents and their memory, skills,
+   outputs), the database with every transcript and the audit, kept wake takes (recordings of
+   your voice), the Hearing test's recordings, and error reports kept here.
+6. **Your passwords**: the vault and its key in your login keyring. Every password saved in
+   Ghost is deleted and cannot be recovered.
+
+**Already removed the package?** The echo canceller stops starting by itself once Ghost is
+gone (its unit waits for a link to the installed Ghost). The rest is in these places; quit
+anything of Ghost's still running, then delete what you want gone:
+
+<!-- uninstall-by-hand: every path ghost_core::leftovers::by_hand() names; a test holds the two together -->
+- Running: `systemctl --user disable --now ghost-echo-cancel.service`, then
+  `~/.config/systemd/user/ghost-echo-cancel.service`,
+  `~/.config/systemd/user/default.target.wants/ghost-echo-cancel.service`,
+  `~/.config/ghost/echo-cancel.conf`,
+  `~/.config/pipewire/pipewire.conf.d/50-ghost-allowed-rates.conf`,
+  `~/.config/wireplumber/wireplumber.conf.d/51-ghost-sink-driver.conf`,
+  `~/.config/pipewire/pipewire.conf.d/90-ghost-echo-cancel.conf`,
+  `~/.local/state/ghost/installed`; `~/.config/autostart/heka-ghost-desktop.desktop`;
+  `~/.local/share/gnome-shell/extensions/ghost-desktop@heka.dev`; from a checkout,
+  `~/.config/systemd/user/ghostd.service`,
+  `~/.config/systemd/user/default.target.wants/ghostd.service`,
+  `~/.config/systemd/user/ghostd.service.d`.
+- Other tools: the `ghost` entry in `~/.cursor/mcp.json`, `~/.codex/config.toml` or Claude
+  Code (`claude mcp remove --scope user ghost`); `~/.cursor/mcp.json.ghost-backup-*`,
+  `~/.codex/config.toml.ghost-backup-*`; `~/.local/share/ghost/clients`.
+- Speech models: `~/.cache/ghost`.
+- The app's storage: `~/.local/share/dev.heka.ghost`, `~/.cache/dev.heka.ghost`,
+  `~/.config/dev.heka.ghost`, `~/.local/share/heka-ghost-desktop`,
+  `~/.cache/heka-ghost-desktop`, `~/.local/state/ghost`, `$XDG_RUNTIME_DIR/ghost`.
+- Your data: `~/.config/ghost`, `~/.local/share/ghost/ghost.db`,
+  `~/.local/share/ghost/ghost.db-wal`, `~/.local/share/ghost/ghost.db-shm`,
+  `~/.local/share/ghost/wake/takes`, `~/.local/share/ghost/hear`,
+  `~/.local/share/ghost/reports`, and the rest of `~/.local/share/ghost`.
+- Your passwords: `~/.local/share/ghost/passwords.vault`,
+  `~/.local/share/ghost/passwords.vault.lock`, and the key in your login keyring
+  (`secret-tool clear application ghost ghost passwords-vault-key`, or "Ghost passwords vault
+  key" in Passwords and Keys).
+<!-- /uninstall-by-hand -->
+
+Ghost's log lines are in your journal (`journalctl --user -t ghostd`), which the system
+rotates; Mesa's shader cache (`~/.cache/mesa_shader_cache`) is shared by every app that draws
+with it.
+
 ## Build from source
 
 You need a Linux desktop with PipeWire (Ubuntu 24.04 or later, Fedora, Arch and the like), about

@@ -2806,6 +2806,13 @@ impl Daemon {
                 Arc::new(crate::reports::ReportsDesk(r.clone()))
                     as Arc<dyn ghost_api::reports::ReportsPort>
             }),
+            uninstall: Some(Arc::new(crate::uninstall::UninstallDesk {
+                places: crate::uninstall::places(
+                    &self.cfg.lock().unwrap_or_else(|e| e.into_inner()),
+                    &self.voice.lock().unwrap_or_else(|e| e.into_inner()),
+                    &self.started_env,
+                ),
+            })),
             wake_takes: Some(crate::wake_takes::WakeTakesDesk::new(
                 self.wake_takes(),
                 Arc::downgrade(self),
