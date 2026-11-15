@@ -3,7 +3,7 @@ import { permissionLabel } from "@ghost/ui";
 import { ChevronDown } from "lucide-react";
 import { type RefObject, useEffect, useId, useRef, useState } from "react";
 
-import { DETAILS, NO, SAY_IT, YES, alwaysWords, clockWords, faceOf, ignoreEnter } from "./always";
+import { DETAILS, NO, SAY_IT, YES, alwaysWords, clockWords, faceOf, ignoreEnter, plainSummary, shortTarget } from "./always";
 import { Button } from "./Button";
 import { cx } from "./cx";
 import { formatTime } from "./format";
@@ -27,6 +27,11 @@ export interface PendingChangeProps {
   busy?: boolean | "confirm" | "cancel";
   /** Every answer off, no spinner: Ghost isn’t answering (`useLive().online` is false). */
   disabled?: boolean;
+  /**
+   * More than one change waits on screen: the face adds the target's short name (“app#17”) after
+   * the sentence, so two “Close the issue.” cards can be told apart. Otherwise it is under Details.
+   */
+  showTarget?: boolean;
   /** A voice session is live and this is its change: the face adds “or say it”. */
   sayable?: boolean;
   /** Tighter padding, a smaller sentence, small buttons: the live strip and the tray. */
@@ -76,7 +81,7 @@ function useSecondsLeft(expiresAt: string | null | undefined, pinned?: number): 
  * Page dock directly above the composer. In development it checks on load that whenever its
  * Yes is on screen, its sentence is fully on screen too, and logs a console error if not.
  */
-export function PendingChange({ summary, rationale, operation, target, expiresAt, onConfirm, onCancel, busy = false, disabled = false, sayable = false, compact, touch, always, onAlways, detailsOpen = false, now, className }: PendingChangeProps) {
+export function PendingChange({ summary, rationale, operation, target, expiresAt, onConfirm, onCancel, busy = false, disabled = false, sayable = false, compact, touch, always, onAlways, detailsOpen = false, now, className, showTarget = false }: PendingChangeProps) {
   const left = useSecondsLeft(expiresAt, now);
   const expired = left === 0;
   const urgent = left != null && left > 0 && left <= 10;
@@ -85,11 +90,13 @@ export function PendingChange({ summary, rationale, operation, target, expiresAt
   const root = useRef<HTMLElement>(null);
   const summaryRef = useRef<HTMLParagraphElement>(null);
   const confirmRef = useRef<HTMLButtonElement>(null);
-  const [open, setOpen] = useState(detailsOpen);
-  const detailsId = useId();
   // The sticky choice is the window's own cards' only: never the phone's touch card.
   const sticky = always && onAlways && !touch ? alwaysWords(always) : null;
-  const face = faceOf(summary, { sayable, clock, sticky });
+  // The plain sentence on the face, the target under Details (or its short name, when asked).
+  const plain = plainSummary(summary);
+  const on = plain.on ?? target ?? null;
+  const tag = showTarget && on ? shortTarget(on) : null;
+  const face = faceOf(plain.what, { sayable, clock, sticky, tag });
   const off = expired || disabled || !!busy;
   const size = compact ? "sm" : touch ? "lg" : "md";
 
@@ -110,8 +117,14 @@ export function PendingChange({ summary, rationale, operation, target, expiresAt
       aria-roledescription="change waiting for your yes"
     >
       {expired && <p className="g-pending__state">Too late · Ghost left it alone</p>}
-      <p ref={summaryRef} id={summaryId} className="g-pending__summary" data-user-content aria-label={face.cut ? summary : undefined}>
-        {face.summary}
+      <p ref={summaryRef} id={summaryId} className="g-pending__summary" aria-label={face.cut || plain.on ? summary : undefined}>
+        <span data-user-content>{face.summary}</span>
+        {tag && (
+          <span className="g-pending__tag">
+            {" · "}
+            {tag}
+          </span>
+        )}
       </p>
       <div className="g-pending__actions">
         <Button ref={confirmRef} variant="primary" size={size} fullWidth={touch} disabled={expired || disabled || (!!busy && busy !== "confirm")} loading={busy === "confirm"} onClick={onConfirm}>
@@ -129,12 +142,6 @@ export function PendingChange({ summary, rationale, operation, target, expiresAt
               </span>
             )}
           </span>
-        )}
-        {!touch && (
-          <button type="button" className="g-pending__toggle" aria-expanded={open} aria-controls={detailsId} onClick={() => setOpen((o) => !o)}>
-            {DETAILS}
-            <ChevronDown size={14} aria-hidden className={cx("g-pending__chevron", open && "is-open")} />
-          </button>
         )}
       </div>
       {sticky && (
@@ -156,11 +163,17 @@ export function PendingChange({ summary, rationale, operation, target, expiresAt
           </Button>
         </div>
       )}
-      {!touch && open && (
-        <dl id={detailsId} className="g-pending__details">
-          {face.cut && (
+      {/* A native disclosure: closed, its identifiers are not on the face (the plain-words guard reads it so too). */}
+      {!touch && (
+        <details className="g-pending__more" open={detailsOpen || undefined}>
+          <summary className="g-pending__toggle">
+            {DETAILS}
+            <ChevronDown size={14} aria-hidden className="g-pending__chevron" />
+          </summary>
+        <dl className="g-pending__details">
+          {(face.cut || plain.on) && (
             <div>
-              <dt>All of it</dt>
+              <dt>In full</dt>
               <dd data-user-content>{summary}</dd>
             </div>
           )}
@@ -176,10 +189,12 @@ export function PendingChange({ summary, rationale, operation, target, expiresAt
               <dd className="t-mono">{operation}</dd>
             </div>
           )}
-          {target && (
+          {on && (
             <div>
               <dt>On</dt>
-              <dd className="t-mono">{target}</dd>
+              <dd className="t-mono" data-user-content>
+                {on}
+              </dd>
             </div>
           )}
           <div>
@@ -199,6 +214,7 @@ export function PendingChange({ summary, rationale, operation, target, expiresAt
             </div>
           )}
         </dl>
+        </details>
       )}
       <span className="sr-only" role="status">
         {said}

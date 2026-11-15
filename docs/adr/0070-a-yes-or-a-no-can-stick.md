@@ -126,8 +126,8 @@ window's card is now the floating card's shape, with this decision's two choices
   `apps/desktop/src/ui/always.ts`, tested): a long summary is cut at a word and given whole
   under Details. The clock shows only in the wait's last minute (“0:42 left”).
 - **The sticky choice is on the card**, not behind a disclosure: a quiet line under a hairline,
-  the action in words, then **Always** and **Never** (“Close issues in GitHub · Always ·
-  Never”). The words are built deterministically from the rule the daemon offers (`app.tool`):
+  the action in words, then **Always allow** and **Never allow** (“Close issues in GitHub ·
+  Always allow · Never allow”). The words are built deterministically from the rule the daemon offers (`app.tool`):
   the tool's name split into words, read as a verb and what it acts on when it starts or ends
   with a known verb (`issues_close` → “close issues”, `issue_write` → “change issues”), and
   otherwise its own words quoted (“close” in GitHub) or “this action”; the app by its key, with
@@ -148,3 +148,11 @@ window's card is now the floating card's shape, with this decision's two choices
 - Who may set a rule is unchanged: the operator's click in their own desktop session only. The
   floating card stays Yes and No with "or say it" (ADR 0059), sharing the sentence and the
   button words; the phone keeps plain Yes and No.
+
+Also on 2026-11-14, after merging with the plain-words pass: the buttons read **Always allow**
+and **Never allow**, matching Permissions' "Never let Ghost …" row. The card's sentence leads
+with what will happen, without its target, as Today's rows do ("Close the issue.", not "On
+ghost-mock/app#17: close the issue."); the whole target is under Details. When more than one
+change waits on the same screen, each card adds its target's short name ("Close the issue. ·
+app#17"), so two cards can always be told apart. Details is a native disclosure, so the
+plain-words guard reads a closed one as off the face, as it does elsewhere.

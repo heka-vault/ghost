@@ -186,7 +186,7 @@ export function AgentsIndex() {
             <span className="conv-row-end">
               <LineStateText state={state} connection={connection} phase={phase} />
               {state.tone === "waiting" && (
-                <Button size="sm" variant="ghost" className="conv-row-action" href={hrefFor("/session")} aria-label="Review the change waiting on your okay">
+                <Button size="sm" variant="ghost" className="conv-row-action" href={hrefFor("/session")} aria-label="Review the change waiting for your yes">
                   Review
                 </Button>
               )}

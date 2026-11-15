@@ -841,17 +841,22 @@ a.g-btn, a.g-icon-btn, a.g-btn:hover, a.g-icon-btn:hover { text-decoration: none
   background: color-mix(in srgb, var(--warn) 8%, var(--bg-canvas));
 }
 .g-pending__state { color: var(--text-3); font-size: var(--text-sm); line-height: var(--leading-sm); font-weight: var(--weight-medium); }
+.g-pending__tag { color: var(--text-2); font-weight: var(--weight-regular); }
 .g-pending__summary { font-size: var(--text-lg); line-height: var(--leading-lg); font-weight: var(--weight-medium); color: var(--text-1); overflow-wrap: anywhere; }
 .g-pending__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-top: var(--space-2); }
 .g-pending__aside { display: inline-flex; align-items: baseline; gap: var(--space-3); color: var(--text-2); font-size: var(--text-sm); line-height: var(--leading-sm); }
 .g-pending__clock { color: var(--warn); font-weight: var(--weight-medium); }
 .g-pending.is-urgent .g-pending__clock { color: var(--danger); font-weight: var(--weight-semibold); }
 /* Details: a quiet text button at the end of the answers. */
-.g-pending__toggle { margin-left: auto; display: inline-flex; align-items: center; gap: var(--space-1); padding: var(--space-1) var(--space-1_5); border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-2); font: inherit; font-size: var(--text-sm); line-height: var(--leading-sm); cursor: pointer; }
+/* Details is a native disclosure under the card's answers; its summary is a quiet text button. */
+.g-pending__more { display: flex; flex-direction: column; }
+.g-pending__more > summary { list-style: none; }
+.g-pending__more > summary::-webkit-details-marker { display: none; }
+.g-pending__toggle { align-self: flex-start; margin-left: calc(-1 * var(--space-1_5)); display: inline-flex; align-items: center; gap: var(--space-1); padding: var(--space-1) var(--space-1_5); border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-2); font: inherit; font-size: var(--text-sm); line-height: var(--leading-sm); cursor: pointer; }
 .g-pending__toggle:hover { color: var(--text-1); background: var(--bg-hover); }
 .g-pending__toggle:focus-visible { outline: var(--focus-outline); outline-offset: var(--focus-offset); }
 .g-pending__chevron { transition: transform var(--duration-fast) ease; }
-.g-pending__chevron.is-open { transform: rotate(180deg); }
+.g-pending__more[open] .g-pending__chevron { transform: rotate(180deg); }
 @media (prefers-reduced-motion: reduce) { .g-pending__chevron { transition: none; } }
 /* ADR 0070: the sticky choice, on the card, quieter than the answers. */
 .g-pending__always { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); padding-top: var(--space-2); border-top: 1px solid var(--border-subtle); }

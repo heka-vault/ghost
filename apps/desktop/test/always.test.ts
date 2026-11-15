@@ -6,7 +6,7 @@ import { MockDaemon } from "../src/design/mock/daemon";
 import { composeFixtures } from "../src/design/mock/fixtures";
 import { scenarioByName } from "../src/design/mock/scenarios";
 import { decidedMeta } from "../src/screens/policy/model";
-import { ALWAYS_WHERE, CLOCK_FROM, FACE_WORDS, HELD_SHORT, NO, SAY_IT, YES, actionWords, alwaysDone, alwaysWords, clockWords, decidedWords, faceOf, ignoreEnter } from "../src/ui/always";
+import { ALWAYS_WHERE, CLOCK_FROM, FACE_WORDS, HELD_SHORT, NO, SAY_IT, YES, actionWords, alwaysDone, alwaysWords, clockWords, decidedWords, faceOf, ignoreEnter, plainSummary, shortTarget } from "../src/ui/always";
 
 const offer: AlwaysOffer = { rule: "github.issue_write", scope: "“issue write” in github", allow: true };
 const words = (s: string) => s.split(/\s+/).filter(Boolean).length;
@@ -71,6 +71,16 @@ describe("the card's words from a tool's name (ADR 0070, the card of 2026-11-14)
   it("is the same words on Permissions' What you've decided", () => {
     expect(decidedWords("allow", "github.issues_close")).toBe("Always close issues in GitHub");
     expect(decidedWords("block", "github.issues_close")).toBe("Never close issues in GitHub");
+  });
+});
+
+describe("the card's sentence and its target", () => {
+  it("leads with what is done; the target's short name tells two cards apart", () => {
+    expect(plainSummary("On ghost-mock/app#17: close the issue.")).toEqual({ what: "Close the issue.", on: "ghost-mock/app#17" });
+    expect(plainSummary("Close app#151 as a duplicate of #148")).toEqual({ what: "Close app#151 as a duplicate of #148", on: null });
+    expect(shortTarget("ghost-mock/app#17")).toBe("app#17");
+    expect(shortTarget("accounting")).toBe("accounting");
+    expect(shortTarget("a/very-long-repository-name-that-goes-on#12")).toHaveLength(24);
   });
 });
 

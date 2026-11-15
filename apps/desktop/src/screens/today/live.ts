@@ -52,6 +52,14 @@ export function withoutLive<T extends NeedsLike>(needs: T, pending: Pick<Pending
   };
 }
 
+/**
+ * How many changes wait on Today's screen at once (the strip's and Decide's): more than one, and
+ * each card adds its target's short name to its sentence so they can be told apart.
+ */
+export function changesOnScreen(needs: NeedsLike, pending: PendingProposal | null): number {
+  return liveNeeds(needs, pending).decide.length;
+}
+
 /** How many things need the operator: one number for the headline and the rail's badge. */
 export function needCount(needs: NeedsLike, pending: PendingProposal | null): number {
   const all = liveNeeds(needs, pending);

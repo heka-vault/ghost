@@ -18,7 +18,7 @@ import { nameOf, useToday } from "../../app/today";
 import { Button, IconButton, Input, LineGlyph, Menu, PendingChange, alwaysDone, cx, errorText, relativeTime, useLive, useToast } from "../../ui";
 import { appWords } from "../../ui/always";
 import { needLine, runReason, took } from "./model";
-import { liveNeeds, withoutLive } from "./live";
+import { changesOnScreen, liveNeeds, withoutLive } from "./live";
 import { actionFailure, canSend, expiresIn, sourceLabel, untilTomorrowMorning } from "./needs";
 import { count, tallyFor } from "./telemetry";
 
@@ -53,6 +53,7 @@ export function Now({ pending = null, question = null }: { pending?: PendingProp
   const { online } = useLive();
   const { busy, act } = useAct();
   const { decide, answer, know } = withoutLive(liveNeeds(today.needs, pending), pending, question);
+  const many = changesOnScreen(today.needs, pending) > 1;
   const clear = !decide.length && !answer.length && !know.length;
 
   return (
@@ -70,7 +71,7 @@ export function Now({ pending = null, question = null }: { pending?: PendingProp
             Decide <span className="t-num">{decide.length}</span>
           </h2>
           {decide.map((i) => (
-            <Decide key={i.key} item={i} busy={busy === i.key} act={act} online={online} />
+            <Decide key={i.key} item={i} busy={busy === i.key} act={act} online={online} many={many} />
           ))}
         </section>
       )}
@@ -202,7 +203,7 @@ function listWords(xs: string[]): string {
  * calls the gate's confirm by id and nothing else (the click is confirmation evidence, ADR 0013).
  * Its "More choices" makes the decision stick for the change's own tool (ADR 0070).
  */
-function Decide({ item, busy, act, online }: { item: WaitingItemView; busy: boolean; act: Act; online: boolean }) {
+function Decide({ item, busy, act, online, many }: { item: WaitingItemView; busy: boolean; act: Act; online: boolean; many: boolean }) {
   const { client } = useGhost();
   const change = item.change!;
   return (
@@ -212,6 +213,7 @@ function Decide({ item, busy, act, online }: { item: WaitingItemView; busy: bool
         rationale={change.rationale}
         operation={`${change.source}.${change.operation}`}
         target={change.target}
+        showTarget={many}
         expiresAt={change.expires_at}
         busy={busy}
         disabled={!online}

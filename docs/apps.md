@@ -208,14 +208,14 @@ Ghost's model to write for it (sampling), and an app's own screens are not shown
 
 Most of the time you set a permission at the moment Ghost asks. Under Yes and No, the card
 that waits for your yes has two quieter answers for that change's own tool, named in plain
-words from the tool's name and the app (“Change issues in GitHub: Always · Never”):
+words from the tool's name and the app (“Change issues in GitHub: Always allow · Never allow”):
 
-- **Always**: the change runs now, and from then on that tool runs without asking (an
+- **Always allow**: the change runs now, and from then on that tool runs without asking (an
   `allow` rule, `github.issue_write`).
-- **Never**: the change is dropped, and that tool is blocked (a `block` rule).
+- **Never allow**: the change is dropped, and that tool is blocked (a `block` rule).
 
 Only that one tool of that one app, never a whole app or a pattern. If one of your own rules
-would still ask for it, the card says so (“Your rules ask every time”) instead of offering Always: change that
+would still ask for it, the card says so (“Your rules ask every time”) instead of offering Always allow: change that
 rule in Settings › Permissions. What you decide this way is listed at the top of Settings ›
 Permissions, in a sentence with the day you set it, and **Remove** takes it back out of the
 file (there is no undo; removing is how you change your mind). Ghost follows a new rule from

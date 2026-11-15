@@ -5,7 +5,7 @@
  * already has (`ghost_schedule_manage`, `ghost_watch_manage`, ADR 0047, ADR 0052) through the
  * gate, which asks where the operator's permissions or ADR 0052's defaults say so. Nothing here
  * writes a schedule or a watch, chooses one, or reads the words: the window sends them and shows
- * what came back. A change waiting for a yes is the one `PendingChange` card, whose Confirm calls
+ * what came back. A change waiting for a yes is the one `PendingChange` card, whose Yes calls
  * `client.confirm()` and nothing else (ADR 0013). Ghost's reply is shown in place, and the list
  * is read again each time one arrives.
  */

@@ -168,7 +168,7 @@ export default function OnItsOwnScreen(_: RouteProps) {
     } else if (d.kind === "watch") {
       const ok = await confirm({
         title: `Remove ${d.w.name}?`,
-        description: `It stops looking, and its entry leaves watches.json. ${nameOf(madeBySlug(d.w))} can set it up again only with your okay.`,
+        description: `It stops looking, and its entry leaves watches.json. ${nameOf(madeBySlug(d.w))} can set it up again only with your yes.`,
         confirmLabel: `Remove ${d.w.name}`,
         tone: "danger",
       });
@@ -340,7 +340,7 @@ export default function OnItsOwnScreen(_: RouteProps) {
             />
           </Card>
           <p className="wat-files t-small t-3">
-            The files: <span className="t-mono">{CONFIG_DIR}/watches.json</span> and <span className="t-mono">hooks.json</span>. They are yours. An agent may add a watch of its own with your okay, marked with who made it; Ghost never changes your own entries or the webhooks. Schedules are kept by Ghost, not in a file.
+            The files: <span className="t-mono">{CONFIG_DIR}/watches.json</span> and <span className="t-mono">hooks.json</span>. They are yours. An agent may add a watch of its own with your yes, marked with who made it; Ghost never changes your own entries or the webhooks. Schedules are kept by Ghost, not in a file.
           </p>
         </Disclosure>
       </div>

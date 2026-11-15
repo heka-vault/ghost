@@ -606,7 +606,7 @@ export function AgentDetail({ slug, manage = false }: { slug: string; manage?: b
     // How many turns and compactions are its memory's facts: on Memory, not in the header.
   }
   // The page status is the agent's own state while it is live, in the sidebar's words
-  // ("Waiting on your okay" in amber while a change waits here, else "Live · listening"), and
+  // ("Waiting for your yes" in amber while a change waits here, else "Live · listening"), and
   // Ghost's state otherwise, like every other screen. Either way it stays in the compact bar
   // when the header scrolls away. The description keeps the agent's facts.
   const state = lineState({ live, pending: !!pending, connection, phase, lastActive: detail?.last_active_at ?? null });

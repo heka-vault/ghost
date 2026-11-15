@@ -6,6 +6,7 @@
  * Every line here is text from the operator's own Ghost, but titles, answers and summaries can
  * carry an outside system's words: they are shown as text, never as markup.
  */
+import { plainSummary } from "../../ui/always";
 import type { AppView, AuditEntry, ModelCheckView, QuestionView, ScheduleRunInfo, WaitingItemView } from "@ghost/client-ts";
 
 // ---------------------------------------------------------------- what needs you
@@ -142,16 +143,8 @@ export function runReason(r: ScheduleRunInfo): string {
   return "on its schedule";
 }
 
-/**
- * A change's summary as a row says it: the gate writes “On <target>: <what>.” (ADR 0011), and
- * the target is an identifier (`ghost-mock/app#208`), so the row leads with what was done and
- * the target goes behind the row's disclosure. A summary in any other shape is kept whole.
- */
-export function plainChange(summary: string): { what: string; on: string | null } {
-  const m = /^On ([^:\n]{1,120}): (\S[\s\S]*)$/.exec(summary.trim());
-  if (!m) return { what: summary, on: null };
-  return { what: m[2].charAt(0).toUpperCase() + m[2].slice(1), on: m[1] };
-}
+/** A change's summary as a row says it: what was done first, the target behind the row (`plainSummary`). */
+export const plainChange = plainSummary;
 
 /** The agent behind an audit entry: the conversation it was made in, Ghost when none. */
 function auditAgent(a: AuditEntry): string {

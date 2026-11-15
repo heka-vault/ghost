@@ -179,6 +179,29 @@ export function clockWords(secondsLeft: number | null): string | null {
   return `${Math.floor(secondsLeft / 60)}:${String(secondsLeft % 60).padStart(2, "0")} left`;
 }
 
+/**
+ * A change's summary as a card or a row says it: the gate writes “On <target>: <what>.” (ADR
+ * 0011), and the target is an identifier (`ghost-mock/app#17`), so the face leads with what is
+ * done (“Close the issue.”) and the target is under Details. A summary in any other shape is kept
+ * whole, with no target.
+ */
+export function plainSummary(summary: string): { what: string; on: string | null } {
+  const m = /^On ([^:\n]{1,120}): (\S[\s\S]*)$/.exec(summary.trim());
+  if (!m) return { what: summary, on: null };
+  return { what: m[2].charAt(0).toUpperCase() + m[2].slice(1), on: m[1] };
+}
+
+/**
+ * The target's short name, for a card's face when more than one change waits on screen (so two
+ * “Close the issue.” cards can be told apart): its last part, `ghost-mock/app#17` → “app#17”,
+ * at most 24 characters.
+ */
+export function shortTarget(on: string): string {
+  const t = on.trim();
+  const last = t.split("/").filter(Boolean).pop() ?? t;
+  return last.length > 24 ? `${last.slice(0, 23)}…` : last;
+}
+
 const countWords = (s: string) => s.split(/\s+/).filter(Boolean).length;
 
 export interface Face {
@@ -195,8 +218,8 @@ export interface Face {
  * voice session is live, the clock in its last minute, the sticky label and its two buttons, and
  * Details. The summary takes what is left and is cut at a word when it would go over.
  */
-export function faceOf(summary: string, o: { sayable?: boolean; clock?: string | null; sticky?: AlwaysWords | null; details?: boolean } = {}): Face {
-  const rest = [YES, NO, o.sayable ? SAY_IT : "", o.clock ?? "", o.sticky ? `${o.sticky.label} ${o.sticky.allow ? "Always allow" : o.sticky.held} Never allow` : "", o.details === false ? "" : DETAILS].filter(Boolean).join(" ");
+export function faceOf(summary: string, o: { sayable?: boolean; clock?: string | null; sticky?: AlwaysWords | null; details?: boolean; tag?: string | null } = {}): Face {
+  const rest = [o.tag ?? "", YES, NO, o.sayable ? SAY_IT : "", o.clock ?? "", o.sticky ? `${o.sticky.label} ${o.sticky.allow ? "Always allow" : o.sticky.held} Never allow` : "", o.details === false ? "" : DETAILS].filter(Boolean).join(" ");
   const room = Math.max(4, FACE_WORDS - countWords(rest));
   const words = summary.trim().split(/\s+/).filter(Boolean);
   const cut = words.length > room;

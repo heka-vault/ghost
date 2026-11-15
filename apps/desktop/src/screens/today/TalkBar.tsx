@@ -23,7 +23,7 @@ import { nameOf, useToday } from "../../app/today";
 import { Button, IconButton, LineGlyph, PendingChange, SpeakingWave, VoicePresence, type GhostPhase, alwaysDone, cx, errorText, useLive, useToast } from "../../ui";
 import { stageState, stageWords } from "../session/Stage";
 import { useSessionQuestions } from "../session/live";
-import { liveQuestion } from "./live";
+import { changesOnScreen, liveQuestion } from "./live";
 
 /** The session's live state, for the talk bar and for Now (which leaves out what the strip shows). */
 export function useLiveSession() {
@@ -50,6 +50,7 @@ export type LiveSession = ReturnType<typeof useLiveSession>;
 /** `live`: `useLiveSession()`, read once by Today for this bar and for Now. */
 export function TalkBar({ live }: { live: LiveSession }) {
   const { client, status } = useGhost();
+  const today = useToday();
   const { online, phase, loadingModels } = useLive();
   const toast = useToast();
   const [text, setText] = useState("");
@@ -142,6 +143,7 @@ export function TalkBar({ live }: { live: LiveSession }) {
           rationale={live.pending.rationale}
           operation={`${live.pending.source}.${live.pending.operation}`}
           target={live.pending.target}
+          showTarget={changesOnScreen(today.needs, live.pending) > 1}
           expiresAt={live.pending.expires_at}
           sayable={inSession && !typedSession(status)}
           busy={busy === "confirm" ? "confirm" : busy === "cancel" ? "cancel" : false}
