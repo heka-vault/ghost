@@ -88,7 +88,13 @@ jobs:
       - uses: EmbarkStudios/cargo-deny-action@v2
         with: { command: check }
 
-  # Which files a pull request touches, for the bundle below.
+  # Which files a pull request touches, for the bundle below. The list is the build
+  # process and nothing else: the two workflows, the shell's packaging (its config, build
+  # script, manifest, removal script, icons, capabilities), the scripts and tools that stage
+  # and describe the bundle, and the workspace manifest (the release profile, the members).
+  # Ordinary source, a crate's own manifest and the lock files are not on it: the tests'
+  # build proves those compile. Of the 45 pull requests merged before this one, 9 touched
+  # the list. If the bundle starts running on most pull requests, narrow this list.
   changes:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -104,23 +110,26 @@ jobs:
         with:
           filters: |
             packaging:
-              - '.github/workflows/**'
-              - 'apps/desktop/src-tauri/**'
-              - 'apps/desktop/package.json'
-              - 'apps/desktop/vite.config.ts'
-              - 'scripts/**'
+              - '.github/workflows/ci.yml'
+              - '.github/workflows/release.yml'
+              - 'apps/desktop/src-tauri/tauri*.conf.json'
+              - 'apps/desktop/src-tauri/build.rs'
+              - 'apps/desktop/src-tauri/Cargo.toml'
+              - 'apps/desktop/src-tauri/prerm'
+              - 'apps/desktop/src-tauri/icons/**'
+              - 'apps/desktop/src-tauri/capabilities/**'
+              - 'scripts/sidecars.sh'
+              - 'scripts/onnxruntime.sh'
+              - 'scripts/models.sh'
+              - 'scripts/posthog-cli.sh'
+              - 'tools/report_chunks.py'
+              - 'tools/release_manifest.py'
               - 'Cargo.toml'
-              - 'Cargo.lock'
-              - 'crates/*/Cargo.toml'
-              - 'crates/*/build.rs'
               - 'package.json'
-              - 'pnpm-lock.yaml'
-              - 'pnpm-workspace.yaml'
-              - 'Makefile'
 
   # The bundle (ADR 0038): the daemon and the app's binaries in release, packaged with what
   # they need. It runs on every push to main, and for a pull request (and its turn in the
-  # merge queue) only when it touches what packaging is made from: a change to ordinary code
+  # merge queue) only when it touches the build process (the list above): a change to ordinary code
   # is proven by the tests, by main's run after it lands, and by the release workflow before
   # anything ships. A pull request builds the .deb alone; main builds the AppImage too. The
   # release profile is the same everywhere, so main's cache of the dependencies serves all.
