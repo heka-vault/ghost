@@ -213,12 +213,6 @@
 .onb-model .set-section + .set-section { margin-top: var(--space-6); }
 
 /* An agent: the family of shapes before the first, then the one hired, large. */
-.onb-shapes { display: flex; flex-wrap: wrap; gap: var(--space-3); }
-.onb-shapes__one { display: inline-grid; place-items: center; width: var(--space-16); height: var(--space-16); border-radius: var(--radius-xl); --agent-eye: var(--bg-canvas); }
-.onb-hired { display: flex; align-items: center; gap: var(--space-6); }
-.onb-hired__mark { flex: none; display: inline-grid; place-items: center; width: calc(var(--space-20) + var(--space-8)); height: calc(var(--space-20) + var(--space-8)); border-radius: var(--radius-xl); --agent-eye: var(--bg-canvas); animation: onb-hero-ok var(--duration-slower) var(--ease-emphasized) both; }
-.onb-hired__name { margin: 0 0 var(--space-1); font-size: var(--text-2xl); line-height: var(--leading-2xl); font-weight: var(--weight-semibold); color: var(--text-1); }
-.onb-hired__job { margin: 0; font-size: var(--text-md); line-height: var(--leading-md); color: var(--text-2); }
 
 /* The first question and its answer: Ghost's words brightest, as on the conversation screen. */
 .onb-ask { display: flex; flex-direction: column; align-items: center; gap: var(--space-4); width: 100%; }
@@ -230,6 +224,12 @@
 .onb-exchange__q { display: flex; align-items: center; gap: var(--space-1_5); font-size: var(--text-lg); line-height: var(--leading-lg); color: var(--text-2); }
 .onb-exchange__a { font-size: var(--text-2xl); line-height: var(--leading-2xl); color: var(--text-1); }
 .onb-summary { width: 100%; text-align: left; }
+/* Done: agents exist and how to get one; what Ghost keeps, for anyone who reached Done without its page. */
+.onb-agents-line { margin: var(--space-4) 0 0; text-align: left; width: 100%; }
+.onb-done-keeps { display: flex; flex-direction: column; gap: var(--space-2); width: 100%; margin-bottom: var(--space-6); text-align: left; }
+/* The wake beat's quiet “Other ways to start”: Type instead, Wake it with a click. */
+.onb-other { margin-top: var(--space-2); text-align: center; }
+.onb-other .onb-try__actions { flex-wrap: wrap; justify-content: center; margin-top: 0; }
 
 /* ---------------------------------------------------------------------------- done */
 .onb-next { display: flex; flex-direction: column; gap: var(--space-2); width: 100%; text-align: left; }
@@ -254,7 +254,7 @@
   .onb-path__stop:nth-child(2) .onb-path__wire { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .onb-hired__mark, .onb-hero__ok, .onb-moment.is-met::after { animation: none; }
+  .onb-hero__ok, .onb-moment.is-met::after { animation: none; }
   .onb-moment.is-met::after { opacity: 0; }
   .onb-rail__bar > span { transition: none; }
 }
