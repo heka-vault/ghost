@@ -32,8 +32,9 @@ Turn did not hear an end 1.6 s (`GHOST_TURN_STOP_SECS`); the close after an unfi
 3 s (`GHOST_TURN_UNFINISHED_SECS`).
 
 **Say the wake phrase, wait for Ghost's opening sound, then the line.** Running straight on
-is a separate test (G1): the first words after the wake are dropped by the echo warm-up
-guard (#54), and that would hide what the turn tests measure. `…` is a stop of about half
+is a separate test (G1): where the microphone path leaks Ghost's onset (`ghost.mic`, an
+unprotected microphone, the phone) the echo warm-up guard drops the first words after the
+wake (#54, ADR 0064 as amended by PR #113), and that would hide what the turn tests measure. `…` is a stop of about half
 a second, then go on. Pause music for parts B to E; part H brings it back.
 
 ## Part A: the audio path
@@ -109,7 +110,7 @@ Then, for the third round (2026-11-12, ADR 0053 and 0054). D5 and D6 need Kokoro
 | | Do | Pass |
 |---|---|---|
 | E1 | "Count to twenty slowly", then after a few numbers: "Stop, that's enough." | Ghost stops within a second and answers you. `turn: barge-in on interim` and `cut off 0.xs after the operator began`. Fail: your words merge into the counting request. |
-| E2 | One word, "Okay", while Ghost is talking | Ghost keeps talking (cutting it off takes two words). `turn: dropped "Okay" while Ghost speaks`. |
+| E2 | One word, "Okay", while Ghost is talking. Then one word, "Stop" | "Okay": Ghost keeps talking, `turn: dropped "Okay" while Ghost speaks`. "Stop" (or "wait", "enough", "quiet", "pause") cuts it off by itself (PR #114). |
 | E3 | Through the whole run, watch for turns Ghost starts from its own words | No `turn:` line whose text is a sentence Ghost just said. |
 
 ## Part F: the screens
@@ -211,3 +212,26 @@ Also seen: four of nine wakes scored 0.34 to 0.59 and were refused when Parakeet
 | the rest | not run | |
 
 Also seen: "A ghost." accepted three times by the check that refused it in the morning, and four more wakes refused at 0.32 to 0.51; the name said mid-session answered with no model call; a pause after "Read me issue" joined into one turn; two sessions opened by reading the slow-connection note aloud (PR #91: shown, never said); the issue read failed because only the first of two GitHub connections was tried (PR #94, the twin read); the prompt cache was lost after every tool call (PR #94). The wake's misses were traced that night to the host canceller deleting the onset (#100, ADR 0064: the desk now hears the array's own channel) and the detector's own limit to data (#101, ADR 0065). Neither change has had a live run.
+
+### 2026-11-13, PR #113 then PR #114, the same desk, the array's own channel (ADR 0064)
+
+Recorded afterwards from the session's notes, not by the checker.
+
+Speaker checks first, with the room empty:
+
+| Item | Result | Note |
+|---|---|---|
+| A6, E3 | pass | Ghost did not wake on its own voice: no VAD segment and no detector hit over about 90 s of its own sentences and 80 synthetic "hey ghost" clips played through the speakers; no self barge-in within a session |
+| onset leak (#42) | none on this path | the first 0.5 s of a reply read about −54 dBFS at the array against a −55 dBFS floor, with −19 dBFS played |
+
+Then with the operator at the desk, on the build with the echo warm-up guard off for this path (ADR 0064 as amended, PR #113):
+
+| Item | Result | Note |
+|---|---|---|
+| H, wakes | 4 of 5 | with music playing; detector scores 0.56, 0.87, 0.34 (refused), 0.60, 0.33 |
+| G1, A7 | pass | the wake and the request in one breath worked 3 of 3 (#54) |
+| E2 | pass | a one-word reply at Ghost's onset was heard, and dropped as a backchannel when it was only an acknowledgment |
+| E1 | fail, then pass | "Stop." alone did not interrupt: two words were needed. Fixed the same day by the one-word stop rule (PR #114) and checked live: "Stop" cut Ghost in 0.50 s, "Wait" in 0.51 s, and an acknowledgment alone was still dropped |
+| the rest | not run | |
+
+Also seen: a fragment was first read as a word in another script; the whole-turn re-read corrected it.
