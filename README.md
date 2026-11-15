@@ -384,9 +384,10 @@ right there. Its voice, an app, an agent and a first question follow, each optio
 Ghost appears, how it reaches you, your phone and apps, error reports, removing Ghost), **Model**,
 **Sound**, **Permissions** and **About** (the version, updates, licences and **Save a diagnostic
 report**). An agent's settings are on its own page, and a password is added where it is used.
-Click the version on About seven times for **Developer**: debug mode, checks, experimental
-switches and the advanced pages (passwords, skills, outside tools, the audit log, notification
-routes). Nothing there is locked away: each is also a file or a command.
+Click the version on About seven times for **Developer**: debug mode, checks (a test error
+report and `ghostd check`, run from the page), a live timing overlay for each turn, a live
+microphone meter (levels and what Ghost decided, never words), experimental switches and the
+advanced pages (passwords, skills, outside tools, the audit log, notification routes). Nothing there is locked away: each is also a file or a command.
 
 ## What's rough
 
