@@ -1,7 +1,7 @@
 /*
- * heyghost.app. Dark on purpose, whatever the OS asks: the site is the floating room's stage,
+ * heyghost.app. Dark on purpose, whatever the OS asks: the site is the floating view's stage,
  * and takes its palette (apps/desktop/src/floating/floating.css, docs/design-system.md, The
- * floating room): glow on black, the phase hues pushed to neon, weight 800 for display only.
+ * floating view): glow on black, the phase hues pushed to neon, weight 800 for display only.
  * Green listens, violet works, cyan speaks; amber means only "waiting for your yes" (the one
  * picture of it) and red only the mic off, so neither is used anywhere else. The float's own
  * language is the page's structure: a beam runs down it (the spine), each part starts where a

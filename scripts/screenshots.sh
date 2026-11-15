@@ -12,7 +12,7 @@
 # Then the floating room's (scripts/floating-shots.mjs, Node 22 or later): the real floating
 # page with `?mock=floating-tour` laid over a made-up desktop (apps/desktop/shots/desktop.html),
 # four stills at 2x and floating-loop.webp, one whole turn as an animated WebP at 30 frames a second
-# (about 4 MB; the loop takes a few minutes to encode). `scripts/screenshots.sh floating-hero` takes only that one.
+# (about 3.5 MB, encoded by tools/loop_webp.py with uv; the loop takes a few minutes to encode). `scripts/screenshots.sh floating-hero` takes only that one.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -28,7 +28,7 @@ SHOTS=(
   "home|passive|/|4000"
   "session|thread|/session|9000"
   "session-pending|pending|/session|4000"
-  "agents|passive|/settings/agents|4000"
+  "agents|passive|/agents|4000"
   "apps|busy|/apps|4000"
   "watching|passive|/on-its-own|4000"
   "model|passive|/settings/model|4000"

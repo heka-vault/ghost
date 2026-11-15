@@ -2,7 +2,7 @@
 /**
  * The hero's moving picture, loaded behind the front page's words only once the page has
  * settled (src/components/Hero.astro): the README's made-up desktop (apps/desktop/shots/world.*,
- * one world for both) scaled to cover the window, and over it the desktop app's floating room
+ * one world for both) scaled to cover the window, and over it the desktop app's floating view
  * playing the `floating-site` loop. Its own page so the room has a window of its own to measure
  * (it lays itself out from the window, as on a monitor), and so none of its script is on the
  * front page's first paint. Not in the sitemap, not indexed.
@@ -38,7 +38,7 @@ import FloatDemo from "../components/FloatDemo";
       .world[data-arrange="site"] .browser { left: 860px; top: 86px; width: 410px; }
       .world[data-arrange="site"] .browser .cols { grid-template-columns: repeat(2, 1fr); }
       .world[data-arrange="site"] .browser .col:last-child { display: none; }
-      /* The floating room draws over the desktop, as it does over a real one. */
+      /* The floating view draws over the desktop, as it does over a real one. */
       .demo-room { position: fixed; inset: 0; z-index: 2; }
     </style>
   </head>

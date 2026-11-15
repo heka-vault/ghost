@@ -11,7 +11,7 @@ Only from a released build (the .deb or the AppImage from a GitHub release), and
 build from the checkout never sends one. A report is sent for:
 
 - Ghost's daemon or the app crashing (a Rust panic), in any of its processes;
-- a page of the app failing (the main window or the floating room);
+- a page of the app failing (the main window or the floating view);
 - one of a short list of times Ghost did not work: a turn's model call failed, the speech
   models would not load or download, the sound output stopped playing, the microphone stopped
   hearing well, an update did not install, the app could not start the daemon, or the daemon
