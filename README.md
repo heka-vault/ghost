@@ -552,6 +552,7 @@ Contributing, filing an issue and what to put in it: [CONTRIBUTING.md](CONTRIBUT
 | [docs/architecture.md](docs/architecture.md) | The design: components, how a conversation flows, how changes stay safe |
 | [docs/agent-setup.md](docs/agent-setup.md) | The setup guide a coding agent follows (heyghost.app/agents.md) |
 | [docs/apps.md](docs/apps.md) | Connecting apps: the catalog, sign-in, keys, local packages |
+| [docs/dictation.md](docs/dictation.md) | Dictating to the clipboard, and the keyboard shortcut for it |
 | [docs/folder.md](docs/folder.md), [docs/skills.md](docs/skills.md) | Ghost's folder: rules, agents, watches, skills |
 | [docs/tools.md](docs/tools.md) | Every tool Ghost's agents have, and its default |
 | [docs/realtime-voice.md](docs/realtime-voice.md) | The optional realtime speech-to-speech voice |
