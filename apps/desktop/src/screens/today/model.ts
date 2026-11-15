@@ -137,9 +137,20 @@ export function runAnswer(r: ScheduleRunInfo): string | null {
 
 /** Why a run started, in a few words: its schedule, a watch, or the operator. */
 export function runReason(r: ScheduleRunInfo): string {
-  if (r.source.startsWith("watch:")) return `for the ${r.source.slice(6)} watch`;
+  if (r.source.startsWith("watch:")) return "for a watch";
   if (r.source === "run_now") return "when asked";
   return "on its schedule";
+}
+
+/**
+ * A change's summary as a row says it: the gate writes “On <target>: <what>.” (ADR 0011), and
+ * the target is an identifier (`ghost-mock/app#208`), so the row leads with what was done and
+ * the target goes behind the row's disclosure. A summary in any other shape is kept whole.
+ */
+export function plainChange(summary: string): { what: string; on: string | null } {
+  const m = /^On ([^:\n]{1,120}): (\S[\s\S]*)$/.exec(summary.trim());
+  if (!m) return { what: summary, on: null };
+  return { what: m[2].charAt(0).toUpperCase() + m[2].slice(1), on: m[1] };
 }
 
 /** The agent behind an audit entry: the conversation it was made in, Ghost when none. */
@@ -164,7 +175,8 @@ export function momentsOf(r: DayRecords, day: Date): Moment[] {
   for (const a of r.audit) {
     if (a.status === "pending" || !inDay(a.created_at, b)) continue;
     const tone: MomentTone = a.status === "executed" ? "ok" : a.status === "failed" ? "failed" : "quiet";
-    out.push({ id: `c-${a.id}`, kind: "change", at: a.created_at, agent: auditAgent(a), title: a.summary, tone, mono: `${a.source}.${a.operation}`, detail: tone === "quiet" ? changeAside(a.status) : null });
+    const plain = plainChange(a.summary);
+    out.push({ id: `c-${a.id}`, kind: "change", at: a.created_at, agent: auditAgent(a), title: plain.what, tone, mono: [plain.on, `${a.source}.${a.operation}`].filter(Boolean).join(" · "), detail: tone === "quiet" ? changeAside(a.status) : null });
   }
   for (const run of r.runs) {
     const at = run.started_at ?? run.scheduled_for;

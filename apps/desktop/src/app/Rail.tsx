@@ -27,6 +27,7 @@ import { FloatingSwitch } from "./FloatingSwitch";
 import { hrefFor, usePath } from "./router";
 import { navMatch } from "./routes";
 import { nameOf, useToday } from "./today";
+import { liveNeeds } from "../screens/today/live";
 import { availableLine, useUpdate } from "./update";
 import { DESKTOP_VERSION, difference } from "./version";
 
@@ -79,11 +80,13 @@ export function Rail() {
           : phase === "starting"
             ? "Loading voice models"
             : "Listening for its name";
-  const needs = today.needs.decide.length + today.needs.answer.length;
+  // The same count as Today's headline: the live session's change once, even before the list has it.
+  const open = liveNeeds(today.needs, inSession ? (status?.pending ?? null) : null);
+  const needs = open.decide.length + open.answer.length;
   const working = today.working.length + (inSession ? 1 : 0);
   const inRoster = path === "/agents" || /^\/agents\/[^/]+\/settings/.test(path);
   const inSettings = path.startsWith("/settings");
-  const all = railAgents({ agents: today.agents, working: today.working, needs: [...today.needs.decide, ...today.needs.answer], session: inSession ? (status?.conversation ?? "ghost") : null, phase });
+  const all = railAgents({ agents: today.agents, working: today.working, needs: [...open.decide, ...open.answer], session: inSession ? (status?.conversation ?? "ghost") : null, phase });
   const openAgent = path.startsWith("/agents/") ? decodeURIComponent(path.slice("/agents/".length).split("/")[0]) : null;
   // The room the agents have, measured, and their order held while the pointer is on them.
   const { navRef, mainRef, groupRef, listRef, fit } = useRailFit();
