@@ -469,7 +469,7 @@ export default function PermissionsScreen(_: RouteProps) {
     <Page
       width="default"
       title="Permissions"
-      description="Everything runs: Ghost uses every app you connect and tells you what it changed. This is where you block, or have Ghost ask you first about, anything you want handled differently. Every change is in the audit log; to reverse one, ask Ghost to change it back."
+      description="Everything runs: Ghost uses every app you connect and tells you what it changed. When it asks you first, your answer can stick; what you decided that way is here. Every change is in the audit log; to reverse one, ask Ghost to change it back."
       actions={
         view === "toml" && (
         <SegmentedControl<View>
