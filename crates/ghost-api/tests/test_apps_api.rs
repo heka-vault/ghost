@@ -247,10 +247,23 @@ async fn the_catalog_lists_first_party_apps_and_searches() {
     with_apps(&mut w);
     let c = w.client();
     let page = c.get("/catalog").await;
+    // the registry's first-party apps, then Ghost's own list of the ones it lacks (ADR 0076)
     assert_eq!(
         common::strings(&page["entries"], "title"),
-        vec!["GitHub".to_string(), "Linear".to_string()]
+        vec![
+            "GitHub",
+            "Linear",
+            "Gmail",
+            "Google Calendar",
+            "Google Drive",
+            "Slack"
+        ]
     );
+    assert_eq!(page["entries"][0]["listed_by_ghost"], false);
+    let gmail = c.get("/catalog/ghost/gmail").await;
+    assert_eq!(gmail["listed_by_ghost"], true);
+    assert_eq!(gmail["options"][0]["kind"], "sign_in");
+    assert!(gmail["publisher"].is_null());
     let gh = &page["entries"][0];
     assert_eq!(gh["suggested_name"], "github-2"); // github is taken
     assert_eq!(gh["options"][0]["kind"], "key");
@@ -826,4 +839,116 @@ fn locked_twin(w: &World) -> Arc<Passwords> {
     let twin = Passwords::new(w.vault.path(), Arc::new(MemoryKeyring::locked()));
     twin.open();
     Arc::new(twin)
+}
+
+const CLIENT_SECRET: &str = "GOCSPX-own-client-secret-value";
+
+#[tokio::test]
+async fn the_persons_own_client_is_kept_and_its_secret_never_comes_back_out() {
+    // ADR 0076: a client ID given when connecting, or afterwards on the app's page. The
+    // secret goes into the vault; apps.json names it; no response, list or audit says it.
+    let mut w = World::new();
+    with_apps(&mut w);
+    let c = w.client();
+    c.get("/catalog").await;
+    let r = c
+        .post(
+            "/apps",
+            Some(json!({
+                "catalog": "ghost/gmail",
+                "option": "remote-0",
+                "client_id": "123-abc.apps.googleusercontent.com",
+                "client_secret": CLIENT_SECRET,
+            })),
+        )
+        .await;
+    assert_eq!(r.status, 200, "{}", r.text);
+    assert!(!r.text.contains(CLIENT_SECRET));
+    let app = &r["apps"][0];
+    assert_eq!(app["kind"], "sign_in");
+    let client = &app["sign_in_client"];
+    assert_eq!(client["client_id"], "123-abc.apps.googleusercontent.com");
+    assert_eq!(client["has_secret"], true);
+    assert_eq!(client["service"], "Google");
+    assert_eq!(client["secret"], "required");
+    assert_eq!(
+        client["make_a_client"],
+        "https://console.cloud.google.com/auth/clients"
+    );
+    let saved = load_apps(&apps_file(&w));
+    let gmail = saved.get("gmail").unwrap();
+    assert_eq!(
+        gmail.client_secret.as_deref(),
+        Some("${GHOST_APP_GMAIL_CLIENT_SECRET}")
+    );
+    let file = std::fs::read_to_string(apps_file(&w)).unwrap();
+    assert!(!file.contains(CLIENT_SECRET), "{file}");
+    assert_eq!(
+        w.vault
+            .value("GHOST_APP_GMAIL_CLIENT_SECRET")
+            .unwrap()
+            .as_str(),
+        CLIENT_SECRET
+    );
+    for path in ["/apps", "/apps/gmail", "/passwords", "/audit"] {
+        let r = c.get(path).await;
+        assert!(!r.text.contains(CLIENT_SECRET), "{path}: {}", r.text);
+    }
+
+    // Changed on the app's page: a new ID with no secret takes the old secret away.
+    let r = c
+        .put(
+            "/apps/gmail/sign-in-client",
+            json!({"client_id": "456-def.apps.googleusercontent.com"}),
+        )
+        .await;
+    assert_eq!(r.status, 200, "{}", r.text);
+    assert_eq!(r["apps"][0]["sign_in_client"]["has_secret"], false);
+    assert!(w.vault.value("GHOST_APP_GMAIL_CLIENT_SECRET").is_none());
+    let saved = load_apps(&apps_file(&w));
+    assert_eq!(
+        saved.get("gmail").unwrap().client_id.as_deref(),
+        Some("456-def.apps.googleusercontent.com")
+    );
+    // null takes the client back
+    let r = c
+        .put("/apps/gmail/sign-in-client", json!({"client_id": null}))
+        .await;
+    assert_eq!(r.status, 200, "{}", r.text);
+    assert!(r["apps"][0]["sign_in_client"]["client_id"].is_null());
+    // a secret alone, a bad ID, and an app that doesn't sign in are refused
+    for (path, body) in [
+        ("/apps/gmail/sign-in-client", json!({"client_secret": "x"})),
+        (
+            "/apps/gmail/sign-in-client",
+            json!({"client_id": "has space"}),
+        ),
+        ("/apps/github/sign-in-client", json!({"client_id": "abc"})),
+    ] {
+        let r = c.put(path, body).await;
+        assert_eq!(r.status, 422, "{path}: {}", r.text);
+    }
+    assert_eq!(
+        c.put("/apps/nope/sign-in-client", json!({"client_id": "a"}))
+            .await
+            .status,
+        404
+    );
+}
+
+#[tokio::test]
+async fn a_client_in_a_pasted_config_is_not_taken() {
+    // Another tool's config may name that tool's client (ADR 0068): it is never Ghost's.
+    let mut w = World::new();
+    with_apps(&mut w);
+    let c = w.client();
+    let pasted = json!({"apps": {"slack": {
+        "url": "https://mcp.slack.com/mcp", "sign_in": true,
+        "client_id": "another-products-client"
+    }}})
+    .to_string();
+    let r = c.post("/apps", Some(json!({"config": pasted}))).await;
+    assert_eq!(r.status, 200, "{}", r.text);
+    let saved = load_apps(&apps_file(&w));
+    assert_eq!(saved.get("slack").unwrap().client_id, None);
 }

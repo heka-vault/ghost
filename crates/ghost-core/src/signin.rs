@@ -1,12 +1,16 @@
 //! Signing in to an app (ADR 0034): OAuth 2.1 with PKCE, the way the MCP authorization spec
 //! asks, through the operator's browser.
 //!
-//! Ghost has no public address, so it cannot publish a client ID metadata document; it
-//! registers itself with the app's authorization server (dynamic client registration),
-//! which `rmcp` does when the server offers it. The browser comes back to a loopback
-//! address, `http://127.0.0.1:<port>/callback`, which listens only while a sign-in is
-//! open, on 127.0.0.1 only, for one path. The port is fixed (`GHOST_SIGNIN_PORT`) because
-//! a registration names its redirect exactly.
+//! Which client Ghost signs in as is chosen in [`crate::signin_clients`] (ADR 0076): the
+//! person's own client ID for the app, Ghost's own for that authorization server, Ghost's
+//! client metadata document (a static file on heyghost.app, whose loopback redirects the
+//! specification allows) where the server takes one, and dynamic registration where it is
+//! offered. A server none of them gets into is said in plain words, never as an error's
+//! kind. The browser comes back to a loopback address, `http://127.0.0.1:<port>/callback`,
+//! which listens only while a sign-in is open, on 127.0.0.1 only, for one path. The port is
+//! fixed (`GHOST_SIGNIN_PORT`) because a registration names its redirect exactly. Ghost's
+//! own client on a server that wants the device flow (GitHub) does without the browser's
+//! way back: the person types a short code on the service's own page ([`device`]).
 //!
 //! Tokens and the registration are kept per app in `~/.local/share/ghost/apps/<name>/
 //! oauth.json` (0600). They never reach the control API, a log line or the model; `rmcp`
@@ -32,6 +36,12 @@ use tokio::sync::oneshot;
 use tracing::{info, warn};
 
 use crate::apps::{App, AppError, AppSpec, AuthFor};
+use crate::signin_clients::{
+    CIMD_URL, Choice, ClientAuth, KnownServer, OwnClient, ServerTakes, choose, needs_a_client,
+    registration_refused,
+};
+
+mod device;
 
 pub const DEFAULT_PORT: u16 = 47823;
 pub const CLIENT_NAME: &str = "Ghost";
@@ -153,6 +163,28 @@ impl FileTokenStorage {
         self.write(&data)
     }
 
+    /// What a device sign-in brought back, kept as `rmcp` keeps a sign-in: the client it
+    /// was for, the tokens, the scopes and the issuer.
+    async fn save_device_token(
+        &self,
+        client_id: &str,
+        token: OAuthTokenResponse,
+        scopes: Vec<String>,
+        issuer: Option<String>,
+    ) -> Result<(), AppError> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        CredentialStore::save(
+            self,
+            StoredCredentials::new(client_id.to_string(), Some(token), scopes, Some(now))
+                .with_issuer(issuer),
+        )
+        .await
+        .map_err(|_| AppError::Connect("CredentialStoreError".into()))
+    }
+
     pub fn has_tokens(&self) -> bool {
         self.read()
             .get("tokens")
@@ -230,8 +262,12 @@ pub type OnUrl = Arc<dyn Fn(&str, &str) + Send + Sync>;
 /// One open sign-in: the app, the address the browser should open, and where the
 /// browser's way back is sent.
 struct Flow {
+    /// Which flow this is: a device flow polls only while its own is open.
+    id: u64,
     app: String,
     url: Option<String>,
+    /// The code the person types on the service's page (the device flow).
+    code: Option<String>,
     sender: Option<oneshot::Sender<Result<HashMap<String, String>, AppError>>>,
     receiver: Option<oneshot::Receiver<Result<HashMap<String, String>, AppError>>>,
 }
@@ -241,6 +277,9 @@ struct State {
     /// One at a time: a new sign-in replaces the open one.
     flow: Option<Flow>,
     server: Option<tokio::task::JoinHandle<()>>,
+    next_id: u64,
+    /// The service an app's sign-in last found it needs a client for (ADR 0076).
+    needs_client: HashMap<String, Option<&'static KnownServer>>,
 }
 
 /// Every app's sign-in. `auth_for` is what `crate::apps::Apps` asks for when it connects
@@ -252,6 +291,8 @@ pub struct SignIns {
     pub port: u16,
     on_url: Option<OnUrl>,
     state: Arc<Mutex<State>>,
+    /// The authorization servers Ghost knows ([`crate::signin_clients::KNOWN_SERVERS`]).
+    servers: &'static [KnownServer],
 }
 
 impl SignIns {
@@ -261,7 +302,19 @@ impl SignIns {
             port: DEFAULT_PORT,
             on_url: None,
             state: Arc::new(Mutex::new(State::default())),
+            servers: crate::signin_clients::KNOWN_SERVERS,
         }
+    }
+
+    /// Another table of servers: a test's fake one, with a client of Ghost's own.
+    #[cfg(test)]
+    fn with_servers(mut self, servers: &'static [KnownServer]) -> Self {
+        self.servers = servers;
+        self
+    }
+
+    fn known(&self, issuer: Option<&str>) -> Option<&'static KnownServer> {
+        crate::signin_clients::known_server_in(self.servers, issuer?)
     }
 
     pub fn with_port(mut self, port: u16) -> Self {
@@ -296,8 +349,37 @@ impl SignIns {
     pub fn forget(&self, app: &str) {
         self.storage(app).clear();
         let mut state = self.lock();
+        state.needs_client.remove(app);
         if state.flow.as_ref().is_some_and(|f| f.app == app) {
             Self::cancel_flow(&mut state);
+        }
+    }
+
+    /// The code to type on the service's page, while a device sign-in waits for it.
+    pub fn pending_code(&self, app: &str) -> Option<String> {
+        let state = self.lock();
+        state
+            .flow
+            .as_ref()
+            .filter(|f| f.app == app)
+            .and_then(|f| f.code.clone())
+    }
+
+    /// The service the app's last sign-in needed a client for, if it did: what the
+    /// desktop asks the person for and where it sends them.
+    pub fn needs_client(&self, app: &str) -> Option<Option<&'static KnownServer>> {
+        self.lock().needs_client.get(app).copied()
+    }
+
+    fn set_needs_client(&self, app: &str, server: Option<Option<&'static KnownServer>>) {
+        let mut state = self.lock();
+        match server {
+            Some(s) => {
+                state.needs_client.insert(app.to_string(), s);
+            }
+            None => {
+                state.needs_client.remove(app);
+            }
         }
     }
 
@@ -360,9 +442,12 @@ impl SignIns {
         let needs_server = {
             let mut state = self.lock();
             Self::cancel_flow(&mut state);
+            state.next_id += 1;
             state.flow = Some(Flow {
+                id: state.next_id,
                 app: app.to_string(),
                 url: Some(url.to_string()),
+                code: None,
                 sender: Some(tx),
                 receiver: None,
             });
@@ -391,6 +476,34 @@ impl SignIns {
             on_url(app, url);
         }
         Ok(rx)
+    }
+
+    /// A device sign-in: the page to open and the code to type there. No loopback
+    /// listener; returns the flow's id, which `flow_open` checks while it polls.
+    fn start_device_flow(&self, app: &str, url: &str, code: &str) -> u64 {
+        let id = {
+            let mut state = self.lock();
+            Self::cancel_flow(&mut state);
+            state.next_id += 1;
+            state.flow = Some(Flow {
+                id: state.next_id,
+                app: app.to_string(),
+                url: Some(url.to_string()),
+                code: Some(code.to_string()),
+                sender: None,
+                receiver: None,
+            });
+            state.next_id
+        };
+        info!("sign-in: {app} is waiting for its code to be typed");
+        if let Some(on_url) = &self.on_url {
+            on_url(app, url);
+        }
+        id
+    }
+
+    fn flow_open(&self, id: u64) -> bool {
+        self.lock().flow.as_ref().is_some_and(|f| f.id == id)
     }
 
     fn cancel_flow(state: &mut State) {
@@ -553,11 +666,13 @@ impl AppAuth {
 
     /// The authorized HTTP client: stored tokens when there are any (refreshed by `rmcp`
     /// as they expire), else a sign-in through the browser when interactive. `fresh`:
-    /// the app refused the stored tokens, so forget them and sign in again.
+    /// the app refused the stored tokens, so forget them and sign in again. `own`: the
+    /// person's own client for this app (ADR 0076), first in the order of choice.
     pub async fn client(
         &self,
         http: reqwest::Client,
         fresh: bool,
+        own: Option<OwnClient>,
     ) -> Result<AuthClient<reqwest::Client>, AppError> {
         let storage = self.signins.storage(&self.spec.name);
         let url = self.spec.url.as_deref().unwrap_or("");
@@ -565,6 +680,20 @@ impl AppAuth {
             .await
             .map_err(auth_error)?;
         manager.set_credential_store(storage.clone());
+        // A person's client with a secret is a confidential one: its refreshes need the
+        // secret, and some servers take it only in the body. The metadata is resolved
+        // here, once, as `initialize_from_store` would have.
+        let with_secret = own.as_ref().and_then(|o| {
+            o.client_secret
+                .as_ref()
+                .map(|s| (o.client_id.clone(), s.clone()))
+        });
+        let mut server: Option<&'static KnownServer> = None;
+        if with_secret.is_some() && !fresh {
+            let resolution = manager.resolve_metadata().await.map_err(auth_error)?;
+            server = self.signins.known(resolution.metadata.issuer.as_deref());
+            manager.set_metadata(shaped(resolution.metadata, server, true));
+        }
         if fresh {
             // The tokens were refused: the registration may stand, the tokens may not.
             let data = storage.read();
@@ -574,6 +703,16 @@ impl AppAuth {
                 storage.write(&data).map_err(AppError::Io)?;
             }
         } else if manager.initialize_from_store().await.map_err(auth_error)? {
+            if let Some((id, secret)) = &with_secret
+                && storage.client_id().as_deref() == Some(id.as_str())
+            {
+                let config = rmcp::transport::auth::OAuthClientConfig::new(
+                    id.clone(),
+                    self.signins.redirect_uri(),
+                )
+                .with_client_secret(secret.clone());
+                manager.configure_client(config).map_err(auth_error)?;
+            }
             return Ok(AuthClient::new(http, manager));
         }
         if !self.interactive {
@@ -583,13 +722,111 @@ impl AppAuth {
             )));
         }
         let resolution = manager.resolve_metadata().await.map_err(auth_error)?;
-        manager.set_metadata(resolution.metadata);
-        let request =
+        let metadata = resolution.metadata;
+        if server.is_none() {
+            server = self.signins.known(metadata.issuer.as_deref());
+        }
+        let takes = ServerTakes {
+            metadata_document: metadata
+                .additional_fields
+                .get("client_id_metadata_document_supported")
+                .and_then(Value::as_bool)
+                == Some(true),
+            registration: metadata.registration_endpoint.is_some(),
+        };
+        let choice = choose(own.as_ref(), server, takes);
+        let shown = self.spec.shown();
+        info!("sign-in: {} as {}", self.spec.name, choice.kind());
+        if choice == Choice::NeedsClient {
+            self.signins.set_needs_client(&self.spec.name, Some(server));
+            return Err(AppError::NeedsClient(needs_a_client(&shown, server)));
+        }
+        self.signins.set_needs_client(&self.spec.name, None);
+        let has_secret = matches!(
+            &choice,
+            Choice::Own(OwnClient {
+                client_secret: Some(_),
+                ..
+            })
+        );
+        let device_endpoint = metadata
+            .additional_fields
+            .get("device_authorization_endpoint")
+            .and_then(Value::as_str)
+            .map(String::from);
+        let issuer = metadata.issuer.clone();
+        let token_endpoint = metadata.token_endpoint.clone();
+        manager.set_metadata(shaped(metadata, server, has_secret));
+        let scopes: Vec<String> = crate::catalog::in_tree_at(url)
+            .map(|t| t.scopes.iter().map(|s| s.to_string()).collect())
+            .unwrap_or_default();
+        let mut request =
             AuthorizationRequest::new(self.signins.redirect_uri()).with_client_name(CLIENT_NAME);
-        let session = AuthorizationSession::new(manager, request)
-            .await
-            .map_err(|(_, e)| auth_error(e))?;
-        self.redirect_handler(&session.auth_url).await?;
+        if !scopes.is_empty() {
+            request = request.with_scopes(scopes.clone());
+        }
+        match &choice {
+            Choice::Own(c) => {
+                request = request.with_preregistered_client(c.client_id.clone());
+                if let Some(secret) = &c.client_secret {
+                    request = request.with_client_secret(secret.clone());
+                }
+            }
+            Choice::Ghost(g) if g.auth == ClientAuth::DeviceFlow => {
+                let Some(endpoint) = device_endpoint else {
+                    warn!("sign-in: no device endpoint for Ghost's client");
+                    return Err(AppError::NeedsClient(needs_a_client(&shown, server)));
+                };
+                let scopes = if scopes.is_empty() {
+                    manager.select_scopes(None, &[])
+                } else {
+                    scopes
+                };
+                let token = device::sign_in(
+                    &self.signins,
+                    &self.spec.name,
+                    &http,
+                    &endpoint,
+                    issuer.as_deref(),
+                    g.client_id,
+                    &scopes,
+                    &token_endpoint,
+                )
+                .await?;
+                storage
+                    .save_device_token(g.client_id, token, scopes, issuer)
+                    .await?;
+                if !manager.initialize_from_store().await.map_err(auth_error)? {
+                    return Err(AppError::NeedsSignIn(format!(
+                        "the sign-in to {shown} didn't keep"
+                    )));
+                }
+                return Ok(AuthClient::new(http, manager));
+            }
+            Choice::Ghost(g) => {
+                request = request.with_preregistered_client(g.client_id);
+            }
+            Choice::MetadataDocument => {
+                request = request.with_client_metadata_url(CIMD_URL);
+            }
+            Choice::Register | Choice::NeedsClient => {}
+        }
+        let session =
+            AuthorizationSession::new(manager, request)
+                .await
+                .map_err(|(_, e)| match e {
+                    AuthError::RegistrationFailed(_) if choice == Choice::Register => {
+                        warn!("sign-in: {}: registration refused", self.spec.name);
+                        self.signins.set_needs_client(&self.spec.name, Some(server));
+                        AppError::NeedsClient(registration_refused(&shown, server))
+                    }
+                    e => auth_error(e),
+                })?;
+        let address = with_params(
+            &session.auth_url,
+            server.map_or(&[], |s| s.authorize_params),
+        );
+        self.redirect_handler(&address).await?;
         let result = self.callback_handler().await?;
         session
             .handle_callback_with_issuer(
@@ -603,14 +840,53 @@ impl AppAuth {
     }
 }
 
+/// The server's metadata as Ghost uses it: a person's secret goes in the body where the
+/// table says that server wants it there.
+fn shaped(
+    mut metadata: rmcp::transport::auth::AuthorizationMetadata,
+    server: Option<&KnownServer>,
+    has_secret: bool,
+) -> rmcp::transport::auth::AuthorizationMetadata {
+    if has_secret && server.is_some_and(|s| s.secret_in_body) {
+        metadata.additional_fields.insert(
+            "token_endpoint_auth_methods_supported".into(),
+            json!(["client_secret_post"]),
+        );
+    }
+    metadata
+}
+
+/// The browser's address with a server's own parameters added (Google's offline access).
+fn with_params(address: &str, params: &[(&str, &str)]) -> String {
+    if params.is_empty() {
+        return address.to_string();
+    }
+    match url::Url::parse(address) {
+        Ok(mut u) => {
+            let have: Vec<String> = u.query_pairs().map(|(k, _)| k.into_owned()).collect();
+            {
+                let mut q = u.query_pairs_mut();
+                for (k, v) in params {
+                    if !have.iter().any(|h| h == k) {
+                        q.append_pair(k, v);
+                    }
+                }
+            }
+            u.to_string()
+        }
+        Err(_) => address.to_string(),
+    }
+}
+
 /// An authorization error by kind only: never a body, a token or an address.
 fn auth_error(e: AuthError) -> AppError {
     let kind = match &e {
-        AuthError::AuthorizationRequired => return AppError::NeedsSignIn("needs sign-in".into()),
+        AuthError::AuthorizationRequired | AuthError::TokenRefreshRejected(_) => {
+            return AppError::NeedsSignIn("needs sign-in".into());
+        }
         AuthError::AuthorizationFailed(_) => "AuthorizationFailed",
         AuthError::TokenExchangeFailed(_) => "TokenExchangeFailed",
         AuthError::TokenRefreshFailed(_) => "TokenRefreshFailed",
-        AuthError::TokenRefreshRejected(_) => "TokenRefreshRejected",
         AuthError::CredentialStoreError(_) => "CredentialStoreError",
         AuthError::HttpError(_) => "HttpError",
         AuthError::OAuthError(_) => "OAuthError",
@@ -633,13 +909,14 @@ impl AuthFor for SignIns {
     async fn auth_for(
         &self,
         spec: &AppSpec,
+        own: Option<OwnClient>,
         http: reqwest::Client,
         interactive: bool,
         fresh: bool,
     ) -> Result<Option<AuthClient<reqwest::Client>>, AppError> {
         match SignIns::auth_for(self, spec, interactive) {
             None => Ok(None),
-            Some(auth) => auth.client(http, fresh).await.map(Some),
+            Some(auth) => auth.client(http, fresh, own).await.map(Some),
         }
     }
 }
@@ -656,6 +933,7 @@ fn _uses(_: &App, _: &Path) {}
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
+    use std::time::Instant;
     use tokio::io::AsyncReadExt;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -848,7 +1126,10 @@ mod tests {
         assert!(s.signed_in("linear"));
         let spec = signs_in("linear", &format!("{}/mcp", server.uri()));
         let auth = s.auth_for(&spec, false).unwrap();
-        let client = auth.client(reqwest::Client::new(), false).await.unwrap();
+        let client = auth
+            .client(reqwest::Client::new(), false, None)
+            .await
+            .unwrap();
         assert_eq!(client.get_access_token().await.unwrap(), "stored-token");
         assert!(s.pending_url("linear").is_none());
     }
@@ -887,7 +1168,7 @@ mod tests {
         let auth = Arc::new(s.auth_for(&spec, true).unwrap());
         let signing_in = tokio::spawn({
             let auth = auth.clone();
-            async move { auth.client(reqwest::Client::new(), false).await }
+            async move { auth.client(reqwest::Client::new(), false, None).await }
         });
         // The "browser": wait for the address, then come back with its state.
         let url = loop {
@@ -928,5 +1209,485 @@ mod tests {
         assert!(text.contains("\"tokens\"") && text.contains("\"client\""));
         s.forget("linear");
         assert!(!s.signed_in("linear"));
+    }
+
+    // --- the order of choice, against fake authorization servers (ADR 0076) -------------
+
+    const CLIENT_SECRET: &str = "own-client-secret-0123456789";
+
+    /// A fake authorization server: the app at `/mcp`, its metadata, the token endpoint.
+    /// `extra` joins the server's metadata (a registration endpoint, the CIMD flag).
+    async fn fake_server(extra: Value) -> MockServer {
+        let server = MockServer::start().await;
+        let base = server.uri();
+        Mock::given(method("GET"))
+            .and(path("/.well-known/oauth-protected-resource/mcp"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "resource": format!("{base}/mcp"),
+                "authorization_servers": [base],
+            })))
+            .mount(&server)
+            .await;
+        let mut meta = json!({
+            "issuer": base,
+            "authorization_endpoint": format!("{base}/authorize"),
+            "token_endpoint": format!("{base}/token"),
+            "response_types_supported": ["code"],
+            "code_challenge_methods_supported": ["S256"],
+        });
+        for (k, v) in extra.as_object().unwrap() {
+            // "BASE" in a value is this server's own address.
+            meta[k] = match v {
+                Value::String(t) => Value::String(t.replace("BASE", &base)),
+                other => other.clone(),
+            };
+        }
+        Mock::given(method("GET"))
+            .and(path("/.well-known/oauth-authorization-server"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(meta))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "access_token": "fresh-token",
+                "token_type": "Bearer",
+                "expires_in": 3600,
+                "refresh_token": "refresh-1"
+            })))
+            .mount(&server)
+            .await;
+        server
+    }
+
+    /// Every log line, at every level, while `f` runs.
+    #[derive(Clone, Default)]
+    struct Lines(Arc<Mutex<Vec<u8>>>);
+
+    impl std::io::Write for Lines {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn capture() -> (Lines, tracing::subscriber::DefaultGuard) {
+        let lines = Lines::default();
+        let writer = lines.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::TRACE)
+            .with_writer(move || writer.clone())
+            .finish();
+        (lines.clone(), tracing::subscriber::set_default(subscriber))
+    }
+
+    /// Sign in to `server`'s app as `own`, playing the browser: returns the address the
+    /// browser was sent to, and the client or the error.
+    async fn sign_in_as(
+        s: &SignIns,
+        opened: &Arc<Mutex<Vec<String>>>,
+        port: u16,
+        server: &MockServer,
+        own: Option<OwnClient>,
+    ) -> (
+        Option<String>,
+        Result<AuthClient<reqwest::Client>, AppError>,
+    ) {
+        let spec = signs_in("acme", &format!("{}/mcp", server.uri()));
+        let auth = Arc::new(s.auth_for(&spec, true).unwrap());
+        let signing_in = tokio::spawn({
+            let auth = auth.clone();
+            async move { auth.client(reqwest::Client::new(), false, own).await }
+        });
+        let started = Instant::now();
+        let url = loop {
+            if let Some(u) = opened.lock().unwrap().first().cloned() {
+                break Some(u);
+            }
+            if signing_in.is_finished() || started.elapsed() > Duration::from_secs(5) {
+                break None;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        };
+        if let Some(url) = &url {
+            let parsed = url::Url::parse(url).unwrap();
+            let state = parsed
+                .query_pairs()
+                .find(|(k, _)| k == "state")
+                .map(|(_, v)| v.into_owned())
+                .unwrap();
+            get(port, &format!("/callback?code=abc&state={state}"))
+                .await
+                .unwrap();
+        }
+        let result = tokio::time::timeout(Duration::from_secs(5), signing_in)
+            .await
+            .unwrap()
+            .unwrap();
+        (url, result)
+    }
+
+    fn browser(dir: &Path) -> (SignIns, Arc<Mutex<Vec<String>>>, u16) {
+        let port = free_port();
+        let opened: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let seen = opened.clone();
+        let s = SignIns::new(dir)
+            .with_port(port)
+            .with_on_url(Arc::new(move |_, url| {
+                seen.lock().unwrap().push(url.to_string())
+            }));
+        (s, opened, port)
+    }
+
+    fn query(url: &str, key: &str) -> Option<String> {
+        url::Url::parse(url)
+            .unwrap()
+            .query_pairs()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.into_owned())
+    }
+
+    #[tokio::test]
+    async fn a_server_that_takes_no_registration_says_what_it_needs() {
+        let server = fake_server(json!({})).await;
+        let dir = tempfile::tempdir().unwrap();
+        let (s, opened, port) = browser(dir.path());
+        let (url, result) = sign_in_as(&s, &opened, port, &server, None).await;
+        assert!(url.is_none(), "no browser for a sign-in that can't happen");
+        let err = result.err().unwrap();
+        assert!(matches!(err, AppError::NeedsClient(_)), "{err}");
+        let said = err.to_string();
+        assert!(
+            said.starts_with("Acme doesn't let Ghost register itself"),
+            "{said}"
+        );
+        assert!(!said.contains("RegistrationFailed"));
+        assert_eq!(err.reason(), said);
+        assert_eq!(s.needs_client("acme"), Some(None));
+        s.forget("acme");
+        assert_eq!(s.needs_client("acme"), None);
+    }
+
+    #[tokio::test]
+    async fn a_refused_registration_is_said_in_plain_words() {
+        let server = fake_server(json!({})).await;
+        Mock::given(method("POST"))
+            .and(path("/register"))
+            .respond_with(ResponseTemplate::new(403).set_body_string("no clients today"))
+            .mount(&server)
+            .await;
+        let server_meta_with_registration = fake_server(json!({
+            "registration_endpoint": format!("{}/register", server.uri())
+        }))
+        .await;
+        let dir = tempfile::tempdir().unwrap();
+        let (s, opened, port) = browser(dir.path());
+        let (_, result) = sign_in_as(&s, &opened, port, &server_meta_with_registration, None).await;
+        let err = result.err().unwrap();
+        assert!(matches!(err, AppError::NeedsClient(_)), "{err}");
+        assert!(
+            err.to_string()
+                .starts_with("Acme refused to let Ghost register itself"),
+            "{err}"
+        );
+        assert!(!err.to_string().contains("no clients today"));
+    }
+
+    #[tokio::test]
+    async fn the_persons_own_client_is_used_and_its_secret_stays_in_memory() {
+        let server = fake_server(json!({
+            "registration_endpoint": "https://unused.example/register",
+            "client_id_metadata_document_supported": true
+        }))
+        .await;
+        let dir = tempfile::tempdir().unwrap();
+        let (s, opened, port) = browser(dir.path());
+        let (lines, _guard) = capture();
+        let own = OwnClient {
+            client_id: "own-client".into(),
+            client_secret: Some(CLIENT_SECRET.into()),
+        };
+        let (url, result) = sign_in_as(&s, &opened, port, &server, Some(own.clone())).await;
+        let client = result.unwrap();
+        let url = url.unwrap();
+        // first in the order of choice, over the document and registration alike
+        assert_eq!(query(&url, "client_id").as_deref(), Some("own-client"));
+        assert!(!url.contains(CLIENT_SECRET));
+        assert_eq!(client.get_access_token().await.unwrap(), "fresh-token");
+        // the token request carried the secret; nothing kept it
+        let requests = server.received_requests().await.unwrap();
+        let token = requests
+            .iter()
+            .find(|r| r.url.path() == "/token")
+            .expect("a token request");
+        let sent = format!(
+            "{} {:?}",
+            String::from_utf8_lossy(&token.body),
+            token.headers.get("authorization")
+        );
+        assert!(
+            sent.contains(CLIENT_SECRET) || sent.contains("Basic "),
+            "{sent}"
+        );
+        let store = s.storage("acme");
+        assert_eq!(store.client_id().as_deref(), Some("own-client"));
+        let kept = std::fs::read_to_string(&store.path).unwrap();
+        assert!(!kept.contains(CLIENT_SECRET), "{kept}");
+        let logged = String::from_utf8_lossy(&lines.0.lock().unwrap()).to_string();
+        assert!(!logged.contains(CLIENT_SECRET), "{logged}");
+        assert!(logged.contains("sign-in: acme as own client"), "{logged}");
+    }
+
+    #[tokio::test]
+    async fn a_server_in_the_table_wants_the_secret_in_the_body() {
+        let server = fake_server(json!({})).await;
+        let row: &'static [KnownServer] = Box::leak(Box::new([KnownServer {
+            issuer: Box::leak(server.uri().into_boxed_str()),
+            service: "Acme",
+            ghost_client: None,
+            own_secret: crate::signin_clients::SecretNeed::Required,
+            secret_in_body: true,
+            make_a_client: "https://acme.example/clients",
+            authorize_params: &[("access_type", "offline")],
+        }]));
+        let dir = tempfile::tempdir().unwrap();
+        let (s, opened, port) = browser(dir.path());
+        let s = s.with_servers(row);
+        let own = OwnClient {
+            client_id: "own-client".into(),
+            client_secret: Some(CLIENT_SECRET.into()),
+        };
+        let (url, result) = sign_in_as(&s, &opened, port, &server, Some(own)).await;
+        result.unwrap();
+        assert_eq!(
+            query(&url.unwrap(), "access_type").as_deref(),
+            Some("offline")
+        );
+        let requests = server.received_requests().await.unwrap();
+        let token = requests.iter().find(|r| r.url.path() == "/token").unwrap();
+        assert!(
+            String::from_utf8_lossy(&token.body)
+                .contains(&format!("client_secret={CLIENT_SECRET}"))
+        );
+        assert!(token.headers.get("authorization").is_none());
+    }
+
+    #[tokio::test]
+    async fn a_known_server_with_no_client_says_where_to_make_one() {
+        let server = fake_server(json!({})).await;
+        let row: &'static [KnownServer] = Box::leak(Box::new([KnownServer {
+            issuer: Box::leak(format!("{}/", server.uri()).into_boxed_str()),
+            service: "Acme Cloud",
+            ghost_client: None,
+            own_secret: crate::signin_clients::SecretNeed::Required,
+            secret_in_body: false,
+            make_a_client: "https://acme.example/clients",
+            authorize_params: &[],
+        }]));
+        let dir = tempfile::tempdir().unwrap();
+        let (s, opened, port) = browser(dir.path());
+        let s = s.with_servers(row);
+        let (_, result) = sign_in_as(&s, &opened, port, &server, None).await;
+        let said = result.err().unwrap().to_string();
+        assert!(
+            said.starts_with("Acme Cloud only lets in apps registered with it"),
+            "{said}"
+        );
+        assert!(
+            said.contains("Register one of your own with Acme Cloud"),
+            "{said}"
+        );
+        assert_eq!(
+            s.needs_client("acme").flatten().map(|k| k.service),
+            Some("Acme Cloud")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_server_that_takes_the_document_gets_ghosts_url_and_no_registration() {
+        let server = fake_server(json!({"client_id_metadata_document_supported": true})).await;
+        Mock::given(method("POST"))
+            .and(path("/register"))
+            .respond_with(ResponseTemplate::new(500))
+            .expect(0)
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        let (s, opened, port) = browser(dir.path());
+        let (url, result) = sign_in_as(&s, &opened, port, &server, None).await;
+        result.unwrap();
+        assert_eq!(
+            query(&url.unwrap(), "client_id").as_deref(),
+            Some(crate::signin_clients::CIMD_URL)
+        );
+        assert_eq!(
+            s.storage("acme").client_id().as_deref(),
+            Some(crate::signin_clients::CIMD_URL)
+        );
+    }
+
+    #[tokio::test]
+    async fn ghosts_own_device_client_signs_in_with_a_code_and_no_secret() {
+        let server2 = fake_server(json!({
+            "device_authorization_endpoint": "BASE/device/code",
+        }))
+        .await;
+        let base2 = server2.uri();
+        Mock::given(method("POST"))
+            .and(path("/device/code"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "device_code": "dev-1",
+                "user_code": "WDJB-MJHT",
+                "verification_uri": format!("{base2}/login/device"),
+                "interval": 1,
+                "expires_in": 60
+            })))
+            .mount(&server2)
+            .await;
+        let row: &'static [KnownServer] = Box::leak(Box::new([KnownServer {
+            issuer: Box::leak(base2.clone().into_boxed_str()),
+            service: "Acme",
+            ghost_client: Some(crate::signin_clients::GhostClient {
+                client_id: "ghost-device-client",
+                auth: ClientAuth::DeviceFlow,
+            }),
+            own_secret: crate::signin_clients::SecretNeed::Required,
+            secret_in_body: true,
+            make_a_client: "https://acme.example/clients",
+            authorize_params: &[],
+        }]));
+        let dir = tempfile::tempdir().unwrap();
+        let (s, opened, _) = browser(dir.path());
+        let s = s.with_servers(row);
+        let spec = signs_in("acme", &format!("{base2}/mcp"));
+        let auth = Arc::new(s.auth_for(&spec, true).unwrap());
+        let signing_in = tokio::spawn({
+            let auth = auth.clone();
+            async move { auth.client(reqwest::Client::new(), false, None).await }
+        });
+        let started = Instant::now();
+        while s.pending_code("acme").is_none() && started.elapsed() < Duration::from_secs(5) {
+            if signing_in.is_finished() {
+                panic!("ended early: {:?}", signing_in.await.unwrap().err());
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(s.pending_code("acme").as_deref(), Some("WDJB-MJHT"));
+        assert_eq!(
+            opened.lock().unwrap().first().cloned(),
+            Some(format!("{base2}/login/device"))
+        );
+        let client = tokio::time::timeout(Duration::from_secs(10), signing_in)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(client.get_access_token().await.unwrap(), "fresh-token");
+        assert!(s.pending_code("acme").is_none());
+        assert_eq!(
+            s.storage("acme").client_id().as_deref(),
+            Some("ghost-device-client")
+        );
+        let requests = server2.received_requests().await.unwrap();
+        let token = requests.iter().find(|r| r.url.path() == "/token").unwrap();
+        let body = String::from_utf8_lossy(&token.body);
+        assert!(body.contains("device_code=dev-1"), "{body}");
+        assert!(!body.contains("client_secret"), "{body}");
+    }
+
+    #[tokio::test]
+    async fn a_stored_sign_in_of_the_persons_client_refreshes_with_its_secret() {
+        let server = fake_server(json!({})).await;
+        let dir = tempfile::tempdir().unwrap();
+        let s = SignIns::new(dir.path()).with_port(free_port());
+        let store = s.storage("acme");
+        std::fs::create_dir_all(store.path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &store.path,
+            json!({"tokens": {"access_token": "old", "token_type": "Bearer",
+                              "expires_in": 1, "refresh_token": "refresh-0"},
+                   "token_received_at": 1,
+                   "issuer": server.uri(),
+                   "client": {"client_id": "own-client"}})
+            .to_string(),
+        )
+        .unwrap();
+        let spec = signs_in("acme", &format!("{}/mcp", server.uri()));
+        let auth = s.auth_for(&spec, false).unwrap();
+        let own = OwnClient {
+            client_id: "own-client".into(),
+            client_secret: Some(CLIENT_SECRET.into()),
+        };
+        let client = auth
+            .client(reqwest::Client::new(), false, Some(own))
+            .await
+            .unwrap();
+        assert_eq!(client.get_access_token().await.unwrap(), "fresh-token");
+        let requests = server.received_requests().await.unwrap();
+        let token = requests.iter().find(|r| r.url.path() == "/token").unwrap();
+        let sent = format!(
+            "{} {:?}",
+            String::from_utf8_lossy(&token.body),
+            token.headers.get("authorization")
+        );
+        assert!(sent.contains("refresh_token=refresh-0"), "{sent}");
+        assert!(
+            sent.contains(CLIENT_SECRET) || sent.contains("Basic "),
+            "{sent}"
+        );
+        assert!(
+            !std::fs::read_to_string(&store.path)
+                .unwrap()
+                .contains(CLIENT_SECRET)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_refresh_the_server_refuses_waits_on_the_person_to_sign_in_again() {
+        let server = MockServer::start().await;
+        let base = server.uri();
+        Mock::given(method("GET"))
+            .and(path("/.well-known/oauth-authorization-server"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "issuer": base,
+                "authorization_endpoint": format!("{base}/authorize"),
+                "token_endpoint": format!("{base}/token"),
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .respond_with(
+                ResponseTemplate::new(400).set_body_json(json!({"error": "invalid_grant"})),
+            )
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        let s = SignIns::new(dir.path()).with_port(free_port());
+        let store = s.storage("acme");
+        std::fs::create_dir_all(store.path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &store.path,
+            json!({"tokens": {"access_token": "old", "token_type": "Bearer",
+                              "expires_in": 1, "refresh_token": "refresh-0"},
+                   "token_received_at": 1,
+                   "client": {"client_id": "ghost-1"}})
+            .to_string(),
+        )
+        .unwrap();
+        let spec = signs_in("acme", &format!("{base}/mcp"));
+        let auth = s.auth_for(&spec, false).unwrap();
+        let client = auth
+            .client(reqwest::Client::new(), false, None)
+            .await
+            .unwrap();
+        let err = client.get_access_token().await.unwrap_err();
+        assert!(
+            matches!(auth_error(err), AppError::NeedsSignIn(_)),
+            "a refused refresh is a sign-in again, not an error's kind"
+        );
     }
 }

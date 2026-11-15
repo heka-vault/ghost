@@ -114,6 +114,10 @@ pub enum AppError {
     /// The app wants the operator to sign in again, and nobody is at the browser.
     #[error("{0}")]
     NeedsSignIn(String),
+    /// The app's sign-in lets in only clients registered with it, and Ghost has none
+    /// there (ADR 0076): the sentence that says which service and what to do.
+    #[error("{0}")]
+    NeedsClient(String),
     /// A `${NAME}` the environment doesn't have: the name, so a misconfigured app fails
     /// loudly at connect time, not silently at first use.
     #[error("{0}")]
@@ -136,6 +140,7 @@ impl AppError {
     pub fn reason(&self) -> String {
         match self {
             AppError::NeedsSignIn(_) => "needs sign-in".into(),
+            AppError::NeedsClient(why) => why.clone(),
             AppError::MissingSecret(name) => format!("setting {name} is not set"),
             AppError::Io(e) => format!("{:?}", e.kind()),
             AppError::Connect(kind) => kind.clone(),

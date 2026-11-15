@@ -48,6 +48,7 @@ pub mod rules;
 pub mod schedules;
 pub mod scripts_server;
 pub mod signin;
+pub mod signin_clients;
 pub mod skill_catalog;
 pub mod skills;
 pub mod source;

@@ -1383,3 +1383,41 @@ async fn an_app_that_runs_on_this_computer_gets_only_what_its_env_names() {
     apps.close().await;
     also_redact("test-apps-stdio", []);
 }
+
+#[test]
+fn the_persons_own_client_is_kept_by_name_and_never_by_value() {
+    // ADR 0076: a client ID is plain; its secret is `${NAME}` in the vault, never a value
+    // in the file. An app that doesn't sign in has no client.
+    let text = r#"{"apps": {
+        "github": {"url": "https://api.githubcopilot.com/mcp/", "sign_in": true,
+                   "client_id": "Iv23liExample", "client_secret": "${GHOST_APP_GITHUB_CLIENT_SECRET}"},
+        "leaky": {"url": "https://x.example/mcp", "sign_in": true,
+                  "client_id": "abc", "client_secret": "plain-secret-value-123"},
+        "keyed": {"url": "https://y.example/mcp", "client_id": "nope"}
+    }}"#;
+    let file = parse_apps_json(text, "apps.json").unwrap();
+    let github = file.get("github").unwrap();
+    assert_eq!(github.client_id.as_deref(), Some("Iv23liExample"));
+    assert_eq!(
+        github.client_secret.as_deref(),
+        Some("${GHOST_APP_GITHUB_CLIENT_SECRET}")
+    );
+    assert!(
+        github
+            .secrets()
+            .contains(&"GHOST_APP_GITHUB_CLIENT_SECRET".to_string())
+    );
+    let leaky = file.get("leaky").unwrap();
+    assert_eq!(leaky.client_id.as_deref(), Some("abc"));
+    assert_eq!(leaky.client_secret, None);
+    assert!(
+        file.problems
+            .iter()
+            .any(|p| p.contains("client_secret must be ${NAME}"))
+    );
+    assert_eq!(file.get("keyed").unwrap().client_id, None);
+    // the file says it back as it read it
+    let again = parse_apps_json(&render_apps_json(&file.apps), "again").unwrap();
+    assert_eq!(again.get("github"), Some(github));
+    assert!(!render_apps_json(&file.apps).contains("plain-secret-value-123"));
+}

@@ -113,6 +113,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/apps/{name}/sign-in-client": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Sign In Client
+         * @description Give an app the person's own client for signing in (ADR 0076), or take it back
+         *     with null, then sign in again. The secret goes into the vault and never comes back out.
+         */
+        put: operations["set_sign_in_client_apps__name__sign_in_client_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/audit": {
         parameters: {
             query?: never;
@@ -2437,6 +2458,13 @@ export interface components {
          */
         AppConnect: {
             catalog?: string | null;
+            /**
+             * @description The person's own client ID for signing in (ADR 0076), for a catalog entry or an
+             *     address. Not read from a pasted config.
+             */
+            client_id?: string | null;
+            /** @description Its secret, where the service wants one: into the vault, never apps.json. */
+            client_secret?: string | null;
             config?: string | null;
             name?: string | null;
             option?: string | null;
@@ -2450,6 +2478,8 @@ export interface components {
             apps: components["schemas"]["AppView"][];
             /** @description What the operator should know about a pasted config: keys Ghost does not read. */
             problems: string[];
+            /** @description The code to type on the service's page, for a device sign-in. */
+            sign_in_code?: string | null;
             sign_in_url?: string | null;
         };
         /** @description An app's own limits in apps.json (ADR 0046). None is Ghost's default, given beside it. */
@@ -2531,10 +2561,13 @@ export interface components {
             problem?: string | null;
             /** @description The environment names it needs (secret values never shown). */
             settings: string[];
+            sign_in_client?: components["schemas"]["SignInClientView"] | null;
+            /** @description The code to type on the service's page, while a device sign-in waits for it. */
+            sign_in_code?: string | null;
             /** @description Waiting for the operator's browser. */
             sign_in_url?: string | null;
             /** @enum {string} */
-            state: "connected" | "connecting" | "needs_sign_in" | "failed" | "stopped";
+            state: "connected" | "connecting" | "needs_sign_in" | "needs_client" | "failed" | "stopped";
             title: string;
         };
         AuditEntry: {
@@ -2616,6 +2649,11 @@ export interface components {
             description: string;
             featured: boolean;
             icon?: string | null;
+            /**
+             * @description From Ghost's own list of first-party apps the registry lacks (ADR 0076), not the
+             *     registry.
+             */
+            listed_by_ghost: boolean;
             maker?: components["schemas"]["CatalogMaker"] | null;
             /** @description The registry's name, reverse-DNS. */
             name: string;
@@ -2759,6 +2797,11 @@ export interface components {
              */
             readonly token: string;
         };
+        /**
+         * @description Whether a service wants a client's secret: none, optional or required (ADR 0076).
+         * @enum {string}
+         */
+        ClientSecretNeed: "none" | "optional" | "required";
         ClientsView: {
             clients: components["schemas"]["ClientView"][];
             /** @description Where Ghost listens for them (`host:port`); empty when that is turned off. */
@@ -4665,6 +4708,26 @@ export interface components {
              */
             type: "show_app";
         };
+        /**
+         * @description The person's own client for an app (ADR 0076). The secret goes into Ghost's vault and
+         *     never comes back out; null clears the client and its secret.
+         */
+        SignInClientUpdate: {
+            client_id?: string | null;
+            client_secret?: string | null;
+        };
+        /** @description How an app signs in, for its page (ADR 0076). */
+        SignInClientView: {
+            /** @description The person's own client ID for this app, when they gave one. */
+            client_id?: string | null;
+            /** @description A secret for it is kept in the vault. */
+            has_secret: boolean;
+            /** @description The vendor's page where the person makes a client of their own. */
+            make_a_client?: string | null;
+            secret: components["schemas"]["ClientSecretNeed"];
+            /** @description The service its sign-in belongs to, when Ghost knows it ("GitHub"). */
+            service?: string | null;
+        };
         SkillAdd: {
             name?: string | null;
             /** @description A folder on this machine holding SKILL.md. */
@@ -5324,6 +5387,7 @@ export type SchemaClaudeCodeState = components['schemas']['ClaudeCodeState'];
 export type SchemaClaudeCodeView = components['schemas']['ClaudeCodeView'];
 export type SchemaClientCreate = components['schemas']['ClientCreate'];
 export type SchemaClientCreated = components['schemas']['ClientCreated'];
+export type SchemaClientSecretNeed = components['schemas']['ClientSecretNeed'];
 export type SchemaClientsView = components['schemas']['ClientsView'];
 export type SchemaClientView = components['schemas']['ClientView'];
 export type SchemaCompactionView = components['schemas']['CompactionView'];
@@ -5480,6 +5544,8 @@ export type SchemaSettingSuggestion = components['schemas']['SettingSuggestion']
 export type SchemaSettingsUpdate = components['schemas']['SettingsUpdate'];
 export type SchemaSettingsView = components['schemas']['SettingsView'];
 export type SchemaShowAppEvent = components['schemas']['ShowAppEvent'];
+export type SchemaSignInClientUpdate = components['schemas']['SignInClientUpdate'];
+export type SchemaSignInClientView = components['schemas']['SignInClientView'];
 export type SchemaSkillAdd = components['schemas']['SkillAdd'];
 export type SchemaSkillBody = components['schemas']['SkillBody'];
 export type SchemaSkillFileView = components['schemas']['SkillFileView'];
@@ -5725,6 +5791,41 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppConnectResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_sign_in_client_apps__name__sign_in_client_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SignInClientUpdate"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

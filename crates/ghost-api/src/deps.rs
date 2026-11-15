@@ -219,6 +219,17 @@ impl OtherToolsPort for LiveOtherTools {
 #[async_trait]
 pub trait SignInPort: Send + Sync {
     fn pending_url(&self, app: &str) -> Option<String>;
+    /// The code to type on the service's page, while a device sign-in waits (ADR 0076).
+    fn pending_code(&self, _app: &str) -> Option<String> {
+        None
+    }
+    /// The service the app's last sign-in needed a client for, when it did (ADR 0076).
+    fn needs_client(
+        &self,
+        _app: &str,
+    ) -> Option<Option<&'static ghost_core::signin_clients::KnownServer>> {
+        None
+    }
     fn forget(&self, app: &str);
     fn localhost_redirect_uri(&self) -> String;
     /// Listen for the browser's way back from `url` and return its query.
@@ -234,6 +245,17 @@ pub trait SignInPort: Send + Sync {
 impl SignInPort for SignIns {
     fn pending_url(&self, app: &str) -> Option<String> {
         SignIns::pending_url(self, app)
+    }
+
+    fn pending_code(&self, app: &str) -> Option<String> {
+        SignIns::pending_code(self, app)
+    }
+
+    fn needs_client(
+        &self,
+        app: &str,
+    ) -> Option<Option<&'static ghost_core::signin_clients::KnownServer>> {
+        SignIns::needs_client(self, app)
     }
 
     fn forget(&self, app: &str) {

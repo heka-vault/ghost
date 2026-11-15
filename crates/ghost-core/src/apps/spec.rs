@@ -39,7 +39,7 @@ const TRANSPORTS: [&str; 5] = [
     "streamable_http",
     "streamableHttp",
 ];
-const APP_KEYS: [&str; 13] = [
+const APP_KEYS: [&str; 15] = [
     "type",
     "command",
     "args",
@@ -53,6 +53,8 @@ const APP_KEYS: [&str; 13] = [
     "connect_timeout",
     "result_chars",
     "pinned",
+    "client_id",
+    "client_secret",
 ];
 /// A literal that is probably a token: a known prefix, or a bearer value with no reference.
 static SECRET_SHAPES: LazyLock<Regex> = LazyLock::new(|| {
@@ -197,6 +199,12 @@ pub struct AppSpec {
     /// Tools (by the app's own names) always offered by name, however many tools the
     /// connected apps have between them.
     pub pinned: Vec<String>,
+    /// The person's own client ID for signing in to it (ADR 0076), when they gave one.
+    /// Never set from an app's text, a model, a tool or a pasted config.
+    pub client_id: Option<String>,
+    /// That client's secret, as `${NAME}`: a password in Ghost's vault (ADR 0036), never
+    /// the value.
+    pub client_secret: Option<String>,
 }
 
 impl AppSpec {
@@ -236,7 +244,8 @@ impl AppSpec {
         let values = std::iter::once(self.url.clone().unwrap_or_default())
             .chain(self.headers.values().cloned())
             .chain(self.env.values().cloned())
-            .chain(self.args.iter().cloned());
+            .chain(self.args.iter().cloned())
+            .chain(self.client_secret.iter().cloned());
         for value in values {
             for name in secret_names(&value) {
                 if !names.contains(&name) {
@@ -264,6 +273,8 @@ impl Default for AppSpec {
             connect_timeout: None,
             result_chars: None,
             pinned: Vec::new(),
+            client_id: None,
+            client_secret: None,
         }
     }
 }
@@ -569,6 +580,28 @@ fn parse_entry(
     let connect_timeout = limit("connect_timeout");
     let result_chars = limit("result_chars").map(|n| n as usize);
     let pinned = str_list(t.get("pinned"), &format!("{where_}.pinned"))?;
+    // The person's own client (ADR 0076): only for an app Ghost signs in to, its ID a
+    // plain one and its secret a `${NAME}` and nothing else, so no value sits in the file.
+    let mut client_id = text_of("client_id").filter(|_| sign_in);
+    if let Some(why) = client_id
+        .as_deref()
+        .and_then(crate::signin_clients::client_id_problem)
+    {
+        problems.push(format!("{where_}: client_id is not used: {why}"));
+        client_id = None;
+    }
+    let client_secret = text_of("client_secret").filter(|_| client_id.is_some());
+    let client_secret = match client_secret {
+        Some(v) if is_one_reference(&v) => Some(v),
+        Some(_) => {
+            problems.push(format!(
+                "{where_}: client_secret must be ${{NAME}}, a password in Ghost's vault; it \
+                 is not used"
+            ));
+            None
+        }
+        None => None,
+    };
     Ok(AppSpec {
         name: name.to_string(),
         title: text_of("title").unwrap_or_default(),
@@ -583,7 +616,15 @@ fn parse_entry(
         connect_timeout,
         result_chars,
         pinned,
+        client_id,
+        client_secret,
     })
+}
+
+/// `${NAME}` and nothing around it.
+fn is_one_reference(value: &str) -> bool {
+    let names = secret_names(value);
+    names.len() == 1 && value == format!("${{{}}}", names[0])
 }
 
 /// One entry of the file, from a body the desktop or a test hands in. Problems that
@@ -631,6 +672,18 @@ fn render_entry(spec: &AppSpec) -> Ordered {
         }
         if spec.sign_in {
             entry.insert("sign_in".into(), Ordered::Other(Value::Bool(true)));
+            if let Some(id) = &spec.client_id {
+                entry.insert(
+                    "client_id".into(),
+                    Ordered::Other(Value::String(id.clone())),
+                );
+                if let Some(secret) = &spec.client_secret {
+                    entry.insert(
+                        "client_secret".into(),
+                        Ordered::Other(Value::String(secret.clone())),
+                    );
+                }
+            }
         }
     } else {
         entry.insert(

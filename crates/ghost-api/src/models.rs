@@ -1042,6 +1042,9 @@ pub enum AppState {
     Connected,
     Connecting,
     NeedsSignIn,
+    /// Its sign-in lets in only registered clients and Ghost has none there: the person
+    /// gives a client ID of their own (ADR 0076).
+    NeedsClient,
     Failed,
     Stopped,
 }
@@ -1070,6 +1073,13 @@ pub struct AppView {
     /// Waiting for the operator's browser.
     #[serde(default)]
     pub sign_in_url: Option<String>,
+    /// The code to type on the service's page, while a device sign-in waits for it.
+    #[serde(default)]
+    pub sign_in_code: Option<String>,
+    /// The client it signs in as (ADR 0076), for an app that signs in: the person's own
+    /// client ID when they gave one, and whether it has a secret; never the secret.
+    #[serde(default)]
+    pub sign_in_client: Option<SignInClientView>,
     /// The environment names it needs (secret values never shown).
     #[serde(default)]
     #[schema(required)]
@@ -1078,6 +1088,42 @@ pub struct AppView {
     #[serde(default)]
     #[schema(required)]
     pub limits: AppLimits,
+}
+
+/// How an app signs in, for its page (ADR 0076).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct SignInClientView {
+    /// The person's own client ID for this app, when they gave one.
+    #[serde(default)]
+    pub client_id: Option<String>,
+    /// A secret for it is kept in the vault.
+    pub has_secret: bool,
+    /// The service its sign-in belongs to, when Ghost knows it ("GitHub").
+    #[serde(default)]
+    pub service: Option<String>,
+    /// The vendor's page where the person makes a client of their own.
+    #[serde(default)]
+    pub make_a_client: Option<String>,
+    pub secret: ClientSecretNeed,
+}
+
+/// Whether a service wants a client's secret: none, optional or required (ADR 0076).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ClientSecretNeed {
+    None,
+    Optional,
+    Required,
+}
+
+/// The person's own client for an app (ADR 0076). The secret goes into Ghost's vault and
+/// never comes back out; null clears the client and its secret.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, ToSchema)]
+pub struct SignInClientUpdate {
+    #[serde(default)]
+    pub client_id: Option<String>,
+    #[serde(default)]
+    pub client_secret: Option<String>,
 }
 
 /// An app's own limits in apps.json (ADR 0046). None is Ghost's default, given beside it.
@@ -1262,6 +1308,11 @@ pub struct CatalogEntryView {
     pub product: Option<String>,
     #[serde(default)]
     pub product_maker: Option<String>,
+    /// From Ghost's own list of first-party apps the registry lacks (ADR 0076), not the
+    /// registry.
+    #[serde(default)]
+    #[schema(required)]
+    pub listed_by_ghost: bool,
     /// In search results: other publishers' entries for the same product, folded under
     /// the maker's own. Always empty on `GET /catalog/{name}`.
     #[serde(default)]
@@ -1304,6 +1355,13 @@ pub struct AppConnect {
     pub config: Option<String>,
     #[serde(default)]
     pub replace: Option<bool>,
+    /// The person's own client ID for signing in (ADR 0076), for a catalog entry or an
+    /// address. Not read from a pasted config.
+    #[serde(default)]
+    pub client_id: Option<String>,
+    /// Its secret, where the service wants one: into the vault, never apps.json.
+    #[serde(default)]
+    pub client_secret: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -1311,6 +1369,9 @@ pub struct AppConnectResult {
     pub apps: Vec<AppView>,
     #[serde(default)]
     pub sign_in_url: Option<String>,
+    /// The code to type on the service's page, for a device sign-in.
+    #[serde(default)]
+    pub sign_in_code: Option<String>,
     /// What the operator should know about a pasted config: keys Ghost does not read.
     #[serde(default)]
     #[schema(required)]
@@ -2518,6 +2579,10 @@ mod tests {
         assert_eq!(
             waiting_place("ghost", "passwords:locked"),
             Some(WaitingPlace::Passwords)
+        );
+        assert_eq!(
+            waiting_place("ghost", "app:github:sign-in"),
+            Some(WaitingPlace::Apps)
         );
         assert_eq!(
             waiting_place("ghost", "app:github"),
