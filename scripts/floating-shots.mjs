@@ -4,7 +4,8 @@
 // made-up desktop) with the real floating page laid over it in a transparent iframe, playing
 // `?mock=floating-tour` on its fixed clock, and takes each picture at its moment; the loop is
 // a screencast of the whole turn, resampled to a steady frame rate. Run by scripts/screenshots.sh
-// (make screenshots) with the UI served; Node 22 or later (its own WebSocket), ImageMagick.
+// (make screenshots) with the UI served; Node 22 or later (its own WebSocket), ImageMagick, and
+// uv for the loop's encoder (tools/loop_webp.py).
 //
 //   node scripts/floating-shots.mjs <url> <out-dir> <work-dir> [name ...]
 import { spawn } from "node:child_process";
@@ -127,6 +128,15 @@ async function openPage(cdp, query, scale) {
 
 const close = (cdp, page) => cdp.send("Target.closeTarget", { targetId: page.targetId });
 
+const root = join(import.meta.dirname, "..");
+
+function run(bin, args) {
+  return new Promise((ok, fail) => {
+    const p = spawn(bin, args, { stdio: ["ignore", "inherit", "inherit"] });
+    p.on("exit", (code) => (code === 0 ? ok() : fail(new Error(`${bin} ${args.join(" ")} exited ${code}`))));
+  });
+}
+
 function magick(args) {
   return new Promise((ok, fail) => {
     const bin = process.env.MAGICK ?? "magick";
@@ -180,11 +190,12 @@ async function loop(cdp) {
   }
   const gaps = frames.slice(1).map((f, i) => f.t - frames[i].t).filter((g) => g > 0);
   console.log(`floating-shots: ${frames.length} screencast frames, median gap ${gaps.sort((a, b) => a - b)[gaps.length >> 1] ?? "?"} ms`);
+  // Encoded by tools/loop_webp.py, not ImageMagick: libwebp keeps pixels that changed less
+  // than its tolerance, so the fading glow stayed and the patch around Wisp didn't (a dark
+  // square as it left); a keyframe every few frames, which only Pillow's binding exposes,
+  // redraws it. The file says why.
   const webp = join(out, `${LOOP.name}.webp`);
-  await magick([
-    "-delay", String(Math.round(100 / LOOP.fps)), ...files,
-    "-quality", "60", "-define", "webp:method=6", "-loop", "0", webp,
-  ]);
+  await run("uv", ["run", "--quiet", "--project", join(root, "tools"), "--group", "shots", "python", join(root, "tools", "loop_webp.py"), dir, webp, "--fps", String(LOOP.fps)]);
   console.log(`floating-shots: ${webp} (${files.length} frames at ${LOOP.fps} a second)`);
 }
 
