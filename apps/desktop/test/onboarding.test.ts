@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { answeredHere, echoOfferNow, EMPTY, type Facts, firstSentence, MEET, micHealthyOf, parseSaved, inputName, pathToMoment, progressOf, requiredAt, routeAfter, STEPS, taskNumber, TASKS, timeLeft, wakeHelp, wakeItems } from "../src/screens/onboarding/state";
+import { answeredHere, echoOfferNow, EMPTY, type Facts, firstSentence, MEET, micHealthyOf, parseSaved, inputName, pathToMoment, progressOf, requiredAt, routeAfter, STEPS, taskNumber, TASKS, timeLeft, wakeHelp, wakeItems, WAKE_ITEMS_MAX, countLine, keepsLead } from "../src/screens/onboarding/state";
 import { offerOnce } from "../src/app/floating";
 import { exchangeOf } from "../src/screens/onboarding/watch";
 
@@ -288,11 +288,34 @@ describe("the simplification pass (2026-11-14)", () => {
   });
 
   // The wake beat's count of things under its title. A control or a sentence added fails here.
-  it("shows three things on the wake beat for a fresh install, and at most five anywhere", () => {
-    const base = { floatKnown: true, mic: true, echoNow: false, keepingTakes: false };
-    expect(wakeItems(base)).toEqual(["float", "mic", "other-ways"]);
-    expect(wakeItems({ ...base, echoNow: true })).toEqual(["float", "mic", "echo", "other-ways"]);
-    expect(wakeItems({ ...base, keepingTakes: true })).toEqual(["float", "mic", "takes", "other-ways"]);
-    expect(wakeItems({ floatKnown: true, mic: true, echoNow: true, keepingTakes: true })).toHaveLength(5);
+  it("shows at most three things on the wake beat besides Wisp and the heading, in every case", () => {
+    const base = { floatKnown: true, mic: true, keepingTakes: false };
+    expect(wakeItems(base)).toEqual(["float", "mic"]);
+    expect(wakeItems({ ...base, keepingTakes: true })).toEqual(["float", "mic", "takes"]);
+    for (const floatKnown of [true, false])
+      for (const mic of [true, false])
+        for (const keepingTakes of [true, false]) expect(wakeItems({ floatKnown, mic, keepingTakes }).length).toBeLessThanOrEqual(WAKE_ITEMS_MAX);
+    expect(WAKE_ITEMS_MAX).toBe(3);
+  });
+});
+
+describe("the first run's one count", () => {
+  it("has one denominator, the six numbered tasks, whatever step is open", () => {
+    expect(TASKS).toHaveLength(6);
+    expect(countLine({ done: 0, total: 6, met: false })).toBe("0 of 6 done");
+    expect(countLine({ done: 2, total: 6, met: false })).toBe("2 of 6 done");
+    expect(countLine({ done: 3, total: 6, met: true })).toBe("You’ve met Ghost · 3 of 6 done");
+    expect(countLine({ done: 6, total: 6, met: true })).toBe("All done");
+    // The same denominator progressOf gives the bar.
+    expect(progressOf({ modelReady: true, modelChecked: true, speechReady: true, echo: true, apps: 0, voiceSet: false }, EMPTY).total).toBe(6);
+  });
+});
+
+describe("what Ghost keeps and sends, said as shown", () => {
+  it("says two only when two switches are on the page", () => {
+    expect(keepsLead({ takesSwitch: true, reportsSwitch: true })).toMatch(/^Two things/);
+    expect(keepsLead({ takesSwitch: false, reportsSwitch: true })).toMatch(/^Error reports are on/);
+    expect(keepsLead({ takesSwitch: true, reportsSwitch: false })).toMatch(/^Keeping wake recordings is on/);
+    expect(keepsLead({ takesSwitch: false, reportsSwitch: false })).not.toMatch(/Two|Both/);
   });
 });

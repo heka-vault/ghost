@@ -5,7 +5,8 @@
  *   ReachSection     how Ghost reaches you, in sentences, with the three everyday routes as
  *                    switches; the rest of `[routes]` (how long before the next way, quiet
  *                    hours, ntfy, the greeting) is Developer › Notification routes
- *   ConnectionsSection  your phone (Pair a phone in two clicks from here) and Apps
+ *   ConnectionsSection  your phone (Pair a phone in two clicks from here); Apps is the rail's
+ *   FinishSetupRow   back to the first run, only while something in it was skipped
  * Telling Ghost where to send updates by voice is a later step, not built here.
  */
 import type { PhoneView, RoutesView } from "@ghost/client-ts";
@@ -18,6 +19,7 @@ import { inTauri } from "../../transport";
 import { Badge, Button, Card, ListRow, Section, Switch, errorText, useToast } from "../../ui";
 import { SECTION_TITLE, sectionDomId } from "./model";
 import { EVERYDAY, type Route, reachSentence } from "./plain";
+import { loadSaved, storageKey } from "../onboarding/state";
 
 /* ------------------------------------------------------------------ start at login */
 
@@ -60,6 +62,29 @@ export function StartAtLogin() {
           disabled={!view.managed}
           onChange={(on: boolean) => void invokeLogin(on).then((v) => v && setView(v))}
         />
+      }
+    />
+  );
+}
+
+/* ------------------------------------------------------------------ the first run, unfinished */
+
+/**
+ * The plain way back to setup for someone who started it and skipped something (the flow
+ * review, 2026-11-14): shown only then. Replay the first run is Developer's; a fresh install
+ * lands in it by itself, and Done says what is left with a button for each.
+ */
+export function FinishSetupRow({ scenario }: { scenario: string | null }) {
+  const saved = loadSaved(storageKey(scenario));
+  if (saved.step === null || (saved.finished && saved.skipped.length === 0)) return null;
+  return (
+    <ListRow
+      title="Finish setting up Ghost"
+      description={saved.skipped.length ? `You skipped ${saved.skipped.length === 1 ? "a step" : `${saved.skipped.length} steps`}. Setup keeps what’s done.` : "Setup keeps what’s done and opens where you stopped."}
+      trailing={
+        <Button size="sm" variant="secondary" href={hrefFor("/welcome")}>
+          Open setup
+        </Button>
       }
     />
   );
@@ -108,7 +133,7 @@ export function ReachSection() {
         })}
         <ListRow
           title="Quiet hours and every other way"
-          description="How long Ghost waits before the next way, quiet hours, a calls limit, ntfy and what it says first."
+          description="How long Ghost waits before the next way, quiet hours, call limits, other services and what it says first."
           href={hrefFor(settingsPath("notifications"))}
           chevron
         />
@@ -119,9 +144,9 @@ export function ReachSection() {
 
 /* ------------------------------------------------------------------ connections */
 
-/** Your phone, and the apps Ghost is connected to. Pairing is at most two clicks from here. */
+/** Your phone: pairing is at most two clicks from Settings. Apps are the rail's own place. */
 export function ConnectionsSection() {
-  const { client, status } = useGhost();
+  const { client } = useGhost();
   const [phone, setPhone] = useState<PhoneView | null>(null);
   useEffect(() => {
     client
@@ -130,13 +155,12 @@ export function ConnectionsSection() {
       .catch(() => setPhone(null));
   }, [client]);
   const paired = phone?.device ?? null;
-  const apps = status?.apps.length ?? 0;
   return (
-    <Section id={sectionDomId("connections")} title={SECTION_TITLE.connections} description="What else reaches Ghost: your phone, and the apps it uses." className="set-section">
+    <Section id={sectionDomId("connections")} title="Your phone" className="set-section">
       <Card list>
         <ListRow
-          title="Your phone"
-          description={paired ? "Paired. Talk to Ghost from it at home, or away through your own tunnel." : "Talk to Ghost from your phone, at home or away through your own tunnel."}
+          title={paired ? "Your phone" : "Talk to Ghost from your phone"}
+          description={paired ? "Paired. Talk to Ghost from it at home, or away through your own tunnel." : "At home, or away through your own tunnel."}
           meta={paired ? <Badge size="sm" tone="ok" dot>Paired</Badge> : undefined}
           trailing={
             <Button size="sm" variant="secondary" href={hrefFor(paired ? settingsPath("phone") : `${settingsPath("phone")}/pair`)}>
@@ -144,7 +168,6 @@ export function ConnectionsSection() {
             </Button>
           }
         />
-        <ListRow title="Apps" description={apps ? `${apps} connected now. Connect, sign in and see what each can do.` : "Connect an app so Ghost can read and act in it."} href={hrefFor("/apps")} chevron />
       </Card>
     </Section>
   );

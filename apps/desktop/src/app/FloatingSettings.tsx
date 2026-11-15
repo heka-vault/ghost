@@ -7,16 +7,20 @@
  * switches, not part of the page's draft. Captions are a choice inside floating. Ghost on
  * stage (the stage window, for showing Ghost to people) is the tray's item (ADR 0073).
  */
-import { Card, ListRow, Notice, SegmentedControl, Select } from "../ui";
+import { Card, Disclosure, ListRow, Notice, SegmentedControl, Select } from "../ui";
 import { type FloatingCaptions, type FloatingPlacement, prefOf, prefValue, useFloating, type WhileShared } from "./floating";
 
-/** The section's body. */
-export function FloatingRoomSettings() {
-  return <FloatingSettings />;
+/**
+ * The section's body: one choice, and the floating choices (monitor, placement, captions,
+ * while shared) behind “Floating options…” (the flow review, 2026-11-14: General is about ten
+ * controls). `optionsOpen` opens them, for an old link to them.
+ */
+export function FloatingRoomSettings({ optionsOpen = false }: { optionsOpen?: boolean }) {
+  return <FloatingSettings optionsOpen={optionsOpen} />;
 }
 
 /** Where Ghost appears: floating, with its choices, or in the window. */
-function FloatingSettings() {
+function FloatingSettings({ optionsOpen }: { optionsOpen: boolean }) {
   const { status, set, error } = useFloating();
   if (!status) return null;
   const refused = status.support.kind === "no" ? status.support.why : null;
@@ -32,12 +36,12 @@ function FloatingSettings() {
     <>
       <Card list>
         <ListRow
-          title="Where Ghost appears"
+          title={refused ? "In this window" : on ? "Over your work" : "In this window"}
           description={
             refused ??
             (on
-              ? "When you call Ghost and this window isn’t the one you’re using, Ghost comes forward over your desktop instead, with no window around it, and goes back to a thin line at the bottom of the screen when you’re done. It never takes your keyboard, and clicks pass through everywhere it isn’t drawn. To send it away, say “Ghost, goodbye” or click Done under it."
-              : "In this window: Today’s talk bar becomes a live strip while you talk, with a yes or a question and its buttons.")
+              ? "Ghost comes forward over your desktop, with no window around it, and goes back to a thin line when you’re done. It never takes your keyboard."
+              : "Today’s talk bar becomes a live strip while you talk, with a yes or a question and its buttons.")
           }
           trailing={
             <SegmentedControl
@@ -52,20 +56,21 @@ function FloatingSettings() {
           }
         />
         {on && (
-          <ListRow
+          <div className="float-options">
+            <Disclosure summary="Floating options…" defaultOpen={optionsOpen}>
+              <div className="float-options__rows">
+        <ListRow
             title="Ghost appears on"
             description={
               status.helper
                 ? "Ghost knows which monitor you’re working on."
                 : status.monitors.length > 1
-                  ? "Without Ghost’s GNOME helper, Ghost can’t see which monitor you’re working on, so “the other monitor” is the one that isn’t primary. docs/floating-room.md says how to add the helper."
+                  ? "Without Ghost’s GNOME helper, Ghost can’t see which monitor you’re working on, so “the other monitor” is the one that isn’t primary. Ghost’s help on floating says how to add the helper."
                   : "With one monitor, Ghost comes forward on the side away from your work when it can tell where that is."
             }
             trailing={<Select size="sm" className="float-select" aria-label="Ghost appears on" value={value} options={options} onChange={(e) => void set({ ...status.settings, monitor: prefOf(e.target.value) })} />}
           />
-        )}
-        {on && (
-          <ListRow
+        <ListRow
             title="Where on the screen"
             description="Beside your work is a column at the edge away from what you’re doing; the corner is the smallest; the centre is the whole stage."
             trailing={
@@ -83,9 +88,7 @@ function FloatingSettings() {
               />
             }
           />
-        )}
-        {on && (
-          <ListRow
+        <ListRow
             title="Captions"
             description="Ghost is a voice, so by default nothing it says is written on your desktop. “When the sound is off” means muted or too quiet to hear."
             trailing={
@@ -103,9 +106,7 @@ function FloatingSettings() {
               />
             }
           />
-        )}
-        {on && (
-          <ListRow
+        <ListRow
             title="While my screen is shared"
             description="When a meeting or recording takes your whole screen. Shown, Ghost is marked “Screen shared”; the tray changes it for one share. Sharing a single window never includes it."
             trailing={
@@ -123,6 +124,9 @@ function FloatingSettings() {
               />
             }
           />
+              </div>
+            </Disclosure>
+          </div>
         )}
       </Card>
       {on && status.capture === "yes" && (

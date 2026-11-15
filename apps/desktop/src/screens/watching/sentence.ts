@@ -13,29 +13,45 @@
 import type { HookInfo, ScheduleInfo, ScheduleRunInfo, WatchInfo } from "@ghost/client-ts";
 import { relativeTime } from "@ghost/ui";
 
-import { OUTCOME, URGENCY, count, everyWords, sumOf, untilWords, whenWords } from "./model";
+import { clockWords } from "../settings/plain";
+import type { Problem } from "./problems";
+import { OUTCOME, URGENCY, count, untilWords, whenWords } from "./model";
 
 /** One thing Ghost does on its own. The code keeps its names; the operator sees a sentence. */
 export type Doing = { kind: "schedule"; key: string; s: ScheduleInfo } | { kind: "watch"; key: string; w: WatchInfo } | { kind: "hook"; key: string; h: HookInfo };
 
 export interface Sentence {
-  /** Ghost's own words: who, and when or on what. */
-  lead: string;
+  /** Which group of the list: at a time, or when something happens. */
+  group: Group;
+  /** When, or on what: the row's title (“Weekdays at 9 AM”, “New pull requests in GitHub”). */
+  trigger: string;
+  /** Who does it, before the quote (“Ghost”); with no quote, the whole of what it does. */
+  what: string;
   /** Someone's own words, shown apart and marked `data-user-content`; none for a watch or webhook. */
   quote: string | null;
   /** The agent the row leads with. */
   agent: string;
-  /** How it tells the operator, and anything that narrows it. */
-  how: string;
-  /** Its state now, in a few words: “Next in 3 h · last ran 2 h ago, done”. */
+  /** Its state now, in a few words: “Tells you with a notification · next in 3 h · last ran 2 h ago, done”. */
   state: string;
-  /** Paused, broken or off: the row says so in its badge. */
+  /** Paused, broken or off: the chip in the row. */
   badge: { label: string; tone: "ok" | "warn" | "danger" | "info" | "neutral" } | null;
+  /** Its switch: on or off, and why it can't be flipped here when it can't. */
+  pause: { on: boolean; why: string | null };
 }
+
+/** The list's two groups (the flow review, 2026-11-14). */
+export type Group = "time" | "event";
+export const GROUP_TITLE: Record<Group, string> = { time: "At a time", event: "When something happens" };
+
+/** Why a row of the operator's own file has a switch that this window can't flip. */
+export const FILE_OWNS = "This one is yours, in Ghost’s folder: change it there.";
+export const HOOK_OWNS = "A webhook is on while Ghost’s folder declares it: change it there.";
 
 export interface SentenceContext {
   /** This computer's time zone, for a schedule's “when”. */
   zone: string;
+  /** The person's locale, for times in their own clock (tests pin it). */
+  locale?: string;
   /** An agent's name by its slug. */
   agentName: (slug: string) => string;
   /** An app's catalog title by its name (“GitHub”, not github_heka). */
@@ -71,27 +87,53 @@ function eventsWords(events: string[]): string {
   return `${words.slice(0, -1).join(", ")} or ${words[words.length - 1]}`;
 }
 
-export function sentenceOf(d: Doing, c: SentenceContext): Sentence {
+/**
+ * What a watch looks for, from its read's name (a typed field of the operator's own file, not an
+ * app's text): `list_workflow_runs` is “workflow runs”, `search_pull_requests` “pull requests”.
+ * Only letters and digits, 40 characters at most; nothing left says “something”.
+ */
+export const READ_MAX = 40;
+export function readWords(read: string): string {
+  const words = read
+    .toLowerCase()
+    .replace(/^(list|search|get|fetch|find|read|query|poll|watch)[_.-]+/, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+  if (!words) return "something";
+  return words.length > READ_MAX ? words.slice(0, READ_MAX).replace(/\s+\S*$/, "") : words;
+}
+
+/** A webhook that is off, in words: never the password's name. */
+function offWords(reason: string | null | undefined): string {
+  if (reason && /password \S+ (is not|isn’t|isn't) set/.test(reason)) return "Off until its password is set";
+  return "Off until it is set up";
+}
+
+export function sentenceOf(d: Doing, given: SentenceContext): Sentence {
+  // An app with no catalog title is named by its own name, first letter up (“Stripe”, “Mail”).
+  const c = { ...given, appTitle: (n: string) => (given.appTitle(n) === n ? cap(n) : given.appTitle(n)) };
   const now = c.now ?? Date.now();
   if (d.kind === "schedule") {
     const s = d.s;
     const when = whenWords(s, c.zone);
     const whenPhrase = when.mono ? `on the schedule ${when.mono}` : lowerFirst(when.text);
-    const hours = s.active_hours ? `, between ${s.active_hours.start} and ${s.active_hours.end}` : "";
+    const hours = s.active_hours ? `, between ${clockWords(s.active_hours.start, c.locale)} and ${clockWords(s.active_hours.end, c.locale)}` : "";
     const check = s.check ? `, only when ${c.appTitle(s.check.app)} has something new` : "";
     const last = s.last_outcome ? OUTCOME[s.last_outcome] : null;
     const state = s.running
-      ? "Running now"
+      ? "running now"
       : !s.enabled
-        ? "Paused"
+        ? "paused"
         : [s.next_run ? `next ${untilWords(s.next_run, now)}` : "no next run", s.last_run ? `last ran ${relativeTime(s.last_run, now)}${last ? `, ${last.label.toLowerCase()}` : ""}` : "not run yet"].join(" · ");
     return {
-      lead: `${c.agentName(s.agent)}, ${whenPhrase}${hours}:`,
+      group: "time",
+      trigger: cap(`${whenPhrase}${hours}`),
+      what: c.agentName(s.agent),
       quote: quoteOf(s.instruction || s.name),
       agent: s.agent,
-      how: `Tells you ${URGENCY[s.urgency]}${check}`,
-      state: cap(state),
+      state: `Tells you ${URGENCY[s.urgency]}${check} · ${state}`,
       badge: s.running ? { label: "Running", tone: "info" } : !s.enabled ? { label: "Paused", tone: "neutral" } : last && (last.tone === "danger" || last.tone === "warn") ? { label: last.label, tone: last.tone } : null,
+      pause: { on: s.enabled, why: null },
     };
   }
   if (d.kind === "watch") {
@@ -99,36 +141,44 @@ export function sentenceOf(d: Doing, c: SentenceContext): Sentence {
     const app = c.appTitle(w.app);
     const actor = w.acts_through ? c.agentName(w.acts_through) : null;
     const does = w.response === "tell" ? `Ghost tells you ${URGENCY[w.urgency]}` : "Ghost keeps a record";
-    const lead = actor ? `When something new turns up in ${app}, ${actor} looks into it and ${does}` : `When something new turns up in ${app}, ${does}`;
+    const what = readWords(w.read);
     const state = w.paused
       ? "Paused"
       : w.error
-        ? `Can’t read ${app}${w.last_ok ? ` · last worked ${relativeTime(w.last_ok, now)}` : w.last_run ? " · never worked" : ""}`
-        : [`looks ${everyWords(w.every_secs)}`, w.last_run ? `looked ${relativeTime(w.last_run, now)}` : "no look yet", w.open ? `${w.open} open` : null].filter(Boolean).join(" · ");
+        ? w.last_ok
+          ? `Last worked ${relativeTime(w.last_ok, now)}`
+          : w.last_run
+            ? "Hasn’t worked yet"
+            : "Not looked yet"
+        : [w.last_run ? `Looked ${relativeTime(w.last_run, now)}` : "Not looked yet", w.open ? `${w.open} open` : null].filter(Boolean).join(" · ");
+    const maker = w.made_by?.startsWith("agent:") ? c.agentName(w.made_by.slice(6)) : null;
     return {
-      lead,
+      group: "event",
+      trigger: what === "something" ? `Something new in ${app}` : `New ${what} in ${app}`,
+      what: actor ? `${actor} looks into each, then ${does.replace(/^Ghost keeps/, "Ghost keeps")}` : does,
       quote: null,
       agent: w.acts_through ?? "ghost",
-      how: w.made_by?.startsWith("agent:") ? `Set up by ${c.agentName(w.made_by.slice(6))}` : "Yours, in Ghost’s folder",
-      state: cap(state),
+      state: maker ? `${state} · set up by ${maker}` : state,
       badge: w.paused ? { label: "Paused", tone: "neutral" } : w.error ? { label: "Can’t read", tone: "danger" } : null,
+      pause: { on: !w.paused, why: w.made_by != null ? null : FILE_OWNS },
     };
   }
   const h = d.h;
-  const taken = sumOf(h.accepted);
   return {
-    lead: `When ${sourceOf(h)} sends ${eventsWords(h.events)}, Ghost tells you`,
+    group: "event",
+    trigger: `When ${sourceOf(h)} sends ${eventsWords(h.events)}`,
+    what: "Ghost tells you",
     quote: null,
     agent: "ghost",
-    how: h.on ? "Checked for its signature before Ghost reads it" : "Off until it is set up",
-    state: cap(h.on ? (h.last ? `last ${relativeTime(h.last, now)} · ${count(taken, "delivery", "deliveries")}` : "nothing yet") : `off: ${h.off_reason ?? "the listener is off"}`),
+    state: h.on ? (h.last ? `Last heard from ${relativeTime(h.last, now)}` : "Nothing yet") : offWords(h.off_reason),
     badge: h.on ? null : { label: "Off", tone: "neutral" },
+    pause: { on: h.on, why: HOOK_OWNS },
   };
 }
 
 /** The whole sentence as one string: the row's accessible name, and what the tests read. */
 export function sentenceText(s: Sentence): string {
-  return s.quote ? `${s.lead} ${s.quote}` : s.lead;
+  return `${s.trigger}: ${s.quote ? `${s.what}, ${s.quote}` : s.what}`;
 }
 
 /**
@@ -179,4 +229,32 @@ export function goingWords(r: ScheduleRunInfo, name: (slug: string) => string): 
   const who = name(r.agent);
   const why = r.source.startsWith("watch:") ? `looking into something new for ${r.source.slice(6)}` : r.status === "queued" ? `about to run ${r.name}` : `running ${r.name}`;
   return `${who} is ${why}`;
+}
+
+/* ------------------------------------------------------------------ what can't run, in its row */
+
+/** A problem the daemon reports for something that isn't on the list (it doesn't read), as a row of its own. */
+export interface ProblemRow {
+  key: string;
+  group: Group;
+  problem: Problem;
+}
+
+/**
+ * Each problem goes to its row (the flow review, 2026-11-14: a red box above the list said three
+ * things and disagreed with the rows): a row it names gets its chip and its sentence; one that
+ * names nothing on the list becomes a row of its own in its group.
+ */
+export function placeProblems(doings: readonly Doing[], problems: readonly Problem[]): { byKey: Map<string, Problem>; rows: ProblemRow[] } {
+  const byKey = new Map<string, Problem>();
+  const rows: ProblemRow[] = [];
+  problems.forEach((p, i) => {
+    const subject = p.subject;
+    const hit = subject
+      ? doings.find((d) => (d.kind === "schedule" ? subject.kind === "schedule" && d.s.name === subject.name : d.kind === subject.kind && (d.kind === "watch" ? d.w.name : d.h.name) === subject.name))
+      : undefined;
+    if (hit && !byKey.has(hit.key)) byKey.set(hit.key, p);
+    else rows.push({ key: `problem:${i}:${subject ? `${subject.kind}:${subject.name}` : "file"}`, group: subject?.kind === "schedule" ? "time" : "event", problem: p });
+  });
+  return { byKey, rows };
 }

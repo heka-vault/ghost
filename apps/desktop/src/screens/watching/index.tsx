@@ -27,10 +27,11 @@ import { toolTitle } from "../settings/tools";
 import { AddWatchDialog } from "./AddWatch";
 import { AskGhost } from "./AskGhost";
 import { CONFIG_DIR, RESPONSE, URGENCY, VERIFY, count, everyWords, folderOf, listWords, madeBy, reasonWords, revealFolder, runErrorWords, stepWords, sumOf, untilWords } from "./model";
-import { problemOf } from "./problems";
+import { OnItsOwnList } from "./List";
+import { type Problem, problemOf } from "./problems";
 import { RunsDialog, ScheduleDialog } from "./Schedules";
 import { useAppTitles } from "./Runs";
-import { type Doing, countWords, doingsOf, goingNow, goingWords, ownersOf, ownsDoing, sentenceOf, sentenceText } from "./sentence";
+import { type Doing, countWords, doingsOf, goingNow, goingWords, ownersOf, ownsDoing, placeProblems, sentenceOf } from "./sentence";
 import "./watching.css";
 
 /** How often the list is read again while the page is open: next and last runs move. */
@@ -59,6 +60,7 @@ export default function OnItsOwnScreen(_: RouteProps) {
   const [addingWatch, setAddingWatch] = useState(false);
   const [history, setHistory] = useState<{ title: string; load: () => Promise<ScheduleRunInfo[]> } | null>(null);
   const [details, setDetails] = useState<Doing | null>(null);
+  const [problem, setProblem] = useState<Problem | null>(null);
 
   const reload = useCallback(() => setAttempt((n) => n + 1), []);
   useEffect(() => {
@@ -107,8 +109,9 @@ export default function OnItsOwnScreen(_: RouteProps) {
   const owners = ownersOf(all);
   const shown = all.filter((d) => !only || ownsDoing(d, only));
   const going = goingNow(runs);
-  const problems = [...(schedules?.problems ?? []), ...(watching?.problems ?? [])];
   const ctx = { zone: schedules?.time_zone ?? "", agentName: nameOf, appTitle };
+  // What can't run goes to its row, or is a row of its own (the flow review, 2026-11-14).
+  const placed = placeProblems(all, [...(schedules?.problems ?? []), ...(watching?.problems ?? [])].map((raw) => problemOf(raw, { appTitle, agentName: nameOf })));
 
   /** One write: the row is busy while it goes; a refusal is said above the list. */
   const act = async (key: string, what: string, fn: () => Promise<void>) => {
@@ -142,7 +145,7 @@ export default function OnItsOwnScreen(_: RouteProps) {
     act(`run:${r.id}`, `stop ${r.name}`, async () => {
       await client.cancelRun(r.id);
       reload();
-      toast({ title: "Stopped", description: `${nameOf(r.agent)} stops where it is. What it already changed is in the audit.` });
+      toast({ title: "Stopped", description: `${nameOf(r.agent)} stops where it is. What it already changed is on Today.` });
     });
   /** Stop a schedule's run from its row: the one going or waiting. */
   const stopSchedule = (s: ScheduleInfo) =>
@@ -178,38 +181,11 @@ export default function OnItsOwnScreen(_: RouteProps) {
   };
 
   return (
-    <Page width="default" title="On its own" description="What Ghost and your agents do without being asked: at a time, or when something happens. To add one, ask Ghost.">
-      {problems.length > 0 && (
-        // Everything that can't run, in one place, before anything else: a plain sentence each,
-        // its fix where there is one, and the daemon's own line under Details. Danger, never amber.
-        <Notice tone="danger" title={`${count(problems.length, "thing")} can’t run`} className="wat-notice wat-problems-notice">
-          <ul className="wat-problems">
-            {problems.map((raw) => {
-              const p = problemOf(raw, { appTitle, agentName: nameOf });
-              return (
-                <li key={raw} className="wat-problem">
-                  <span className="wat-problem__line">
-                    <span>{p.sentence}</span>
-                    {p.fix && (
-                      <Link to={p.fix.path} className="wat-problem__fix">
-                        {p.fix.label}
-                      </Link>
-                    )}
-                  </span>
-                  <Disclosure summary="Details" className="wat-problem__details">
-                    <p className="t-mono t-small" data-user-content>
-                      {p.detail}
-                    </p>
-                  </Disclosure>
-                </li>
-              );
-            })}
-          </ul>
-        </Notice>
-      )}
+    <Page width="default" title="On its own" description="What Ghost and your agents do without being asked.">
+      <AskGhost onReply={reload} />
 
       {going.length > 0 && (
-        <Section id="wat-now" title="Running now" description="Stop one and it stops where it is; what it already changed is in the audit.">
+        <Section id="wat-now" title="Running now" description="Stop one and it stops where it is. What it already changed stays, and is on Today.">
           <Card list className="wat-now">
             {going.map((r) => (
               <ListRow
@@ -236,12 +212,9 @@ export default function OnItsOwnScreen(_: RouteProps) {
         </Section>
       )}
 
-      <AskGhost onReply={reload} />
-
       <Section
         id="wat-list"
-        title={loaded ? countWords(all.length) : "Everything it does"}
-        description="Each says what it does, when or on what, and as which agent."
+        title={loaded ? countWords(all.length + placed.rows.length) : "Everything it does"}
         className="wat-list"
       >
         {owners.length > 1 && (
@@ -280,7 +253,7 @@ export default function OnItsOwnScreen(_: RouteProps) {
               </div>
             ))}
           </Card>
-        ) : shown.length === 0 ? (
+        ) : shown.length === 0 && placed.rows.length === 0 ? (
           <Card>
             <EmptyState
               icon={<Repeat />}
@@ -289,32 +262,29 @@ export default function OnItsOwnScreen(_: RouteProps) {
             />
           </Card>
         ) : (
-          <Card list>
-            {shown.map((d) => (
-              <DoingRow
-                key={d.key}
-                d={d}
-                sentence={sentenceOf(d, ctx)}
-                busy={busy === d.key}
-                online={online}
-                onToggle={(on) => void toggle(d, on)}
-                onRun={() => d.kind === "schedule" && void runNow(d.s)}
-                onStop={() => d.kind === "schedule" && void stopSchedule(d.s)}
-                onEdit={() => d.kind === "schedule" && setEditing(d.s)}
-                onHistory={() =>
-                  setHistory(
-                    d.kind === "schedule"
-                      ? { title: d.s.name, load: () => client.scheduleRuns(d.s.id, 10).then((r) => r.runs) }
-                      : d.kind === "watch"
-                        ? { title: d.w.name, load: () => client.runs(60).then((r) => r.runs.filter((x) => x.source === `watch:${d.w.name}`).slice(0, 10)) }
-                        : null,
-                  )
-                }
-                onDetails={() => setDetails(d)}
-                onRemove={() => void remove(d)}
-              />
-            ))}
-          </Card>
+          <OnItsOwnList
+            rows={shown.map((d) => ({ d, s: sentenceOf(d, ctx), problem: placed.byKey.get(d.key) ?? null }))}
+            problems={only && only !== "ghost" ? [] : placed.rows}
+            busyKey={busy}
+            online={online}
+            on={{
+              toggle: (d, on) => void toggle(d, on),
+              run: (d) => d.kind === "schedule" && void runNow(d.s),
+              stop: (d) => d.kind === "schedule" && void stopSchedule(d.s),
+              edit: (d) => d.kind === "schedule" && setEditing(d.s),
+              history: (d) =>
+                setHistory(
+                  d.kind === "schedule"
+                    ? { title: d.s.name, load: () => client.scheduleRuns(d.s.id, 10).then((r) => r.runs) }
+                    : d.kind === "watch"
+                      ? { title: d.w.name, load: () => client.runs(60).then((r) => r.runs.filter((x) => x.source === `watch:${d.w.name}`).slice(0, 10)) }
+                      : null,
+                ),
+              details: (d) => setDetails(d),
+              remove: (d) => void remove(d),
+              problemDetails: (p) => setProblem(p),
+            }}
+          />
         )}
       </Section>
 
@@ -392,6 +362,33 @@ export default function OnItsOwnScreen(_: RouteProps) {
       />
       <AddWatchDialog open={addingWatch} onClose={() => setAddingWatch(false)} agents={agents} />
       <RunsDialog title={history?.title ?? null} load={history?.load ?? null} onClose={() => setHistory(null)} />
+      <Dialog
+        open={problem != null}
+        onClose={() => setProblem(null)}
+        size="md"
+        title="Why it can’t run"
+        description={problem?.sentence}
+        footer={
+          <Button variant="secondary" onClick={() => setProblem(null)}>
+            Close
+          </Button>
+        }
+      >
+        {problem && (
+          <dl className="wat-details">
+            {problem.file && (
+              <>
+                <dt>File</dt>
+                <dd className="t-mono">{problem.file}</dd>
+              </>
+            )}
+            <dt>Ghost says</dt>
+            <dd className="t-mono t-small" data-user-content>
+              {problem.detail}
+            </dd>
+          </dl>
+        )}
+      </Dialog>
       <DetailsDialog d={details} listening={watching?.listening ?? []} nameOf={nameOf} appTitle={appTitle} onClose={() => setDetails(null)} />
       {confirmDialog}
     </Page>
@@ -400,86 +397,6 @@ export default function OnItsOwnScreen(_: RouteProps) {
 
 /** The agent that made a watch, from `agent:<slug>`. */
 const madeBySlug = (w: WatchInfo) => (w.made_by ?? "").replace(/^agent:/, "");
-
-interface RowProps {
-  d: Doing;
-  sentence: ReturnType<typeof sentenceOf>;
-  busy: boolean;
-  online: boolean;
-  onToggle: (on: boolean) => void;
-  onRun: () => void;
-  onStop: () => void;
-  onEdit: () => void;
-  onHistory: () => void;
-  onDetails: () => void;
-  onRemove: () => void;
-}
-
-/** One thing Ghost does on its own: its sentence, how it tells you, its state, and its controls. */
-function DoingRow({ d, sentence: s, busy, online, onToggle, onRun, onStop, onEdit, onHistory, onDetails, onRemove }: RowProps) {
-  const off = busy || !online;
-  const name = d.kind === "schedule" ? d.s.name : d.kind === "watch" ? d.w.name : d.h.name;
-  // Pause and resume: a schedule, and a watch an agent made (the operator's own is the file's).
-  const pausable = d.kind === "schedule" ? { on: d.s.enabled } : d.kind === "watch" && d.w.made_by != null ? { on: !d.w.paused } : null;
-  const items =
-    d.kind === "schedule"
-      ? [
-          d.s.running ? { label: "Stop this run", icon: <Square />, onSelect: onStop, disabled: off } : { label: "Run now", icon: <Play />, onSelect: onRun, disabled: off },
-          { label: "What it did…", icon: <History />, onSelect: onHistory },
-          { label: "Edit…", icon: <Pencil />, onSelect: onEdit, disabled: off },
-          "separator" as const,
-          { label: "Remove…", icon: <Trash2 />, danger: true, onSelect: onRemove, disabled: off },
-        ]
-      : d.kind === "watch"
-        ? [
-            { label: "Details…", icon: <Info />, onSelect: onDetails },
-            ...(d.w.acts_through ? [{ label: "What it did…", icon: <History />, onSelect: onHistory }] : []),
-            ...(d.w.made_by != null ? ["separator" as const, { label: "Remove…", icon: <Trash2 />, danger: true, onSelect: onRemove, disabled: off }] : []),
-          ]
-        : [{ label: "Details…", icon: <Info />, onSelect: onDetails }];
-  const err = d.kind === "schedule" && d.s.last_error && s.badge ? d.s.last_error : null;
-  return (
-    <ListRow
-      align="start"
-      leading={<LineGlyph slug={s.agent} name={agentName(s.agent)} size="lg" />}
-      title={
-        <span className="wat-title wat-sentence">
-          <span>
-            {s.lead}
-            {s.quote && (
-              <>
-                {" "}
-                <span data-user-content>{s.quote}</span>
-              </>
-            )}
-          </span>
-          {s.badge && (
-            <Badge tone={s.badge.tone} dot size="sm">
-              {s.badge.label}
-            </Badge>
-          )}
-        </span>
-      }
-      description={
-        <span className="wat-desc">
-          <span>{s.how}</span>
-          <span className="t-3 t-num">{s.state}</span>
-          {err && (
-            <span className="wat-error" title={err}>
-              Last run didn’t finish: {runErrorWords(err)}.
-            </span>
-          )}
-        </span>
-      }
-      trailing={
-        <span className="wat-sched-end">
-          {pausable && <Switch checked={pausable.on} onChange={onToggle} disabled={off} size="sm" aria-label={`Keep “${sentenceText(s)}” going`} />}
-          <Menu align="end" trigger={<IconButton label={`More for ${name}`} icon={<MoreHorizontal />} variant="ghost" size="sm" />} items={items} />
-        </span>
-      }
-    />
-  );
-}
 
 /** A watch's or a webhook's details: what the old Watching rows said, in full. */
 function DetailsDialog({ d, listening, nameOf, appTitle, onClose }: { d: Doing | null; listening: string[]; nameOf: (s: string) => string; appTitle: (n: string) => string; onClose: () => void }) {

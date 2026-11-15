@@ -302,3 +302,9 @@
 
 /* A password where it is used (ADR 0073). */
 .set-inplace__where { margin: 0; padding: 0 var(--space-4) var(--space-3); color: var(--text-3); font-size: var(--text-sm); }
+/* A row's Details: the ids under what the row says in words (the flow review, 2026-11-14). */
+.set-details-line { margin: 0 0 var(--space-2); font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-2); }
+/* General's “Floating options…”: a row of the card, its choices inside, divided like the card's rows. */
+.float-options { padding: var(--space-3) var(--space-4); }
+.float-options__rows { display: flex; flex-direction: column; margin: var(--space-2) calc(var(--space-4) * -1) calc(var(--space-3) * -1); }
+.float-options__rows > * + * { border-top: 1px solid var(--border-subtle); }

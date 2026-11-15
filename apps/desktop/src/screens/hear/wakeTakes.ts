@@ -38,7 +38,7 @@ export function keeping(wakeMode: string | null | undefined, count: number): Kee
   if (wakeMode === DETECTOR_WAKE) return { notice: KEEP_NOTICE, controls: true, row: true };
   if (count > 0) {
     return {
-      notice: `${NOTHING_KEPT} These were kept while the trained detector was the wake; delete them when you like.`,
+      notice: `${NOTHING_KEPT} These were kept earlier, while Ghost woke a different way; delete them when you like.`,
       controls: false,
       row: true,
     };

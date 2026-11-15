@@ -22,6 +22,7 @@ import { inTauri } from "../../transport";
 import { Button, Card, ListRow, Section, buildText, useToast } from "../../ui";
 import { VersionNotice, VersionRows } from "./About";
 import { DiagnosticReport } from "./Diagnostic";
+import { SentReportsSection } from "./ErrorReports";
 import { Licences } from "./Licences";
 import { SECTION_TITLE, sectionDomId } from "./model";
 import { UpdatesSection } from "./Updates";
@@ -95,6 +96,7 @@ export function AboutPage({ forced }: { forced: string | null }) {
       </Section>
       <UpdatesSection />
       <DiagnosticReport openOnLoad={forced === "report"} />
+      <SentReportsSection />
       <Licences />
     </>
   );
