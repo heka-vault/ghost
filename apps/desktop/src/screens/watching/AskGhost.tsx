@@ -15,7 +15,7 @@ import { ArrowUp } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { Link } from "../../app/router";
-import { Button, Card, PendingChange, Spinner, Textarea, errorText, quoted, useLive } from "../../ui";
+import { Button, Card, PendingChange, Spinner, Textarea, alwaysDone, errorText, quoted, useLive, useToast } from "../../ui";
 
 /** A few sentences to start from, one of each kind: they fill the field, nothing more. */
 export const EXAMPLES = [
@@ -49,6 +49,7 @@ export function repliesTo(turns: readonly Pick<Turn, "role" | "text">[], asked: 
 export function AskGhost({ onReply }: { onReply: () => void }) {
   const { client, turns, pending } = useGhost();
   const { online } = useLive();
+  const toast = useToast();
   const [text, setText] = useState("");
   const [asked, setAsked] = useState<string | null>(null);
   /** What Ghost said back, kept after the typed session ends and its turns go. */
@@ -157,6 +158,16 @@ export function AskGhost({ onReply }: { onReply: () => void }) {
               disabled={!online}
               onConfirm={() => void client.confirm()}
               onCancel={() => void client.cancel()}
+              // ADR 0070: the same decision made to stick, behind More choices; the click is the
+              // operator's own and calls `decideAlways` and nothing else.
+              always={pending.always}
+              onAlways={(choice) => {
+                const scope = pending.always?.scope ?? "this tool";
+                client.decideAlways(pending.id, choice).then(
+                  () => toast(alwaysDone(choice, scope)),
+                  (e) => setError(errorText(e)),
+                );
+              }}
             />
           ) : replies.length === 0 ? (
             <p className="wat-ask__wait t-small t-2">

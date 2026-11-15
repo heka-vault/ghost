@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { schedules, watching } from "../src/design/mock/fixtures/folder";
 import { scenarioByName } from "../src/design/mock/scenarios";
 import { repliesTo } from "../src/screens/watching/AskGhost";
+import { problemOf } from "../src/screens/watching/problems";
 import { QUOTE_MAX, countWords, doingsOf, goingNow, goingWords, ownersOf, quoteOf, sentenceOf, sentenceText } from "../src/screens/watching/sentence";
 
 const names: Record<string, string> = { ghost: "Ghost", accounting: "Accounting", ledger: "Ledger" };
@@ -139,5 +140,37 @@ describe("asking Ghost to do something on its own", () => {
     ];
     expect(repliesTo(turns, " Every weekday at 9, check the build ")).toEqual(["Done. Weekdays at 9 AM I check the build.", "It’s on the list."]);
     expect(repliesTo(turns, "something never said")).toEqual([]);
+  });
+});
+
+describe("what can't run, said for a newcomer", () => {
+  const c = { appTitle: (n: string) => ({ quickbooks: "QuickBooks" })[n] ?? n, agentName: (s: string) => ({ analytics: "Analytics" })[s] ?? s };
+  it("says each known kind in a plain sentence, with its fix, the line kept for Details", () => {
+    const busy = scenarioByName("busy");
+    const raw = [...schedules(busy).view.problems, ...watching(busy).problems];
+    const said = raw.map((r) => problemOf(r, c));
+    expect(said.map((p) => p.sentence)).toEqual([
+      "The weekly numbers schedule can’t run: Analytics is retired.",
+      "The invoices watch can’t run: QuickBooks isn’t connected.",
+      "The billing webhook is off: Ghost can’t read how it is set up.",
+    ]);
+    expect(said.map((p) => p.fix?.path ?? null)).toEqual(["/settings/agents", "/apps", null]);
+    expect(said[1].fix?.label).toBe("Connect QuickBooks");
+    // The raw line and its file stay for Details, never in the sentence.
+    expect(said[1].detail).toBe(raw[1]);
+    expect(said[1].file).toBe("~/.config/ghost/watches.json");
+    for (const p of said) expect(p.sentence).not.toMatch(/\.json|~\/|"/);
+  });
+  it("reads the daemon's own shapes", () => {
+    expect(problemOf("/home/x/.config/ghost/watches.json: watch ci: \"every\" must be a number; the watch is off", c).sentence).toBe("The ci watch is off: Ghost can’t read how it is set up.");
+    expect(problemOf("hook stripe is off: its password STRIPE_HOOK_SECRET is not set", c)).toMatchObject({ sentence: "The stripe webhook is off: its password isn’t set.", fix: { path: "/settings/passwords" } });
+    expect(problemOf("hook jobs is off: the recorded delivery bad.json was accepted", c).sentence).toBe("The jobs webhook is off: its recorded deliveries don’t check out.");
+    expect(problemOf("/home/x/.config/ghost/hooks.json: expected value at line 1 column 1", c).sentence).toBe("Your webhooks file can’t be read, so nothing in it runs.");
+    expect(problemOf("The schedule nightly is for ops, which is not an agent Ghost has; it will not run", c).sentence).toBe("The nightly schedule can’t run: there is no agent called ops.");
+  });
+  it("says an unknown kind as something that can't be read, and bounds every name", () => {
+    expect(problemOf("a line Ghost has never written", c)).toMatchObject({ sentence: "Something in your setup can’t be read.", fix: null });
+    const long = problemOf(`~/.config/ghost/watches.json: watch ${"x".repeat(200)}: bad; the watch is off`, c).sentence;
+    expect(long.length).toBeLessThan(120);
   });
 });

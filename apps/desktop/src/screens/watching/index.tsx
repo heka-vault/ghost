@@ -20,12 +20,14 @@ import { useGhost } from "@ghost/ui";
 import { CalendarClock, CloudOff, Eye, FolderOpen, History, Info, MoreHorizontal, Pencil, Play, Plus, Repeat, Square, Trash2, Webhook } from "lucide-react";
 import { Fragment, useCallback, useEffect, useState } from "react";
 
+import { Link } from "../../app/router";
 import type { RouteProps } from "../../app/routes";
 import { Badge, Button, Card, cx, Dialog, Disclosure, EmptyState, IconButton, LineGlyph, ListRow, Menu, Notice, Page, Section, Skeleton, Switch, agentName, errorText, relativeTime, useConfirm, useLive, useToast } from "../../ui";
 import { toolTitle } from "../settings/tools";
 import { AddWatchDialog } from "./AddWatch";
 import { AskGhost } from "./AskGhost";
 import { CONFIG_DIR, RESPONSE, URGENCY, VERIFY, count, everyWords, folderOf, listWords, madeBy, reasonWords, revealFolder, runErrorWords, stepWords, sumOf, untilWords } from "./model";
+import { problemOf } from "./problems";
 import { RunsDialog, ScheduleDialog } from "./Schedules";
 import { useAppTitles } from "./Runs";
 import { type Doing, countWords, doingsOf, goingNow, goingWords, ownersOf, ownsDoing, sentenceOf, sentenceText } from "./sentence";
@@ -178,15 +180,30 @@ export default function OnItsOwnScreen(_: RouteProps) {
   return (
     <Page width="default" title="On its own" description="What Ghost and your agents do without being asked: at a time, or when something happens. To add one, ask Ghost.">
       {problems.length > 0 && (
-        // Everything that can't run, in one place, before anything else. Danger, never amber.
+        // Everything that can't run, in one place, before anything else: a plain sentence each,
+        // its fix where there is one, and the daemon's own line under Details. Danger, never amber.
         <Notice tone="danger" title={`${count(problems.length, "thing")} can’t run`} className="wat-notice wat-problems-notice">
-          <p className="wat-notice__lead">Ghost goes on without them. Fix each and it picks the change up.</p>
           <ul className="wat-problems">
-            {problems.map((p) => (
-              <li key={p} className="t-small" data-user-content>
-                {p}
-              </li>
-            ))}
+            {problems.map((raw) => {
+              const p = problemOf(raw, { appTitle, agentName: nameOf });
+              return (
+                <li key={raw} className="wat-problem">
+                  <span className="wat-problem__line">
+                    <span>{p.sentence}</span>
+                    {p.fix && (
+                      <Link to={p.fix.path} className="wat-problem__fix">
+                        {p.fix.label}
+                      </Link>
+                    )}
+                  </span>
+                  <Disclosure summary="Details" className="wat-problem__details">
+                    <p className="t-mono t-small" data-user-content>
+                      {p.detail}
+                    </p>
+                  </Disclosure>
+                </li>
+              );
+            })}
           </ul>
         </Notice>
       )}
