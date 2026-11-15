@@ -19,7 +19,7 @@ wheels = [
 
 [[package]]
 name = "ghost"
-version = "2026.11.2"
+version = "2026.11.3"
 source = { virtual = "." }
 
 [package.dev-dependencies]
@@ -38,7 +38,7 @@ dev = [
 
 [[package]]
 name = "ghost-tools"
-version = "2026.11.2"
+version = "2026.11.3"
 source = { virtual = "tools" }
 
 [package.dev-dependencies]
