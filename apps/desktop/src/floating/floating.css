@@ -472,3 +472,12 @@ body {
 /* Debug mode (ADR 0074): worn like “Screen shared”, amber. */
 .flt-shared--debug { border-color: rgb(255 184 77 / 0.75); box-shadow: 0 0 16px rgb(255 184 77 / 0.3); }
 .flt-shared--debug .flt-shared__dot { background: var(--flt-amber); box-shadow: 0 0 10px var(--flt-amber); }
+
+/* Developer's timing overlay, one line under the label (ADR 0073 as amended 2026-11-14): inside
+   the stage's box, as wide as the label's column at most, never a target for a click. */
+.flt-under .flt-timing {
+  max-width: calc(440px * var(--flt-s));
+  font: 500 calc(11px * max(var(--flt-s), 0.85)) / 14px var(--flt-mono);
+  color: rgb(255 255 255 / 0.72);
+  text-shadow: 0 1px 2px rgb(0 0 0 / 0.9), 0 0 6px rgb(0 0 0 / 0.8);
+}

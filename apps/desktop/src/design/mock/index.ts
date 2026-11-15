@@ -30,6 +30,7 @@ import type { Transport } from "@ghost/client-ts";
 
 import type { DesignState } from "../context";
 import { scenarioHref } from "../context";
+import { setDeveloper, setTimingOverlay } from "../../app/developer";
 import { MockDaemon, HttpError } from "./daemon";
 import { composeFixtures } from "./fixtures";
 import { SCENARIOS, type Scenario, scenarioByName } from "./scenarios";
@@ -45,6 +46,11 @@ export function createMock(
   extra: { onSiteLoop?: () => void } = {},
 ): { transport: Transport; design: DesignState; dispose: () => void } {
   const params = new URLSearchParams(window.location.search);
+  // ?timing=on: Developer on with its timing overlay shown (ADR 0073 as amended), for review.
+  if (params.get("timing") === "on") {
+    setDeveloper(true);
+    setTimingOverlay(true);
+  }
   const phone = params.get("phone");
   const base = scenarioByName(name);
   const listener: Scenario["phone"] =
@@ -63,6 +69,7 @@ export function createMock(
     skillSearch: params.get("skillsearch") === "down" ? "down" : null,
     vault: (["locked", "import", "broken"] as const).find((v) => v === params.get("vault")) ?? null,
     hear: (["recording", "countdown", "check", "problem", "scoring"] as const).find((v) => v === params.get("hear")) ?? null,
+    meterRoom: (["quiet", "talker", "echo"] as const).find((v) => v === params.get("meter")) ?? null,
     onSiteLoop: extra.onSiteLoop,
   });
   const latency = Number(params.get("latency") ?? 140);

@@ -74,6 +74,13 @@ export class MockReports {
       this.send = !!b.send;
       return this.view();
     }
+    if (method === "POST" && path === "/reports/test") {
+      if (!this.send) return { sent: false, available: true, message: "error reports are off (ghostd reports on)", body: null };
+      const at = new Date().toISOString();
+      const b2 = body(at, "test", "daemon", "test", "a test report from ghostd reports test", {}, null);
+      this.kept = [{ sent_at: at, kind: "test", component: "daemon", title: "test: a test report from ghostd reports test", body: b2 }, ...this.kept].slice(0, 20);
+      return { sent: true, available: true, message: "Sent. This is exactly what went.", body: b2 };
+    }
     return undefined;
   }
 }

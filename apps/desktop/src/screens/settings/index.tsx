@@ -14,7 +14,7 @@
  *   phone      (General's) the one phone Ghost pairs with; /settings/phone/pair opens Pair
  *   passwords  (Developer's, /settings/developer/passwords) Ghost's vault (ADR 0036)
  *   tools      (Developer's, /settings/developer/tools) the outside tools (ADR 0048)
- *   live       (Developer's, /settings/developer/live) the slot for live views, coming next
+ *   live       (Developer's, /settings/developer/live) the live microphone meter (ADR 0073 as amended)
  * Permissions, Skills, the Audit log and the notification routes are their owners' screens;
  * the shell's settings nav (app/SettingsFrame.tsx) marks a page here with unsaved changes, a
  * field to fix or a restart owed, a sub-page's on its parent.
@@ -896,7 +896,7 @@ export default function SettingsScreen({ params: route }: RouteProps) {
     ) : page === "developer" ? (
       "For testing a build: debug mode, checks, experimental switches and the advanced pages."
     ) : page === "live" ? (
-      "Live views for testing Ghost, coming next."
+      "What Ghost’s microphone hears, as levels, and what Ghost decides about it. Never words, never audio."
     ) : page === "model" ? (
       "Where Ghost thinks: every session, its tool calls and its summaries go to this model."
     ) : page === "passwords" ? (
@@ -913,7 +913,7 @@ export default function SettingsScreen({ params: route }: RouteProps) {
 
   return (
     <Page
-      width="narrow"
+      width={page === "live" ? "wide" : "narrow"}
       title={pageInfo?.label ?? "Settings"}
       description={description}
       dock={

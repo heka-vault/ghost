@@ -9,6 +9,7 @@ import {
 import { createContext, type ReactNode, useContext, useEffect, useMemo, useState } from "react";
 
 import { type Activity, addActivity } from "./activity";
+import { createDevLive, type DevLive } from "./devLive";
 import { createHearLive, type HearLive } from "./hearLive";
 import { createSaidWords, type SaidWords } from "./said";
 import { createReachLive, type ReachLive } from "./reachLive";
@@ -47,6 +48,8 @@ export interface GhostState {
   runsVersion: number;
   /** Each call an agent makes, as counts and sizes (ADR 0060), outside React state. Stable for the provider's life. */
   reach: ReachLive;
+  /** Developer's timing overlay and microphone meter (ADR 0073 as amended), outside React state. Stable for the provider's life. */
+  dev: DevLive;
 }
 
 const Ctx = createContext<GhostState | null>(null);
@@ -68,6 +71,7 @@ export function GhostProvider({ client, children }: { client: GhostClient; child
   const [said] = useState(createSaidWords);
   const [runsVersion, setRunsVersion] = useState(0);
   const [reach] = useState(createReachLive);
+  const [dev] = useState(createDevLive);
 
   useEffect(() => {
     let stop: (() => void) | null = null;
@@ -106,6 +110,15 @@ export function GhostProvider({ client, children }: { client: GhostClient; child
           // Every call an agent makes, as counts and sizes (ADR 0060): into its store.
           if (m.type === "reach") {
             reach.push(m.reach);
+            return;
+          }
+          // Developer's live views: a turn's timings, the meter fifteen a second (ADR 0073).
+          if (m.type === "timing") {
+            dev.pushTiming(m.timing);
+            return;
+          }
+          if (m.type === "meter") {
+            dev.pushMeter(m.meter);
             return;
           }
           setLastEvent(m);
@@ -185,11 +198,11 @@ export function GhostProvider({ client, children }: { client: GhostClient; child
       if (timer) clearTimeout(timer);
       stop?.();
     };
-  }, [client, voice, hear, said, reach]);
+  }, [client, voice, hear, said, reach, dev]);
 
   const value = useMemo(
-    () => ({ client, status, connected, turns: captions.shown, heldTurns: captions.held.length, pending, activity, logs, lastEvent, conversationsVersion, waitingVersion, appsVersion, voice, hear, said, runsVersion, reach }),
-    [client, status, connected, captions, pending, activity, logs, lastEvent, conversationsVersion, waitingVersion, appsVersion, voice, hear, said, runsVersion, reach],
+    () => ({ client, status, connected, turns: captions.shown, heldTurns: captions.held.length, pending, activity, logs, lastEvent, conversationsVersion, waitingVersion, appsVersion, voice, hear, said, runsVersion, reach, dev }),
+    [client, status, connected, captions, pending, activity, logs, lastEvent, conversationsVersion, waitingVersion, appsVersion, voice, hear, said, runsVersion, reach, dev],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

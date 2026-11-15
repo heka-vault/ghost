@@ -22,6 +22,7 @@ import type { AlwaysChoice, QuestionView } from "@ghost/client-ts";
 import { ArrowDown, ArrowRight, AudioLines, Brain, Clock, Mic, MicOff, MoreHorizontal, PhoneOff, SlidersHorizontal, TriangleAlert, X } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
+import { TimingOverlay } from "../../app/TimingOverlay";
 import { notListening, notListeningSub, typedSession } from "../../app/listening";
 import { useListening } from "../../app/ListeningSwitch";
 import { Link, navigate } from "../../app/router";
@@ -443,6 +444,7 @@ export default function SessionScreen(_: RouteProps) {
                 typed={typed}
               />
             )}
+            {inSession && <TimingOverlay />}
             {/* Out of a session with the mic closed (ADR 0057): the strip says so, with the way back. */}
             {!inSession && micOff && online && (
               <Stage state="listening" slug="ghost" name="Ghost" calls={[]} micOff={{ text: micOffText ?? "Mic off", onListen: listenAgain, busy: listening.busy }} />

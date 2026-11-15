@@ -19,6 +19,8 @@ export const TAP_GAP_MS = 2000;
 export const HINT_FROM = 4;
 
 const KEY = "ghost.settings.developer";
+/** Developer's live timing overlay (ADR 0073 as amended 2026-11-14), on this computer. */
+export const TIMING_KEY = "ghost.developer.timing";
 
 export interface Taps {
   count: number;
@@ -41,13 +43,23 @@ export function tap(prev: Taps, now: number, unlocked: boolean): { taps: Taps; u
 }
 
 let on = read();
+let timing = read(TIMING_KEY);
 const listeners = new Set<() => void>();
 
-function read(): boolean {
+function read(key = KEY): boolean {
   try {
-    return typeof localStorage !== "undefined" && localStorage.getItem(KEY) === "on";
+    return typeof localStorage !== "undefined" && localStorage.getItem(key) === "on";
   } catch {
     return false;
+  }
+}
+
+function write(key: string, next: boolean) {
+  try {
+    if (next) localStorage.setItem(key, "on");
+    else localStorage.removeItem(key);
+  } catch {
+    // Remembered for this window only.
   }
 }
 
@@ -55,16 +67,51 @@ export function developerOn(): boolean {
   return on;
 }
 
-/** Show Developer in the settings nav, or hide it again. */
+/** Show Developer in the settings nav, or hide it again. Hiding it turns the timing overlay off too. */
 export function setDeveloper(next: boolean) {
   on = next;
-  try {
-    if (next) localStorage.setItem(KEY, "on");
-    else localStorage.removeItem(KEY);
-  } catch {
-    // Remembered for this window only.
+  write(KEY, next);
+  if (!next) {
+    timing = false;
+    write(TIMING_KEY, false);
   }
   for (const l of listeners) l();
+}
+
+/** The timing overlay is shown: switched on, and Developer is on. */
+export function timingOverlayOn(): boolean {
+  return on && timing;
+}
+
+/** Show the timing overlay, or hide it. Remembered on this computer until Developer is hidden. */
+export function setTimingOverlay(next: boolean) {
+  timing = next && on;
+  write(TIMING_KEY, timing);
+  for (const l of listeners) l();
+}
+
+/**
+ * Read both again from storage: the floating view is a second process of the app, which sees
+ * the main window's choice when it next looks (on focus, and every few seconds while it runs).
+ */
+export function rereadDeveloper() {
+  const a = read();
+  const b = read(TIMING_KEY);
+  if (a === on && b === timing) return;
+  on = a;
+  timing = b;
+  for (const l of listeners) l();
+}
+
+export function useTimingOverlay(): boolean {
+  return useSyncExternalStore(
+    (cb) => {
+      listeners.add(cb);
+      return () => listeners.delete(cb);
+    },
+    timingOverlayOn,
+    () => false,
+  );
 }
 
 export function useDeveloper(): boolean {
