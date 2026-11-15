@@ -6,7 +6,8 @@
  * it needs one), its ears (a glance when the microphone is healthy; the speech models download
  * from Welcome on and ride along), and “Hey Ghost”, answered with Ghost's own first line over
  * the desktop in the floating room (ADR 0059 as amended 2026-11-14), or in this window where it
- * can't float. Then Make it yours, each optional: its voice, an app, an agent, a question. Each
+ * can't float. Then one short page of what Ghost keeps and sends, and Make it yours, each
+ * optional: its voice, an app, a question (agents are found later, 2026-11-14). Each
  * task is done only when Ghost says so (`progressOf`), each can be skipped, Continue and Skip go
  * where `routeAfter` says, and setup resumes from where it stopped (localStorage, and the step
  * in the address). Real endpoints only: nothing here exists only in the mock.
@@ -42,7 +43,7 @@ import {
   TASKS,
   writeStepToUrl,
 } from "./state";
-import { AgentStep, AppStep, AskStep, DoneStep, HearStep, ModelStep, VoiceStep, WakeStep, WelcomeStep } from "./steps";
+import { AppStep, AskStep, DoneStep, HearStep, KeepsStep, ModelStep, VoiceStep, WakeStep, WelcomeStep } from "./steps";
 import "../settings/settings.css";
 import "./onboarding.css";
 
@@ -152,13 +153,12 @@ export default function Onboarding({ params }: RouteProps) {
             speechReady: models ? models.ready : null,
             echo: devices ? devices.echo_cancel_active : null,
             apps: apps ? apps.filter((a) => a.state === "connected" && a.name !== "ghost-mock-github").length : null,
-            agents: agents ? agents.filter((a) => !a.is_ghost && !a.retired_at).length : null,
             voiceSet: settings ? !!settings.values.GHOST_VOICE_MODE : null,
             micHealthy: devices ? micHealthyOf(devices.microphone, !!notListening(status)) : null,
             micNone: devices ? !devices.devices.some((x) => x.max_input_channels > 0) : null,
           }
-        : { modelReady: null, modelChecked: null, speechReady: null, echo: null, apps: null, agents: null, voiceSet: null, micHealthy: null, micNone: null },
-    [live.online, modelReady, models, devices, apps, agents, settings, status],
+        : { modelReady: null, modelChecked: null, speechReady: null, echo: null, apps: null, voiceSet: null, micHealthy: null, micNone: null },
+    [live.online, modelReady, models, devices, apps, settings, status],
   );
   const speech = useSpeechModels(client, live.online);
   const progress = useMemo(() => progressOf(facts, saved), [facts, saved]);
@@ -200,7 +200,7 @@ export default function Onboarding({ params }: RouteProps) {
   };
 
   // They went on to Make it yours while Ghost's ears downloaded: back to the moment the
-  // moment they are here, unless a dialog is open (a sign-in, hiring an agent).
+  // moment they are here, unless a dialog is open (a sign-in).
   useEffect(() => {
     if (!saved.waitingForEars || saved.met || facts.speechReady !== true || partOf(step) !== "yours") return;
     if (document.querySelector("dialog[open]")) return;
@@ -242,9 +242,9 @@ export default function Onboarding({ params }: RouteProps) {
             {step === "model" && <ModelStep w={w} />}
             {step === "hear" && <HearStep w={w} />}
             {step === "wake" && <WakeStep w={w} />}
+            {step === "keeps" && <KeepsStep w={w} />}
             {step === "voice" && <VoiceStep w={w} />}
             {step === "app" && <AppStep w={w} />}
-            {step === "agent" && <AgentStep w={w} />}
             {step === "ask" && <AskStep w={w} />}
             {step === "done" && <DoneStep w={w} />}
           </div>

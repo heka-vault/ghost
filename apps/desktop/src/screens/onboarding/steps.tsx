@@ -1,28 +1,28 @@
 /**
  * Owner: onboarding. The first run's steps. Meet Ghost: the model and its check, the
  * microphone (a glance when it is healthy), and the moment, “Hey Ghost” answered over the
- * desktop. Make it yours: the voice, an app, an agent, a question. Every step reads what is
- * true from Ghost and saves through it; none promises what Ghost hasn't said.
+ * desktop. Then what Ghost keeps and sends, one short page. Make it yours: the voice, an app, a
+ * question. Every step reads what is true from Ghost and saves through it; none promises what
+ * Ghost hasn't said.
  */
-import type { CatalogEntryView, ConversationDetail, ModelConnectionView } from "@ghost/client-ts";
-import { lookOf, useGhost } from "@ghost/ui";
+import type { CatalogEntryView, ModelConnectionView, WakeTakesView } from "@ghost/client-ts";
+import { useGhost } from "@ghost/ui";
 import { ArrowRight, AudioLines, Check, Cpu, Ear, Hand, KeyRound, Mic, MicOff, Plus, Search, Volume2, WifiOff } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 import { notListening } from "../../app/listening";
-import { hrefFor, navigate } from "../../app/router";
+import { navigate } from "../../app/router";
 import { inTauri, startDaemon } from "../../transport";
 import {
-  AgentShapeGlyph,
   Badge,
   Button,
   Card,
   cx,
+  Disclosure,
   errorText,
   GhostChip,
   GhostMark,
   Input,
-  LineGlyph,
   ListRow,
   Notice,
   Progress,
@@ -37,7 +37,6 @@ import { AddOwnDialog } from "../apps/AddOwnDialog";
 import { AppIcon } from "../apps/AppIcon";
 import { ConnectDialog } from "../apps/ConnectDialog";
 import { FoundModels, NoticedLine, OtherToolsApps, useOtherTools } from "../apps/OtherTools";
-import { NewAgentDialog } from "../conversations/NewAgentDialog";
 import { verdictOf } from "../settings/check";
 import { ClaudeCodeFix, ClaudeCodeLead } from "../settings/ClaudeCodeCard";
 import { CLAUDE_CODE, claudeCodeOffer, claudeCodeValues } from "../settings/claudeCode";
@@ -50,9 +49,9 @@ import { markStateOf, moodOf } from "../../app/mood";
 import { useSaying } from "../session/live";
 import { gb, speechLine, SpeechRow } from "./speech";
 import type { Wizard } from "./index";
-import { answeredHere, firstSentence, inputName, phraseCase, splitList, wakeHelp } from "./state";
-import { keeping } from "../hear/wakeTakes";
-import { ErrorReportsLine } from "../settings/ErrorReports";
+import { answeredHere, echoOfferNow, firstSentence, inputName, phraseCase, splitList, TAKES_ON_WAKE, wakeHelp, wakeItems } from "./state";
+import { keeping, KEEP_NOTICE, NOTHING_KEPT } from "../hear/wakeTakes";
+import { REPORTS_FIRST_RUN, useReports } from "../settings/ErrorReports";
 import { exchangeOf, isAwake, useWakeWatch } from "./watch";
 
 /* ------------------------------------------------------------------------------ shared */
@@ -566,7 +565,7 @@ export function WakeStep({ w }: { w: Wizard }) {
   const fuzzy = Number(w.settings?.values.GHOST_WAKE_FUZZY || 0.9);
   const off = useMicOff();
   // ADR 0065: takes are kept only under the trained detector; transcript wake keeps none.
-  const kept = keeping(status?.wake_mode, 0);
+  const kept = useTakes().keepingNow;
   const met = w.saved.met ?? (w.demo === "met" || w.demo === "met-nomodel" ? "voice" : null);
   const modelReady = w.demo === "met-nomodel" ? false : w.facts.modelReady === true;
   const sp = w.speech.view;
@@ -679,7 +678,7 @@ export function WakeStep({ w }: { w: Wizard }) {
   };
   const FIX_LABEL: Record<string, string> = { listen: "Turn listening on", mic: "Check the microphone", fuzzy: "Match more loosely", hearing: "Open the Hearing test" };
   const [installing, setInstalling] = useState(false);
-  const echoOffer = !!mp && mp.case === "unprotected" && !w.devices?.echo_cancel_active;
+  const echoOffer = echoOfferNow(mp, !!w.devices?.echo_cancel_active);
   const installEcho = async () => {
     setInstalling(true);
     setError(null);
@@ -713,7 +712,7 @@ export function WakeStep({ w }: { w: Wizard }) {
     state = "met";
     title = "Ghost needs a model to think";
     line = "It heard you and said hello. Give it a model and it answers you too.";
-    primary = { label: "Give it a model", onClick: w.next };
+    primary = { label: "Continue", onClick: w.next };
   } else if (met) {
     state = "met";
     title = "You’ve met Ghost";
@@ -721,7 +720,7 @@ export function WakeStep({ w }: { w: Wizard }) {
       where === "floating"
         ? `It came forward over your desktop${at ? ` at ${at}` : ""} and answered out loud.`
         : `It answered you here${at ? ` at ${at}` : ""}, out loud.`;
-    primary = { label: "Make it yours", onClick: w.next };
+    primary = { label: "Continue", onClick: w.next };
   } else if (earsMissing) {
     state = "ears";
     title = "Ghost needs its ears first";
@@ -756,6 +755,9 @@ export function WakeStep({ w }: { w: Wizard }) {
     line = heard === "click" ? "Out loud this time, the way you normally talk." : null;
   }
   const typed = state === "waiting" && live.online && !loading && (noMic || off || typing);
+  // Calling it by name: what the beat shows is `wakeItems`, and nothing else (the simplification pass).
+  const calling = state === "waiting" && live.online && ready && !off && !noMic;
+  const items = wakeItems({ floatKnown: !!floating.status, mic: !!mp, echoNow: echoOffer, keepingTakes: kept });
   const presence = !live.online ? "offline" : state === "ears" || loading ? "starting" : live.phase;
 
   return (
@@ -773,7 +775,7 @@ export function WakeStep({ w }: { w: Wizard }) {
       onBack={w.back}
       onSkip={state === "met" || state === "live" ? undefined : w.skip}
       autoFocus={w.focusOnOpen}
-      footNote={state === "met" && modelReady ? "Its voice, an app, an agent: each one optional." : undefined}
+      footNote={state === "met" ? (modelReady ? "Next: what Ghost keeps, then its voice, an app and a first question, each optional." : "Next: what Ghost keeps, then a model.") : undefined}
       notices={
         <>
           <NeedsGhost w={w} what="hear its name" />
@@ -792,41 +794,58 @@ export function WakeStep({ w }: { w: Wizard }) {
         {line && <p className="onb-try__line">{line}</p>}
         {state === "live" && where !== "floating" && <WindowMoment why={answeredHere(floating.status)} />}
         {state === "ears" && fetching && <Progress value={w.speech.share * 100} label="Downloading Ghost’s ears and voice" tone="info" className="onb-try__bar" />}
-        {(state === "waiting" || state === "met") && live.online && <FloatLine floating={floating} met={state === "met"} />}
-        {state === "waiting" && mp && !off && !noMic && ready && (
-          <p className="onb-try__meta">
-            Listening through {inputName(mp.session_input)}.{" "}
-            <button type="button" className="onb-link" onClick={() => w.go("hear")}>
-              Change
-            </button>
-          </p>
-        )}
-        {state === "waiting" && echoOffer && ready && (
-          <p className="onb-try__meta">
-            On speakers? Ghost can take its own voice out of the microphone.{" "}
-            <Button size="sm" variant="ghost" loading={installing} onClick={() => void installEcho()}>
-              Set it up
-            </Button>
-          </p>
-        )}
-        {(state === "waiting" || state === "ears") && (
-          <>
-            <p className="onb-try__meta">
-              {kept.notice}
-              {kept.controls && (
-                <>
-                  {" "}
-                  <a href="#/settings/sound" onClick={(e) => (e.preventDefault(), navigate("/settings/sound"))}>
-                    Turn off or delete
-                  </a>
-                </>
-              )}
-            </p>
-            {/* ADR 0067: on by default in a released build, so said here at the same weight. */}
-            <ErrorReportsLine />
-          </>
-        )}
-        {state === "waiting" && list.length > 1 && !quiet && !typed && <p className="onb-try__meta">It also answers to {list.slice(1).map((o) => quoted(phraseCase(o))).join(" and ")}.</p>}
+        {state === "met" && live.online && <FloatLine floating={floating} met />}
+        {state === "waiting" && live.online && !calling && <FloatLine floating={floating} met={false} />}
+        {calling &&
+          items.map((item) => {
+            switch (item) {
+              case "float":
+                return <FloatLine key={item} floating={floating} met={false} />;
+              case "mic":
+                return (
+                  <p key={item} className="onb-try__meta">
+                    Listening through {inputName(mp!.session_input)}.{" "}
+                    <button type="button" className="onb-link" onClick={() => w.go("hear")}>
+                      Change
+                    </button>
+                  </p>
+                );
+              case "echo":
+                return (
+                  <p key={item} className="onb-try__meta">
+                    On speakers? Ghost can take its own voice out of the microphone.{" "}
+                    <Button size="sm" variant="ghost" loading={installing} onClick={() => void installEcho()}>
+                      Set it up
+                    </Button>
+                  </p>
+                );
+              case "takes":
+                return (
+                  <p key={item} className="onb-try__meta">
+                    {TAKES_ON_WAKE}{" "}
+                    <a href="#/settings/sound" onClick={(e) => (e.preventDefault(), navigate("/settings/sound"))}>
+                      Change
+                    </a>
+                  </p>
+                );
+              case "other-ways":
+                return waiting ? (
+                  <Disclosure key={item} summary="Other ways to start" className="onb-other">
+                    <div className="onb-try__actions">
+                      {list.length > 1 && <p className="onb-try__meta">It also answers to {list.slice(1).map((o) => quoted(phraseCase(o))).join(" and ")}.</p>}
+                      {!typing && (
+                        <Button variant="ghost" size="sm" onClick={() => setTyping(true)}>
+                          Type instead
+                        </Button>
+                      )}
+                      <Button variant="ghost" size="sm" loading={waking} onClick={wake}>
+                        Wake it with a click
+                      </Button>
+                    </div>
+                  </Disclosure>
+                ) : null;
+            }
+          })}
         {state === "waiting" && off && (
           <Button size="sm" variant="secondary" onClick={() => void fix("listen")}>
             Turn listening on
@@ -863,17 +882,100 @@ export function WakeStep({ w }: { w: Wizard }) {
             </ol>
           </div>
         )}
-        {waiting && !off && !noMic && !typing && (
-          <div className="onb-try__actions">
-            <Button variant="ghost" size="sm" onClick={() => setTyping(true)}>
-              Type instead
-            </Button>
-            <Button variant="ghost" size="sm" loading={waking} onClick={wake}>
-              Wake it with a click
-            </Button>
-          </div>
-        )}
       </div>
+    </StepFrame>
+  );
+}
+
+/* ------------------------------------------------------------------- what Ghost keeps */
+
+/**
+ * Whether wake takes are being kept now (ADR 0065): only under the trained detector, and only
+ * while the operator's switch is on. `view` is null until read (or when the read failed).
+ */
+function useTakes(): { keepingNow: boolean; detector: boolean; view: WakeTakesView | null; set: (keep: boolean) => Promise<void> } {
+  const { client, status } = useGhost();
+  const detector = keeping(status?.wake_mode, 0).controls;
+  const [view, setView] = useState<WakeTakesView | null>(null);
+  useEffect(() => {
+    if (!detector) return;
+    let on = true;
+    client
+      .wakeTakes()
+      .then((v) => on && setView(v))
+      .catch(() => undefined);
+    return () => {
+      on = false;
+    };
+  }, [client, detector]);
+  const set = async (keep: boolean) => {
+    setView(await client.setWakeTakesChoice({ keep, unlabelled_accepted_are_me: view?.choice.unlabelled_accepted_are_me ?? false }));
+  };
+  return { keepingNow: detector && (view?.choice.keep ?? true), detector, view, set };
+}
+
+/**
+ * What Ghost keeps and sends, each with its switch: what it hears (ADR 0065) and error reports
+ * (ADR 0067), both on by default and so said before the first run ends. Shared by the page
+ * after the wake beat and, for anyone who reached Done another way, by Done itself.
+ */
+function KeepsCard({ onError }: { onError: (e: string) => void }) {
+  const { client } = useGhost();
+  const takes = useTakes();
+  const [reports, setReports] = useReports();
+  const flip = async (send: boolean) => {
+    try {
+      setReports(await client.setReportsChoice(send));
+    } catch (e) {
+      onError(errorText(e));
+    }
+  };
+  const keep = async (on: boolean) => {
+    try {
+      await takes.set(on);
+    } catch (e) {
+      onError(errorText(e));
+    }
+  };
+  return (
+    <Card list className="onb-keeps">
+      <ListRow
+        title="What it hears"
+        description={
+          takes.detector
+            ? `${KEEP_NOTICE} Nothing is sent anywhere. Settings › Sound can delete them.`
+            : `${NOTHING_KEPT} Until it hears its name, audio stays on this computer and is thrown away.`
+        }
+        trailing={takes.detector ? <Switch checked={takes.keepingNow} onChange={(on) => void keep(on)} aria-label="Keep wake recordings" /> : undefined}
+      />
+      <ListRow
+        title="When something breaks"
+        description={!reports ? "Can’t check yet." : !reports.available ? "This copy of Ghost sends no error reports." : reports.send ? REPORTS_FIRST_RUN : "Error reports are off: Ghost sends nothing when something breaks."}
+        trailing={reports?.available ? <Switch checked={reports.send} onChange={(on) => void flip(on)} aria-label="Send error reports" /> : undefined}
+      />
+    </Card>
+  );
+}
+
+export function KeepsStep({ w }: { w: Wizard }) {
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <StepFrame
+      id="keeps"
+      title="What Ghost keeps and sends"
+      description="Two things are on unless you turn them off. Both are in Settings later."
+      primary={{ label: "Continue", onClick: () => (w.setSaved({ keepsSeen: true }), w.next()) }}
+      onBack={w.back}
+      autoFocus={w.focusOnOpen}
+      notices={
+        error ? (
+          <Notice tone="danger" title="Couldn’t change it" onDismiss={() => setError(null)}>
+            {error}
+          </Notice>
+        ) : undefined
+      }
+    >
+      <KeepsCard onError={setError} />
     </StepFrame>
   );
 }
@@ -1073,76 +1175,6 @@ export function AppStep({ w }: { w: Wizard }) {
   );
 }
 
-/* ------------------------------------------------------------------------------- agent */
-
-export function AgentStep({ w }: { w: Wizard }) {
-  const live = useLive();
-  const [open, setOpen] = useState(false);
-  const [made, setMade] = useState<ConversationDetail | null>(null);
-  const agents = (w.agents ?? []).filter((a) => !a.is_ghost && !a.retired_at);
-  const latest = made ?? null;
-  const shown = latest ? lookOf(latest.slug, latest.look) : null;
-
-  return (
-    <StepFrame
-      id="agent"
-      title="Hire an agent"
-      description="An agent is someone with a job: its own name, persona, voice, memory and shape. Ghost hands work to it; you can call it by name."
-      primary={agents.length ? { label: "Continue", onClick: w.next } : { label: "Hire an agent…", onClick: () => setOpen(true), disabled: !live.online, icon: <Plus /> }}
-      secondary={
-        agents.length ? (
-          <Button variant="ghost" leadingIcon={<Plus />} onClick={() => setOpen(true)} disabled={!live.online}>
-            Hire another…
-          </Button>
-        ) : undefined
-      }
-      onBack={w.back}
-      onSkip={agents.length ? undefined : w.skip}
-      autoFocus={w.focusOnOpen}
-      notices={<NeedsGhost w={w} what="hire an agent" />}
-    >
-      {latest && shown ? (
-        <div className="onb-hired">
-          <span className="onb-hired__mark" style={{ color: `var(--hue-${shown.hue}-fg)`, background: `var(--hue-${shown.hue}-bg)` }} aria-hidden>
-            <AgentShapeGlyph shape={shown.shape} size={72} />
-          </span>
-          <div>
-            <p className="onb-hired__name">{latest.name} is on the rail</p>
-            <p className="onb-hired__job">{latest.job || "No job yet: give it one on its page."}</p>
-            <p className="onb-hired__job">
-              Say {quoted(`Ghost, transfer me to ${latest.name}`)}, or pick it on the rail.
-            </p>
-          </div>
-        </div>
-      ) : agents.length ? (
-        <Card list>
-          {agents.slice(0, 5).map((a) => (
-            <ListRow key={a.slug} leading={<LineGlyph slug={a.slug} name={a.name} size="lg" />} title={a.name} description={a.job || "No job yet"} href={hrefFor(`/agents/${a.slug}`)} />
-          ))}
-        </Card>
-      ) : (
-        <div className="onb-shapes" aria-hidden>
-          {(["drop", "bell", "cloud", "lantern", "star"] as const).map((sh, i) => (
-            <span key={sh} className="onb-shapes__one" style={{ color: `var(--hue-${i + 1}-fg)`, background: `var(--hue-${i + 1}-bg)` }}>
-              <AgentShapeGlyph shape={sh} size={36} />
-            </span>
-          ))}
-        </div>
-      )}
-      <NewAgentDialog
-        open={open}
-        onClose={() => setOpen(false)}
-        taken={(w.agents ?? []).map((a) => a.name.toLowerCase())}
-        onCreated={(d) => {
-          setOpen(false);
-          setMade(d);
-          void w.reload();
-        }}
-      />
-    </StepFrame>
-  );
-}
-
 /* --------------------------------------------------------------------------------- ask */
 
 const SUGGESTIONS = ["What can you do?", "What needs me today?", "What did you change today?"];
@@ -1247,12 +1279,12 @@ const FIX: Partial<Record<string, string>> = {
   wake: "Not yet heard on your voice.",
   voice: "Ghost uses its voice on this computer.",
   app: "Ghost has only its own tools.",
-  agent: "Ghost does everything itself.",
   ask: "Ask whenever you like.",
 };
 
 export function DoneStep({ w }: { w: Wizard }) {
   const verdict = useModelVerdict();
+  const [error, setError] = useState<string | null>(null);
   const open = w.tasks.filter((t) => w.progress.state[t.id] !== "done");
   const all = open.length === 0;
   const finish = (to: string) => {
@@ -1268,7 +1300,21 @@ export function DoneStep({ w }: { w: Wizard }) {
       description={all ? `Say ${quoted("Hey Ghost")} whenever you need it.` : "What isn’t set up yet is below. Each one is a click from here, or from Settings."}
       primary={{ label: "Go to Today", onClick: () => finish("/") }}
       autoFocus={w.focusOnOpen}
+      notices={
+        error ? (
+          <Notice tone="danger" title="Couldn’t change it" onDismiss={() => setError(null)}>
+            {error}
+          </Notice>
+        ) : undefined
+      }
     >
+      {/* Before the list and its finish: anyone who reached Done without that page reads it here. */}
+      {!w.saved.keepsSeen && (
+        <div className="onb-done-keeps" role="group" aria-label="What Ghost keeps and sends">
+          <p className="onb-label">What Ghost keeps and sends</p>
+          <KeepsCard onError={setError} />
+        </div>
+      )}
       <Card list className="onb-summary">
         {w.tasks.map((t) => {
           const st = w.progress.state[t.id];
@@ -1293,6 +1339,10 @@ export function DoneStep({ w }: { w: Wizard }) {
           );
         })}
       </Card>
+      {/* Hiring an agent left the first run (2026-11-14): one line says they exist and how to get one. */}
+      <p className="onb-try__meta onb-agents-line">
+        Agents take on work of their own, each with a name and a job. Ask Ghost to hire one, or press + under Agents on the rail.
+      </p>
     </StepFrame>
   );
 }

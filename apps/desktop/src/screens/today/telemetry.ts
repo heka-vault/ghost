@@ -103,3 +103,20 @@ export function reachSentence(t: Tally): string {
   const where = apps ? ` across ${apps} ${apps === 1 ? "app" : "apps"}` : "";
   return `Read ${count(t.items)} ${t.items === 1 ? "item" : "items"}${where}, ${bytes(t.bytes)}`;
 }
+
+/**
+ * The instruments closed, in words (the simplification pass, 2026-11-14): the day's totals with
+ * no unit and no identifier, “Read 79 items across 2 apps and made 8 changes.” Bytes,
+ * milliseconds, a model's id and a tool's name wait for the panel to open.
+ */
+export function quietLine(t: Tally, changes: number): string {
+  const parts: string[] = [];
+  if (t.calls) {
+    const apps = t.apps.length;
+    parts.push(`read ${count(t.items)} ${t.items === 1 ? "item" : "items"}${apps ? ` across ${apps} ${apps === 1 ? "app" : "apps"}` : ""}`);
+  }
+  if (changes) parts.push(`made ${count(changes)} ${changes === 1 ? "change" : "changes"}`);
+  if (!parts.length) return "Nothing read or changed yet today.";
+  const s = parts.join(" and ");
+  return `${s.charAt(0).toUpperCase()}${s.slice(1)}.`;
+}

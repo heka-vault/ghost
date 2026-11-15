@@ -331,6 +331,12 @@ export class MockDaemon {
     // `&mic=none`: a computer with no microphone at all (the first run's typed moment).
     if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("mic") === "none")
       this.devices = { ...this.devices, microphone: null, devices: this.devices.devices.map((d) => ({ ...d, max_input_channels: 0, is_default_input: false })) };
+    // `&mic=headset`: a headset, so nothing of Ghost's voice comes back (no echo line on the wake beat).
+    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("mic") === "headset" && this.devices.microphone)
+      this.devices = {
+        ...this.devices,
+        microphone: { ...this.devices.microphone, case: "headset", summary: "Ghost listens to your headset’s microphone; its voice plays in your ears, so it can’t hear itself.", session_input: "alsa_input.usb-Jabra_Evolve2_65-00.mono-fallback", wake_input: "alsa_input.usb-Jabra_Evolve2_65-00.mono-fallback" },
+      };
     this.models = f.settings.models;
     // `floating.html?…&first=1&heyghost=<ms>`: the first run's moment on the floating page alone
     // (no wizard to arm it): armed from the start.
@@ -365,7 +371,8 @@ export class MockDaemon {
       uptime_secs: 0,
       ...mockBuild(options.build ?? null),
       api_version: "1",
-      wake_mode: "transcript",
+      // `&wake=detector`: the trained detector is the wake, so wake takes are kept (ADR 0065).
+      wake_mode: typeof window !== "undefined" && new URLSearchParams(window.location.search).get("wake") === "detector" ? "onnx" : "transcript",
       apps: f.apps.filter((a) => a.view.state === "connected").map((a) => a.view.name),
       pending: this.pending,
       conversation: scenario.session,
