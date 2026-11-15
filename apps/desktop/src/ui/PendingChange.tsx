@@ -144,7 +144,7 @@ export function PendingChange({ summary, rationale, operation, target, expiresAt
           </span>
           {sticky.allow ? (
             <Button variant="ghost" size="sm" disabled={off} aria-label={sticky.always} onKeyDown={ignoreEnter} onClick={() => onAlways!("allow")}>
-              Always
+              Always allow
             </Button>
           ) : (
             <span className="g-pending__held" title={sticky.heldWhy ?? undefined}>
@@ -152,7 +152,7 @@ export function PendingChange({ summary, rationale, operation, target, expiresAt
             </span>
           )}
           <Button variant="danger-ghost" size="sm" disabled={off} aria-label={sticky.never} onKeyDown={ignoreEnter} onClick={() => onAlways!("block")}>
-            Never
+            Never allow
           </Button>
         </div>
       )}

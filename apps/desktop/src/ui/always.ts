@@ -196,7 +196,7 @@ export interface Face {
  * Details. The summary takes what is left and is cut at a word when it would go over.
  */
 export function faceOf(summary: string, o: { sayable?: boolean; clock?: string | null; sticky?: AlwaysWords | null; details?: boolean } = {}): Face {
-  const rest = [YES, NO, o.sayable ? SAY_IT : "", o.clock ?? "", o.sticky ? `${o.sticky.label} ${o.sticky.allow ? "Always" : o.sticky.held} Never` : "", o.details === false ? "" : DETAILS].filter(Boolean).join(" ");
+  const rest = [YES, NO, o.sayable ? SAY_IT : "", o.clock ?? "", o.sticky ? `${o.sticky.label} ${o.sticky.allow ? "Always allow" : o.sticky.held} Never allow` : "", o.details === false ? "" : DETAILS].filter(Boolean).join(" ");
   const room = Math.max(4, FACE_WORDS - countWords(rest));
   const words = summary.trim().split(/\s+/).filter(Boolean);
   const cut = words.length > room;
