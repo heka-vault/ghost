@@ -3,13 +3,15 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The merge queue tests what will land: queued pull requests together, on top of main.
+  merge_group:
 
 permissions:
   contents: read
 
 # A new push to a PR replaces its run; runs on main always finish.
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.sha }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -48,8 +50,8 @@ jobs:
   # The Rust workspace: the daemon's crates and the Tauri shell (ADR 0039). Clippy is
   # strict, every test runs, cargo-deny fails on a known vulnerability or a license outside
   # deny.toml's allowlist, and the control API's document is checked against the Rust types.
-  # Two builds and no more: one dev build serves clippy, the tests and the export; one
-  # release build makes the daemon, the two app binaries and the shell for the bundle.
+  # One dev build serves clippy, the tests and the export. The release build and the
+  # packages are the `bundle` job's, beside this one and only when packaging could change.
   rust:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -63,7 +65,11 @@ jobs:
             libxdo-dev libssl-dev clang libclang-dev lld \
             libpipewire-0.3-dev libspa-0.2-dev libpulse-dev libasound2-dev \
             libespeak-ng-dev libopus-dev
+      # Only main saves the cache: a pull request restores main's and adds nothing to the
+      # repository's 10 GB, which pull requests' own copies were filling.
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: taiki-e/install-action@nextest
       - run: cargo fmt --all --check
       # generate_context! wants the frontend's folder to exist; its contents don't matter to a check.
@@ -81,17 +87,75 @@ jobs:
         run: cargo run -q -p ghost-api --bin ghost-api-export --locked | diff -u packages/api/openapi.json -
       - uses: EmbarkStudios/cargo-deny-action@v2
         with: { command: check }
-      # The bundle (ADR 0038): the daemon and the app's two binaries in release, then one
-      # .deb and one AppImage with them inside, proven on every push.
+
+  # Which files a pull request touches, for the bundle below.
+  changes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      packaging: ${{ steps.filter.outputs.packaging }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            packaging:
+              - '.github/workflows/**'
+              - 'apps/desktop/src-tauri/**'
+              - 'apps/desktop/package.json'
+              - 'apps/desktop/vite.config.ts'
+              - 'scripts/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'crates/*/Cargo.toml'
+              - 'crates/*/build.rs'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'Makefile'
+
+  # The bundle (ADR 0038): the daemon and the app's binaries in release, packaged with what
+  # they need. It runs on every push to main, and for a pull request (and its turn in the
+  # merge queue) only when it touches what packaging is made from: a change to ordinary code
+  # is proven by the tests, by main's run after it lands, and by the release workflow before
+  # anything ships. A pull request builds the .deb alone; main builds the AppImage too. The
+  # release profile is the same everywhere, so main's cache of the dependencies serves all.
+  bundle:
+    needs: changes
+    if: github.event_name == 'push' || needs.changes.outputs.packaging == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      BUNDLES: ${{ github.event_name == 'push' && 'deb,appimage' || 'deb' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: system libraries
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev \
+            libxdo-dev libssl-dev clang libclang-dev lld \
+            libpipewire-0.3-dev libspa-0.2-dev libpulse-dev libasound2-dev \
+            libespeak-ng-dev libopus-dev
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: scripts/onnxruntime.sh
+      - run: scripts/models.sh
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
       - name: the bundle
-        run: pnpm tauri build --ci
+        run: pnpm tauri build --ci --bundles "$BUNDLES"
       - name: the bundle carries the daemon, the app binaries, ONNX Runtime, the model files and its record
         run: |
-          ls -la target/release/bundle/deb/*.deb target/release/bundle/appimage/*.AppImage
+          ls -la target/release/bundle/deb/*.deb
+          case "$BUNDLES" in *appimage*) ls -la target/release/bundle/appimage/*.AppImage ;; esac
           for b in ghostd ghost-mock-github ghost-scripts heka-ghost-desktop; do
             dpkg-deb -c target/release/bundle/deb/*.deb | grep -q "usr/bin/$b\$" || { echo "missing: $b"; exit 1; }
           done
@@ -113,10 +177,11 @@ jobs:
   # settings change.
   ci-ok:
     if: always()
-    needs: [python, typescript, rust]
+    needs: [python, typescript, rust, changes, bundle]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: every job passed
         run: |
-          echo '${{ toJSON(needs) }}' | jq -e 'all(.[]; .result == "success")'
+          # The bundle may be skipped (a change that touches no packaging); nothing else may.
+          echo '${{ toJSON(needs) }}' | jq -e 'to_entries | all(.value.result == "success" or (.key == "bundle" and .value.result == "skipped"))'
