@@ -24,6 +24,7 @@ import {
   GhostMark,
   Input,
   ListRow,
+  Menu,
   Notice,
   Progress,
   quoted,
@@ -43,13 +44,13 @@ import { CLAUDE_CODE, claudeCodeOffer, claudeCodeValues } from "../settings/clau
 import { GhostVoice } from "../settings/GhostVoice";
 import { CONNECTION_KEYS, micOptions, validateConnection } from "../settings/model";
 import { ModelSection } from "../settings/ModelSection";
-import { HeroPresence, StepFrame, type StepFrameProps } from "./frame";
+import { HeroPresence, StepFrame, type StepFrameProps, useShortWindow } from "./frame";
 import { canFloat, setFirstMeeting, useFloating, useFloatingForward } from "../../app/floating";
 import { markStateOf, moodOf } from "../../app/mood";
 import { useSaying } from "../session/live";
 import { gb, speechLine, SpeechRow } from "./speech";
 import type { Wizard } from "./index";
-import { answeredHere, echoOfferNow, firstSentence, inputName, phraseCase, splitList, TAKES_ON_WAKE, wakeHelp, wakeItems } from "./state";
+import { answeredHere, echoOfferNow, firstSentence, keepsLead, inputName, phraseCase, splitList, TAKES_ON_WAKE, wakeHelp, wakeItems } from "./state";
 import { keeping, KEEP_NOTICE, NOTHING_KEPT } from "../hear/wakeTakes";
 import { REPORTS_FIRST_RUN, useReports } from "../settings/ErrorReports";
 import { exchangeOf, isAwake, useWakeWatch } from "./watch";
@@ -757,7 +758,8 @@ export function WakeStep({ w }: { w: Wizard }) {
   const typed = state === "waiting" && live.online && !loading && (noMic || off || typing);
   // Calling it by name: what the beat shows is `wakeItems`, and nothing else (the simplification pass).
   const calling = state === "waiting" && live.online && ready && !off && !noMic;
-  const items = wakeItems({ floatKnown: !!floating.status, mic: !!mp, echoNow: echoOffer, keepingTakes: kept });
+  const items = wakeItems({ floatKnown: !!floating.status, mic: !!mp, keepingTakes: kept });
+  const short = useShortWindow();
   const presence = !live.online ? "offline" : state === "ears" || loading ? "starting" : live.phase;
 
   return (
@@ -767,7 +769,7 @@ export function WakeStep({ w }: { w: Wizard }) {
       plain
       lead={
         <span className={cx("onb-moment", state === "met" && "is-met")}>
-          <GhostChip size={128} ring="arc" state={markStateOf(presence, off && !met)} mood={moodOf(presence, off && !met, !!status?.session_typed)} trigger={bump} idle />
+          <GhostChip size={short ? 72 : 128} ring="arc" state={markStateOf(presence, off && !met)} mood={moodOf(presence, off && !met, !!status?.session_typed)} trigger={bump} idle />
         </span>
       }
       title={title}
@@ -775,6 +777,19 @@ export function WakeStep({ w }: { w: Wizard }) {
       onBack={w.back}
       onSkip={state === "met" || state === "live" ? undefined : w.skip}
       autoFocus={w.focusOnOpen}
+      secondary={
+        calling && waiting ? (
+          <Menu
+            align="end"
+            trigger={<Button variant="ghost">Other ways to start</Button>}
+            items={[
+              ...(list.length > 1 ? [{ heading: `It also answers to ${list.slice(1).map((o) => quoted(phraseCase(o))).join(" and ")}` }] : []),
+              ...(typing ? [] : [{ label: "Type instead", onSelect: () => setTyping(true) }]),
+              { label: "Wake it with a click", onSelect: () => void wake(), disabled: waking },
+            ]}
+          />
+        ) : undefined
+      }
       footNote={state === "met" ? (modelReady ? "Next: what Ghost keeps, then its voice, an app and a first question, each optional." : "Next: what Ghost keeps, then a model.") : undefined}
       notices={
         <>
@@ -808,15 +823,15 @@ export function WakeStep({ w }: { w: Wizard }) {
                     <button type="button" className="onb-link" onClick={() => w.go("hear")}>
                       Change
                     </button>
-                  </p>
-                );
-              case "echo":
-                return (
-                  <p key={item} className="onb-try__meta">
-                    On speakers? Ghost can take its own voice out of the microphone.{" "}
-                    <Button size="sm" variant="ghost" loading={installing} onClick={() => void installEcho()}>
-                      Set it up
-                    </Button>
+                    {echoOffer && (
+                      <>
+                        {" "}
+                        On speakers? Ghost can take its own voice out of the microphone.{" "}
+                        <Button size="sm" variant="ghost" loading={installing} onClick={() => void installEcho()}>
+                          Set it up
+                        </Button>
+                      </>
+                    )}
                   </p>
                 );
               case "takes":
@@ -828,22 +843,6 @@ export function WakeStep({ w }: { w: Wizard }) {
                     </a>
                   </p>
                 );
-              case "other-ways":
-                return waiting ? (
-                  <Disclosure key={item} summary="Other ways to start" className="onb-other">
-                    <div className="onb-try__actions">
-                      {list.length > 1 && <p className="onb-try__meta">It also answers to {list.slice(1).map((o) => quoted(phraseCase(o))).join(" and ")}.</p>}
-                      {!typing && (
-                        <Button variant="ghost" size="sm" onClick={() => setTyping(true)}>
-                          Type instead
-                        </Button>
-                      )}
-                      <Button variant="ghost" size="sm" loading={waking} onClick={wake}>
-                        Wake it with a click
-                      </Button>
-                    </div>
-                  </Disclosure>
-                ) : null;
             }
           })}
         {state === "waiting" && off && (
@@ -919,10 +918,18 @@ function useTakes(): { keepingNow: boolean; detector: boolean; view: WakeTakesVi
  * (ADR 0067), both on by default and so said before the first run ends. Shared by the page
  * after the wake beat and, for anyone who reached Done another way, by Done itself.
  */
-function KeepsCard({ onError }: { onError: (e: string) => void }) {
+type Takes = ReturnType<typeof useTakes>;
+type Reports = ReturnType<typeof useReports>;
+
+/** Both reads once, for the card and the sentence above it, so the two can't disagree. */
+function useKeeps(): { takes: Takes; reports: Reports } {
+  return { takes: useTakes(), reports: useReports() };
+}
+
+function KeepsCard({ onError, keeps }: { onError: (e: string) => void; keeps: { takes: Takes; reports: Reports } }) {
   const { client } = useGhost();
-  const takes = useTakes();
-  const [reports, setReports] = useReports();
+  const { takes } = keeps;
+  const [reports, setReports] = keeps.reports;
   const flip = async (send: boolean) => {
     try {
       setReports(await client.setReportsChoice(send));
@@ -959,11 +966,12 @@ function KeepsCard({ onError }: { onError: (e: string) => void }) {
 
 export function KeepsStep({ w }: { w: Wizard }) {
   const [error, setError] = useState<string | null>(null);
+  const keeps = useKeeps();
   return (
     <StepFrame
       id="keeps"
       title="What Ghost keeps and sends"
-      description="Two things are on unless you turn them off. Both are in Settings later."
+      description={keepsLead({ takesSwitch: keeps.takes.detector, reportsSwitch: !!keeps.reports[0]?.available })}
       primary={{ label: "Continue", onClick: () => (w.setSaved({ keepsSeen: true }), w.next()) }}
       onBack={w.back}
       autoFocus={w.focusOnOpen}
@@ -975,7 +983,7 @@ export function KeepsStep({ w }: { w: Wizard }) {
         ) : undefined
       }
     >
-      <KeepsCard onError={setError} />
+      <KeepsCard onError={setError} keeps={keeps} />
     </StepFrame>
   );
 }
@@ -1284,6 +1292,7 @@ const FIX: Partial<Record<string, string>> = {
 
 export function DoneStep({ w }: { w: Wizard }) {
   const verdict = useModelVerdict();
+  const keeps = useKeeps();
   const [error, setError] = useState<string | null>(null);
   const open = w.tasks.filter((t) => w.progress.state[t.id] !== "done");
   const all = open.length === 0;
@@ -1312,7 +1321,7 @@ export function DoneStep({ w }: { w: Wizard }) {
       {!w.saved.keepsSeen && (
         <div className="onb-done-keeps" role="group" aria-label="What Ghost keeps and sends">
           <p className="onb-label">What Ghost keeps and sends</p>
-          <KeepsCard onError={setError} />
+          <KeepsCard onError={setError} keeps={keeps} />
         </div>
       )}
       <Card list className="onb-summary">

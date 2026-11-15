@@ -15,7 +15,7 @@ import { ArrowUp } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { Link } from "../../app/router";
-import { Button, Card, PendingChange, Spinner, Textarea, alwaysDone, errorText, quoted, useLive, useToast } from "../../ui";
+import { Button, Card, Input, PendingChange, Spinner, alwaysDone, errorText, useLive, useToast } from "../../ui";
 
 /** A few sentences to start from, one of each kind: they fill the field, nothing more. */
 export const EXAMPLES = [
@@ -56,7 +56,7 @@ export function AskGhost({ onReply }: { onReply: () => void }) {
   const [replies, setReplies] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const field = useRef<HTMLTextAreaElement>(null);
+  const field = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!asked) return;
@@ -98,24 +98,20 @@ export function AskGhost({ onReply }: { onReply: () => void }) {
           void send();
         }}
       >
-        <label htmlFor="wat-ask-field" className="t-heading wat-ask__label">
+        <label htmlFor="wat-ask-field" className="sr-only">
           Ask Ghost to do something on its own
         </label>
-        <p id="wat-ask-help" className="t-small t-2">
-          Say what, and when or on what; name an agent if it isn’t Ghost’s. Ghost sets it up, asks you first where your permissions say so, and it shows below. You can also say it: {quoted("Ghost, every morning at eight…")}
-        </p>
         <div className="wat-ask__row">
-          <Textarea
+          <Input
             ref={field}
             id="wat-ask-field"
-            rows={2}
             maxLength={2000}
             value={text}
             aria-describedby="wat-ask-help"
-            placeholder="Every weekday at 9, check unpaid invoices and tell me which are overdue"
+            placeholder="What, and when: every weekday at 9, check unpaid invoices"
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+              if (e.key === "Enter" && !e.nativeEvent.isComposing) {
                 e.preventDefault();
                 void send();
               }
@@ -126,7 +122,7 @@ export function AskGhost({ onReply }: { onReply: () => void }) {
           </Button>
         </div>
         {!asked && (
-          <div className="wat-ask__examples" role="group" aria-label="Examples">
+          <div id="wat-ask-help" className="wat-ask__examples" role="group" aria-label="Examples">
             {EXAMPLES.map((x) => (
               <button key={x} type="button" className="wat-ask__example t-small" onClick={() => (setText(x), field.current?.focus())}>
                 {x}

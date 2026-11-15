@@ -118,7 +118,7 @@ describe("where keeping wake takes is said (ADR 0065)", () => {
     const k = keeping("transcript", 3);
     expect(k.row).toBe(true);
     expect(k.controls).toBe(false);
-    expect(k.notice).toMatch(/while the trained detector was the wake/);
+    expect(k.notice).toMatch(/kept earlier, while Ghost woke a different way/);
   });
 
   it("an unknown or missing mode is not taken for the detector", () => {

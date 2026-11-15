@@ -1,6 +1,6 @@
 /**
  * Every control Settings had before ADR 0073 (2026-11-14, eleven pages) and where it lives
- * now. Pure data: test/settings-structure.test.ts resolves each new address to a route, and
+ * now, with General's trim after the flow review the same day (about ten controls). Pure data: test/settings-structure.test.ts resolves each new address to a route, and
  * the PR's checklist is this list. Nothing was deleted; the Settings › Agents page went
  * because each thing on it is on the agents' own pages.
  */
@@ -19,18 +19,20 @@ const m = (was: string, control: string, now: string, where: string): Moved => (
 export const MOVED: Moved[] = [
   // General
   m("General", "Finish setup (while unfinished)", "/settings/general", "General"),
-  m("General", "Set up Ghost (the first run again)", "/settings/general", "General"),
+  m("General", "Set up Ghost (the first run again)", "/settings/developer/tests", "Developer › Tests › Replay the first run; General’s “Finish setting up Ghost” while a step was skipped"),
   m("General", "Float over the desktop", "/settings/general/floating", "General › Where Ghost appears"),
-  m("General", "Ghost appears on (monitor)", "/settings/general/floating", "General › Where Ghost appears"),
-  m("General", "Where on the screen", "/settings/general/floating", "General › Where Ghost appears"),
-  m("General", "Captions", "/settings/general/floating", "General › Where Ghost appears, inside floating"),
-  m("General", "While my screen is shared", "/settings/general/floating", "General › Where Ghost appears"),
+  m("General", "Ghost appears on (monitor)", "/settings/general/floating", "General › Where Ghost appears › Floating options…"),
+  m("General", "Where on the screen", "/settings/general/floating", "General › Where Ghost appears › Floating options…"),
+  m("General", "Captions", "/settings/general/floating", "General › Where Ghost appears › Floating options…"),
+  m("General", "While my screen is shared", "/settings/general/floating", "General › Where Ghost appears › Floating options…"),
   m("General", "Ghost on stage (Open the stage)", "tray", "The tray’s “Ghost on stage”"),
   m("General", "Version, build, desktop app", "/settings/about", "About"),
   m("General", "Settings file", "/settings/developer/advanced", "Developer › Advanced pages"),
   m("General", "Updates: check now, check for updates, update and restart, what’s new", "/settings/about/updates", "About › Updates"),
-  m("General", "Error reports: send, the last 20 as sent", "/settings/general/reports", "General"),
-  m("General", "Remove Ghost from this computer", "/settings/general/remove", "General"),
+  m("General", "Error reports: send", "/settings/general/reports", "General"),
+  m("General", "Error reports: the last 20 as sent", "/settings/about/sent", "About, beside the diagnostic report"),
+  m("General", "Remove Ghost from this computer (six kinds, Show, Remove and quit)", "/settings/general/remove", "Its own page, from General’s one row"),
+  m("General", "Apps (how many are connected)", "/apps", "The rail’s Apps"),
   // Model
   m("Model", "Every control of the model connection, its Test and its key", "/settings/model", "Model"),
   // Agents

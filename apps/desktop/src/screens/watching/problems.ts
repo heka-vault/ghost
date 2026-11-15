@@ -23,6 +23,24 @@ export interface Problem {
   detail: string;
   /** The file it is about, for Details, when the line names one. */
   file: string | null;
+  /** What it is about, when the line names one entry: its row on the list, or a row of its own. */
+  subject: { kind: "schedule" | "watch" | "hook"; name: string } | null;
+  /** The sentence's reason alone, for the row that carries it: “Analytics is retired.” */
+  reason: string;
+  /** The row's chip: it can't run, or it is off. */
+  chip: "Can’t run" | "Off";
+}
+
+/** The part of a sentence after its first colon, capitalized: the reason a row says. */
+const reasonOf = (sentence: string) => {
+  const r = sentence.includes(": ") ? sentence.slice(sentence.indexOf(": ") + 2) : sentence;
+  return r.charAt(0).toUpperCase() + r.slice(1);
+};
+const off = (sentence: string) => (/ is off:/.test(sentence) ? ("Off" as const) : ("Can’t run" as const));
+
+/** The plain problem plus what its row needs. */
+function said(p: Omit<Problem, "reason" | "chip" | "subject">, subject: Problem["subject"]): Problem {
+  return { ...p, subject, reason: reasonOf(p.sentence), chip: off(p.sentence) };
 }
 
 const NAME_MAX = 48;
@@ -49,19 +67,23 @@ export function problemOf(raw: string, c: ProblemContext): Problem {
   // A schedule whose agent is retired or isn't there (`jobs::problems`).
   if ((m = /^The schedule (.+?) is for (\S+), which (is retired|is not an agent Ghost has); it will not run$/.exec(line))) {
     const who = c.agentName(nameOf(m[2]));
-    return {
-      ...base,
-      sentence: m[3] === "is retired" ? `The ${nameOf(m[1])} schedule can’t run: ${who} is retired.` : `The ${nameOf(m[1])} schedule can’t run: there is no agent called ${who}.`,
-      fix: { label: "See your agents", path: "/agents" },
-    };
+    return said(
+      {
+        ...base,
+        sentence: m[3] === "is retired" ? `The ${nameOf(m[1])} schedule can’t run: ${who} is retired.` : `The ${nameOf(m[1])} schedule can’t run: there is no agent called ${who}.`,
+        fix: { label: "See your agents", path: "/agents" },
+      },
+      { kind: "schedule", name: nameOf(m[1]) },
+    );
   }
 
   // A webhook the daemon turned off (`hooks.rs`: “hook <name> is off: <why>”).
   if ((m = /^hook (\S+) is off: (its password \S+ is not set|.+)$/.exec(line))) {
     const pw = /^its password (\S+) is not set$/.exec(m[2]);
+    const subject = { kind: "hook" as const, name: nameOf(m[1]) };
     return pw
-      ? { ...base, sentence: `The ${nameOf(m[1])} webhook is off: its password isn’t set.`, fix: { label: "Open Passwords", path: "/settings/passwords" } }
-      : { ...base, sentence: `The ${nameOf(m[1])} webhook is off: its recorded deliveries don’t check out.`, fix: null };
+      ? said({ ...base, sentence: `The ${nameOf(m[1])} webhook is off: its password isn’t set.`, fix: { label: "Set its password", path: "/settings/developer/passwords" } }, subject)
+      : said({ ...base, sentence: `The ${nameOf(m[1])} webhook is off: what it was tested with doesn’t check out.`, fix: null }, subject);
   }
 
   // A line about one entry of a file: “<file>: [watch |hook ]<name>: <what>”.
@@ -70,25 +92,26 @@ export function problemOf(raw: string, c: ProblemContext): Problem {
     const what = kind === "hook" ? "webhook" : "watch";
     const name = nameOf(m[2]);
     const rest = m[3];
+    const subject = { kind: kind === "hook" ? ("hook" as const) : ("watch" as const), name };
     const app = /\bapp\s+["“]?([A-Za-z0-9_-]{1,64})["”]?\s+(?:is not|isn’t|isn't) connected/.exec(rest);
     if (app) {
       // An app with no catalog title is named by its own name, first letter up (“Quickbooks”).
       const named = c.appTitle(app[1]);
       const title = named === app[1] ? named.charAt(0).toUpperCase() + named.slice(1) : named;
-      return { ...base, sentence: `The ${name} ${what} can’t run: ${title} isn’t connected.`, fix: { label: `Connect ${title}`, path: "/apps" } };
+      return said({ ...base, sentence: `The ${name} ${what} can’t run: ${title} isn’t connected.`, fix: { label: `Connect ${title}`, path: "/apps" } }, subject);
     }
     const agent = /\bagent\s+["“]?([a-z0-9-]{1,64})["”]?\b.*\b(retired|not an agent|isn’t an agent|doesn't have|doesn’t have)/i.exec(rest);
     if (agent) {
-      return { ...base, sentence: `The ${name} ${what} can’t act: ${c.agentName(agent[1])} ${/retired/i.test(agent[2]) ? "is retired" : "isn’t one of your agents"}.`, fix: { label: "See your agents", path: "/agents" } };
+      return said({ ...base, sentence: `The ${name} ${what} can’t act: ${c.agentName(agent[1])} ${/retired/i.test(agent[2]) ? "is retired" : "isn’t one of your agents"}.`, fix: { label: "See your agents", path: "/agents" } }, subject);
     }
-    return { ...base, sentence: `The ${name} ${what} is off: Ghost can’t read how it is set up.`, fix: null };
+    return said({ ...base, sentence: `The ${name} ${what} is off: Ghost can’t read how it is set up.`, fix: null }, subject);
   }
 
   // A whole file that doesn't read, or isn't the shape Ghost reads.
   if (file) {
     const which = file.endsWith("watches.json") ? "Your watches file" : file.endsWith("hooks.json") ? "Your webhooks file" : "Your rules file";
-    return { ...base, sentence: `${which} can’t be read, so nothing in it runs.`, fix: null };
+    return said({ ...base, sentence: `${which} can’t be read, so nothing in it runs.`, fix: null }, null);
   }
 
-  return { ...base, sentence: "Something in your setup can’t be read.", fix: null };
+  return said({ ...base, sentence: "Something in your setup can’t be read.", fix: null }, null);
 }

@@ -41,7 +41,7 @@
  */
 import type { DevicesView, ModelConnectionView, ModelsView, SettingsView } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
-import { AudioWaveform, MoreHorizontal, ShieldCheck, Trash2 } from "lucide-react";
+import { AudioWaveform, ChevronLeft, MoreHorizontal, ShieldCheck, Trash2 } from "lucide-react";
 import {
   type FocusEvent,
   type FormEvent,
@@ -56,7 +56,7 @@ import {
   useState,
 } from "react";
 
-import { hrefFor, navigate } from "../../app/router";
+import { Link, hrefFor, navigate } from "../../app/router";
 import { ListeningButton } from "../../app/ListeningSwitch";
 import { FloatingRoomSettings } from "../../app/FloatingSettings";
 import { listeningSentence, notListening } from "../../app/listening";
@@ -64,7 +64,7 @@ import { AboutPage } from "./AboutPage";
 import { DeveloperPage } from "./Developer";
 import { DeveloperLivePage } from "./DeveloperLive";
 import { ErrorReportsSection } from "./ErrorReports";
-import { ConnectionsSection, ReachSection, StartAtLogin } from "./General";
+import { ConnectionsSection, FinishSetupRow, ReachSection, StartAtLogin } from "./General";
 import { RemoveGhostSection } from "./RemoveGhost";
 import { SpeechModelsRow } from "../onboarding/speech";
 import { DEVELOPER_PAGE, DEVELOPER_SCREEN_PAGES, type RouteProps, SETTINGS_PAGES, SETTINGS_SCREEN_PAGES, SETTINGS_SUBPAGES, settingsPath } from "../../app/routes";
@@ -148,6 +148,8 @@ import { PhoneSection } from "./Phone";
 import { WakePhrasesField, wakeHelp } from "./WakePhrases";
 import { WakeTakesRow } from "./WakeTakesRow";
 import { WavePicker } from "./WavePicker";
+import { deviceWords, ECHO_MIC_WORDS, plainDeviceText } from "./plain";
+import { inputName as inputDeviceName } from "../onboarding/state";
 import "./settings.css";
 
 // Charter sections with no API yet. Compiled only in development; rendered only under the mock layer.
@@ -187,7 +189,13 @@ const LAND_GAP = 24;
 
 export default function SettingsScreen({ params: route }: RouteProps) {
   // A sub-page of Developer is drawn here under its own id (passwords, tools, live).
-  const sub = route.page === "developer" && route.section && DEVELOPER_SCREEN_PAGES.includes(route.section) ? route.section : null;
+  // So is General's Remove Ghost from this computer (/settings/general/remove).
+  const sub =
+    route.page === "developer" && route.section && DEVELOPER_SCREEN_PAGES.includes(route.section)
+      ? route.section
+      : route.page === "general" && route.section === "remove"
+        ? "remove"
+        : null;
   const page = (sub ?? route.page) as PageId;
   const { client, status, conversationsVersion } = useGhost();
   const { online, connection } = useLive();
@@ -708,7 +716,7 @@ export default function SettingsScreen({ params: route }: RouteProps) {
         : r.ok
         ? uninstall
           ? { tone: "ok", title: "Echo cancellation removed", text: "Ghost listens to the microphone directly now.", offer: "default" }
-          : { tone: "ok", title: "Echo cancellation installed", text: "Ghost listens through ghost.mic now, unless Microphone below names another device.", offer: "ghost.mic" }
+          : { tone: "ok", title: "Echo cancellation installed", text: "Ghost listens to your microphone without its own voice now, unless Microphone below names another device.", offer: "ghost.mic" }
         : { tone: "danger", title: uninstall ? "Couldn’t remove echo cancellation" : "Couldn’t install echo cancellation", text: r.detail ?? "Ghost didn’t say why. Run journalctl --user -u ghostd to see the log." };
     } catch (e) {
       msg = { tone: "danger", title: "Couldn’t reach Ghost", text: errorText(e) };
@@ -776,7 +784,7 @@ export default function SettingsScreen({ params: route }: RouteProps) {
     const out: Record<string, SettingsMark | undefined> = {};
     const rank = (m: SettingsMark | undefined) => (m === "error" ? 3 : m === "dirty" ? 2 : m === "restart" ? 1 : 0);
     for (const pg of [...SETTINGS_SCREEN_PAGES, ...DEVELOPER_SCREEN_PAGES]) {
-      const nav = pg === "phone" ? "general" : DEVELOPER_SCREEN_PAGES.includes(pg) ? "developer" : pg;
+      const nav = pg === "phone" || pg === "remove" ? "general" : DEVELOPER_SCREEN_PAGES.includes(pg) ? "developer" : pg;
       const m = pageMark(pg, onlyKept);
       if (rank(m) > rank(out[nav])) out[nav] = m;
     }
@@ -795,7 +803,7 @@ export default function SettingsScreen({ params: route }: RouteProps) {
           id: "model",
           title: "Give Ghost a model",
           done: modelReady(conn),
-          doneText: conn ? `${conn.wire_model}, through ${conn.providers.find((p) => p.id === conn.provider)?.title ?? conn.provider}.` : "",
+          doneText: conn ? `Ready, through ${conn.providers.find((p) => p.id === conn.provider)?.title ?? conn.provider}.` : "",
           todoText: "Pick a provider and give it its password, or sign in to OpenRouter.",
           target: "model",
         },
@@ -848,7 +856,7 @@ export default function SettingsScreen({ params: route }: RouteProps) {
   const jevWords = (text: string | undefined): ReactNode =>
     text === JEV_NEEDS_KEY ? (
       <>
-        Jev needs a TypeSafe or OpenRouter password.{" "}
+        Hearing your yes with a model needs a TypeSafe or OpenRouter password.{" "}
         <button type="button" className="set-link" onClick={goToJevKey}>
           Add one under Passwords
         </button>
@@ -890,7 +898,9 @@ export default function SettingsScreen({ params: route }: RouteProps) {
 
   const description: ReactNode =
     page === "general" ? (
-      "How Ghost starts, where it appears, how it reaches you, and what it connects to."
+      "How Ghost starts, where it appears and how it reaches you."
+    ) : page === "remove" ? (
+      "What Ghost keeps on this computer, by kind. Choose what goes; Ghost quits and removes it, and one command finishes."
     ) : page === "about" ? (
       "What Ghost is, its updates, and a report to hand to whoever is helping you."
     ) : page === "developer" ? (
@@ -915,6 +925,14 @@ export default function SettingsScreen({ params: route }: RouteProps) {
     <Page
       width="narrow"
       title={pageInfo?.label ?? "Settings"}
+      crumb={
+        page === "remove" ? (
+          <Link to={settingsPath("general")}>
+            <ChevronLeft size={14} aria-hidden />
+            General
+          </Link>
+        ) : undefined
+      }
       description={description}
       dock={
         barState ? (
@@ -952,20 +970,12 @@ export default function SettingsScreen({ params: route }: RouteProps) {
             {showSetup && <SetupSection steps={steps} onGo={(id) => go(id)} />}
             <Section id={sectionDomId("login")} title="Ghost on this computer" className="set-section">
               <Card list>
-                <ListRow
-                  title="Set up Ghost"
-                  description="The first run again: the model, the microphone, its name, its voice, an app, an agent and a first question. It keeps what’s done."
-                  trailing={
-                    <Button size="sm" variant="secondary" href={hrefFor("/welcome")}>
-                      Open setup
-                    </Button>
-                  }
-                />
+                <FinishSetupRow scenario={design?.scenario.name ?? null} />
                 <StartAtLogin />
               </Card>
             </Section>
-            <Section id={sectionDomId("floating")} title="Floating" description="Where Ghost appears when you call it: big and present over your work, or in this window." className="set-section">
-              <FloatingRoomSettings />
+            <Section id={sectionDomId("floating")} title="Where Ghost appears" description="When you call it: over your work, or in this window." className="set-section">
+              <FloatingRoomSettings optionsOpen={target === "floating"} />
             </Section>
             <ReachSection />
             <ConnectionsSection />
@@ -975,9 +985,20 @@ export default function SettingsScreen({ params: route }: RouteProps) {
                 <Prototype only="privacy" />
               </Suspense>
             )}
-            <RemoveGhostSection confirmOpen={mock && new URLSearchParams(window.location.search).get("remove") === "confirm"} />
+            <Section id="set-remove-row" className="set-section">
+              <Card list>
+                <ListRow
+                  title="Remove Ghost from this computer…"
+                  description="Choose what goes, by kind: what keeps running, the speech models, your data, your passwords."
+                  href={hrefFor(settingsPath("remove"))}
+                  chevron
+                />
+              </Card>
+            </Section>
           </>
         )}
+
+        {s && page === "remove" && <RemoveGhostSection confirmOpen={mock && new URLSearchParams(window.location.search).get("remove") === "confirm"} />}
 
         {s && page === "about" && <AboutPage forced={mock ? new URLSearchParams(window.location.search).get("about") : null} />}
 
@@ -1044,7 +1065,6 @@ export default function SettingsScreen({ params: route }: RouteProps) {
                         layout="inline"
                         id={fieldId(FUZZY)}
                         label="Wake sensitivity"
-                        detail={FUZZY}
                         help={help(FUZZY, exact ? "Ghost wakes only on the exact words." : "Forgiving catches a mumble; strict wakes less by accident.")}
                       >
                         <WakeSensitivity
@@ -1063,7 +1083,6 @@ export default function SettingsScreen({ params: route }: RouteProps) {
                         layout="inline"
                         id={fieldId("GHOST_JEV")}
                         label="How Ghost hears your yes"
-                        detail="GHOST_JEV"
                         help={help("GHOST_JEV", jevWords(jevStatus.label))}
                         error={jevWords(err("GHOST_JEV") ?? undefined) || undefined}
                       >
@@ -1094,7 +1113,7 @@ export default function SettingsScreen({ params: route }: RouteProps) {
                       action={
                         echoMsg.offer === "ghost.mic" && v.GHOST_INPUT_DEVICE !== "ghost.mic" ? (
                           <Button size="sm" id={ECHO_IDS.offer} onClick={() => pickMic("ghost.mic")}>
-                            Use ghost.mic
+                            Use it
                           </Button>
                         ) : echoMsg.offer === "default" && v.GHOST_INPUT_DEVICE === "ghost.mic" ? (
                           <Button size="sm" id={ECHO_IDS.offer} onClick={() => pickMic("")}>
@@ -1103,7 +1122,7 @@ export default function SettingsScreen({ params: route }: RouteProps) {
                         ) : undefined
                       }
                     >
-                      {echoMsg.offer === "default" && v.GHOST_INPUT_DEVICE === "ghost.mic" ? "Ghost is still set to ghost.mic, which is gone now. Pick another microphone, save, and restart Ghost." : echoMsg.text}
+                      {echoMsg.offer === "default" && v.GHOST_INPUT_DEVICE === "ghost.mic" ? `Ghost is still set to ${ECHO_MIC_WORDS.replace(/^Your/, "your")}, which is gone now. Pick another microphone, save, and restart Ghost.` : echoMsg.text}
                     </Notice>
                     </div>
                   )}
@@ -1142,13 +1161,13 @@ export default function SettingsScreen({ params: route }: RouteProps) {
                         </span>
                       }
                     >
-                      {micPath.problem}
+                      {plainDeviceText(micPath.problem)}
                       {!micPath.can_repair ? " End the session (and turn listening on) to repair it." : ""}
                     </Notice>
                   )}
                   {micPath?.fell_back && (
                     <Notice tone="warn" title="Listening on another microphone">
-                      {micPath.fell_back}
+                      {plainDeviceText(micPath.fell_back)}
                     </Notice>
                   )}
                   <Card list>
@@ -1158,8 +1177,8 @@ export default function SettingsScreen({ params: route }: RouteProps) {
                         title="How Ghost hears you"
                         description={
                           <>
-                            {micPath.summary}
-                            {micPath.advice ? ` ${micPath.advice}` : ""}
+                            {plainDeviceText(micPath.summary)}
+                            {micPath.advice ? ` ${plainDeviceText(micPath.advice)}` : ""}
                           </>
                         }
                         meta={<Badge size="sm" dot tone={micPath.case === "unprotected" ? "warn" : micPath.case === "unknown" ? undefined : "ok"}>{MIC_CASE_LABEL[micPath.case] ?? micPath.case}</Badge>}
@@ -1177,7 +1196,6 @@ export default function SettingsScreen({ params: route }: RouteProps) {
                         layout="inline"
                         id={fieldId("GHOST_INPUT_DEVICE")}
                         label="Microphone"
-                        detail="GHOST_INPUT_DEVICE"
                         help={
                           devices ? (
                             <>
@@ -1185,10 +1203,10 @@ export default function SettingsScreen({ params: route }: RouteProps) {
                                 <span className="set-waits">Waits for a restart. </span>
                               )}
                               In use now: {micInUse(devices)}.
-                              {devices.echo_cancel_source_present && v.GHOST_INPUT_DEVICE !== "ghost.mic" ? " Pick ghost.mic so Ghost doesn’t hear itself." : ""}
+                              {devices.echo_cancel_source_present && v.GHOST_INPUT_DEVICE !== "ghost.mic" ? ` Pick “${ECHO_MIC_WORDS}” so Ghost doesn’t hear itself.` : ""}
                             </>
                           ) : (
-                            "Type a device name, like ghost.mic."
+                            "Type the device’s name as the system lists it."
                           )
                         }
                       >
@@ -1204,11 +1222,10 @@ export default function SettingsScreen({ params: route }: RouteProps) {
                         layout="inline"
                         id={fieldId("GHOST_WAKE_INPUT_DEVICE")}
                         label="Wake microphone"
-                        detail="GHOST_WAKE_INPUT_DEVICE"
                         help={
                           <>
                             {restartSet.has("GHOST_WAKE_INPUT_DEVICE") && !dirtyKeys.includes("GHOST_WAKE_INPUT_DEVICE") && <span className="set-waits">Waits for a restart. </span>}
-                            What listens for “Hey Ghost” while no session is open.{micPath ? ` In use now: ${micPath.wake_input}.` : ""}
+                            What listens for “Hey Ghost” while no session is open.{micPath ? ` In use now: ${deviceWords(inputDeviceName(micPath.wake_input))}.` : ""}
                           </>
                         }
                       >
@@ -1224,7 +1241,6 @@ export default function SettingsScreen({ params: route }: RouteProps) {
                         layout="inline"
                         id={fieldId("GHOST_INPUT_REPAIR")}
                         label="If it stops hearing well"
-                        detail="GHOST_INPUT_REPAIR"
                         help="Ghost notices when loud speech keeps reading as nothing. It can leave a note with Repair, or repair it by itself while no session is open (at most once an hour)."
                       >
                         <Select
@@ -1249,7 +1265,7 @@ export default function SettingsScreen({ params: route }: RouteProps) {
                     <ListRow
                       title="Speakers"
                       description="Ghost uses the system output. Change it in your sound settings."
-                      meta={<span className="set-value">{devices?.output_device ?? "System default"}</span>}
+                      meta={<span className="set-value">{deviceWords(devices?.output_device ?? null)}</span>}
                     />
                     <ListRow
                       title="Echo cancellation"
@@ -1403,8 +1419,23 @@ export default function SettingsScreen({ params: route }: RouteProps) {
                   description="Kokoro, on this computer."
                   meta={!models ? undefined : models.kokoro_present ? <Badge tone="ok" size="sm" dot>Here</Badge> : <Badge size="sm">Not here yet</Badge>}
                 />
-                <ListRow title="Speech to text" description="Parakeet, on this computer." meta={<span className="set-value is-mono">{models?.stt_model ?? "–"}</span>} />
-                <ListRow title="Model cache" description="Delete this folder to download the models again." meta={<span className="set-value is-mono">{models ? tildePath(models.cache_dir) : "–"}</span>} />
+                <ListRow
+                  title="Speech to text"
+                  description="Parakeet, on this computer."
+                  meta={!models ? undefined : models.ready ? <Badge tone="ok" size="sm" dot>Here</Badge> : <Badge size="sm">Not here yet</Badge>}
+                />
+                {models && (
+                  <div className="set-devices">
+                    <Disclosure summary="Details">
+                      <p className="set-details-line">
+                        Speech to text: <span className="set-value is-mono">{models.stt_model}</span>
+                      </p>
+                      <p className="set-details-line">
+                        Kept in <span className="set-value is-mono">{tildePath(models.cache_dir)}</span>. Delete that folder to download them again.
+                      </p>
+                    </Disclosure>
+                  </div>
+                )}
               </Card>
             </Section>
             {mock && Prototype && (

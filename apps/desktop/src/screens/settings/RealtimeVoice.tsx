@@ -125,7 +125,7 @@ export function RealtimeVoiceSection({ onSettings }: { onSettings?: (s: Settings
       {mode === "realtime" && (
         <Card list>
           <Row>
-            <Field layout="inline" id="rt-model" label="Model" detail="GHOST_REALTIME_MODEL" help="The mini model is cheaper and quick; the full one reads more carefully.">
+            <Field layout="inline" id="rt-model" label="Model" help="The mini model is cheaper and quick; the full one reads more carefully.">
               <Select
                 id="rt-model"
                 value={view.model}
@@ -136,7 +136,7 @@ export function RealtimeVoiceSection({ onSettings }: { onSettings?: (s: Settings
             </Field>
           </Row>
           <Row>
-            <Field layout="inline" id="rt-voice" label="Its voice" detail="GHOST_REALTIME_VOICE" help="An agent’s own voice applies on this machine only.">
+            <Field layout="inline" id="rt-voice" label="Its voice" help="An agent’s own voice applies on this machine only.">
               <Select
                 id="rt-voice"
                 value={view.voice}
@@ -153,7 +153,6 @@ export function RealtimeVoiceSection({ onSettings }: { onSettings?: (s: Settings
               layout="inline"
               id="rt-cap"
               label="Daily cap"
-              detail="GHOST_REALTIME_DAILY_CAP_USD"
               help={capError ?? "After this much in a day, Ghost uses the voice on this machine until tomorrow. Empty: no cap."}
               error={capError ?? undefined}
             >

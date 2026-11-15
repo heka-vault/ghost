@@ -68,7 +68,7 @@ export function GhostVoice({ value, speed, onChange }: { value: string; speed: n
               "Playing on your speakers…"
             ) : (
               <>
-                {title} · {voiceKind(voice)} <span className="set-detail">{value}</span>
+                {title} · {voiceKind(voice)}
               </>
             )}
           </span>
