@@ -59,7 +59,7 @@ endef
         wake say status check latency restore-volumes \
         lint fmt test deny typecheck contract web ci api-schema version release screenshots marks \
         deploy deploy-rollback deploy-status service-on service-off service-logs service-install \
-        perf perf-micro perf-llm perf-providers perf-hear perf-turns record wake-eval record-takes wake-takes-eval wake-check-replay wake-dynamics \
+        perf perf-micro perf-llm perf-providers perf-hear perf-turns perf-room record wake-eval record-takes wake-takes-eval wake-check-replay wake-dynamics \
         wake-train wake-detectors wake-use wake-rollback \
         android android-apk android-install mobile-web \
         bundle sidecars onnxruntime models
@@ -292,6 +292,10 @@ perf-hear: ## how well Ghost hears (docs/benchmarks/hear-harness.md): make perf-
 perf-turns: ## when Ghost would take a turn for over, on the same takes (docs/benchmarks/hear-harness.md): make perf-turns [TAKES=latest|dir] [ARGS=--set turn_confident_prob=0.95 ...]; with REALTIME_KEY_ENV=VAR the realtime voice's first sound and relay instead (docs/realtime-voice.md)
 	@cargo build --release -q -p ghostd --bin ghostd
 	@$(if $(REALTIME_KEY_ENV),target/release/ghostd perf realtime --key-env $(REALTIME_KEY_ENV) $(ARGS),$(load_env) target/release/ghostd perf turns $(if $(TAKES),--takes $(TAKES)) $(ARGS))
+
+perf-room: ## a session in a noisy room, synthetic voices and rooms (docs/benchmarks/room-harness.md): make perf-room [ARGS="--conditions babble --snr 6 --set room_gate=on ..."]
+	@cargo build --release -q -p ghost-voice --bin ghost-perf
+	@target/release/ghost-perf room $(ARGS)
 
 record: ## record a 4 s wake-phrase clip from ghost.mic and the raw mic: make record NAME=hey-ghost-1
 	@scripts/record-clip.sh "$(NAME)" $(or $(SECS),4)

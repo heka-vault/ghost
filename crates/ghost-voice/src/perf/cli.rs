@@ -39,7 +39,7 @@ use super::harness::{AppSet, Bench, Profile, RealModel, RunConfig, parse_ablatio
 use super::report::render;
 use super::scenarios::{DEFAULT, by_name, scenarios};
 
-pub const USAGE: &str = "usage: ghost-perf run|micro|llm|providers|realtime|report|hear|hear-report|hear-check|turns|turns-report [options]";
+pub const USAGE: &str = "usage: ghost-perf run|micro|llm|providers|realtime|report|hear|hear-report|hear-check|turns|turns-report|room [options]";
 
 fn csv(s: Option<&String>) -> Vec<String> {
     s.map(|s| {
@@ -147,6 +147,11 @@ pub fn main(argv: &[String]) -> i32 {
     if args.cmd == "providers" {
         // Its own arguments: providers by name, keys only from the variables named.
         return super::providers::cli(&argv[1..], &root);
+    }
+    if args.cmd == "room" {
+        // Its own arguments; Ghost's default settings, nothing of this computer's (a noisy
+        // room, docs/benchmarks/room-harness.md).
+        return super::room::cli(&argv[1..], &scratch);
     }
     if args.cmd == "hear-report" {
         return hear_report(&args);
