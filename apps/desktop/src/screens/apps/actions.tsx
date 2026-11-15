@@ -10,6 +10,7 @@ import { useState } from "react";
 import { useDesign } from "../../design/context";
 import { errorText, useConfirm, useToast } from "../../ui";
 import { sentence } from "./model";
+import type { OwnClientBody } from "./OwnClient";
 import { expectSignIn, openSignIn } from "./signin";
 
 export interface AppProblem {
@@ -52,7 +53,7 @@ export function useAppActions({ onChanged, onDisconnected }: { onChanged: () => 
   };
 
   /** The person's own client for an app (ADR 0076), or null to take it back; then it signs in again. */
-  const giveClient = async (a: AppView, body: { client_id: string | null; client_secret: string | null }) => {
+  const giveClient = async (a: AppView, body: OwnClientBody) => {
     if (busy) return false;
     setBusy(a.name);
     setProblem(null);

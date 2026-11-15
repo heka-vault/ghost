@@ -6955,7 +6955,7 @@
         "type": "object"
       },
       "SignInClientUpdate": {
-        "description": "The person's own client for an app (ADR 0076). The secret goes into Ghost's vault and\nnever comes back out; null clears the client and its secret.",
+        "description": "The person's own client for an app (ADR 0076). The secret goes into Ghost's vault and\nnever comes back out; a null client ID clears the client and its secret. A secret left\nempty keeps the one stored; `forget_secret` takes it away.",
         "properties": {
           "client_id": {
             "type": [
@@ -6966,6 +6966,13 @@
           "client_secret": {
             "type": [
               "string",
+              "null"
+            ]
+          },
+          "forget_secret": {
+            "description": "Take the stored secret away; only with no new one.",
+            "type": [
+              "boolean",
               "null"
             ]
           }

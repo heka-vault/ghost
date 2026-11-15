@@ -1117,13 +1117,17 @@ pub enum ClientSecretNeed {
 }
 
 /// The person's own client for an app (ADR 0076). The secret goes into Ghost's vault and
-/// never comes back out; null clears the client and its secret.
+/// never comes back out; a null client ID clears the client and its secret. A secret left
+/// empty keeps the one stored; `forget_secret` takes it away.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, ToSchema)]
 pub struct SignInClientUpdate {
     #[serde(default)]
     pub client_id: Option<String>,
     #[serde(default)]
     pub client_secret: Option<String>,
+    /// Take the stored secret away; only with no new one.
+    #[serde(default)]
+    pub forget_secret: Option<bool>,
 }
 
 /// An app's own limits in apps.json (ADR 0046). None is Ghost's default, given beside it.

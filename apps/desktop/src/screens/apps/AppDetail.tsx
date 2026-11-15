@@ -19,7 +19,7 @@ import { Badge, Button, Card, Disclosure, EmptyState, Field, IconButton, LineGly
 import { formatBytes } from "../watching/model";
 import { useAppActions } from "./actions";
 import { SignInCode } from "./ConnectDialog";
-import { OwnClientFields, useOwnClient } from "./OwnClient";
+import { type OwnClientBody, OwnClientFields, emptyOwnClient, useOwnClient } from "./OwnClient";
 import { useAppLimits } from "./AppLimits";
 import { abilityOf, callsOf, latelyWords, limitsWords, twinsOf } from "./plain";
 import { AppIcon } from "./AppIcon";
@@ -344,7 +344,7 @@ export function AppDetail({ name }: { name: string }) {
  * The person's own client (ADR 0076): asked for when the sign-in was refused for lack of one,
  * otherwise under "I have my own client ID", never a field everybody sees.
  */
-function OwnClientPanel({ app: a, busy, online, onGive }: { app: AppView; busy: boolean; online: boolean; onGive: (body: { client_id: string | null; client_secret: string | null }) => Promise<boolean> }) {
+function OwnClientPanel({ app: a, busy, online, onGive }: { app: AppView; busy: boolean; online: boolean; onGive: (body: OwnClientBody) => Promise<boolean> }) {
   const c = a.sign_in_client!;
   const own = useOwnClient(null);
   const [missing, setMissing] = useState(false);
@@ -354,7 +354,7 @@ function OwnClientPanel({ app: a, busy, online, onGive }: { app: AppView; busy: 
       setMissing(true);
       return;
     }
-    if (await onGive(body)) own.setValue({ client_id: "", client_secret: "" });
+    if (await onGive(body)) own.setValue(emptyOwnClient());
   };
   const form = (
     <>

@@ -2,11 +2,12 @@
 //! asks, through the operator's browser.
 //!
 //! Which client Ghost signs in as is chosen in [`crate::signin_clients`] (ADR 0076): the
-//! person's own client ID for the app, Ghost's own for that authorization server, Ghost's
-//! client metadata document (a static file on heyghost.app, whose loopback redirects the
-//! specification allows) where the server takes one, and dynamic registration where it is
-//! offered. A server none of them gets into is said in plain words, never as an error's
-//! kind. The browser comes back to a loopback address, `http://127.0.0.1:<port>/callback`,
+//! person's own client ID for the app (only at the issuer it was given for), Ghost's own for
+//! that authorization server (only for an app at one of the row's own hosts), dynamic
+//! registration where it is offered, and Ghost's client metadata document (a static file on
+//! heyghost.app, whose loopback redirects the specification allows) where only that is taken
+//! and it names this sign-in's way back. A server none of them gets into is said in plain
+//! words, never as an error's kind. The browser comes back to a loopback address, `http://127.0.0.1:<port>/callback`,
 //! which listens only while a sign-in is open, on 127.0.0.1 only, for one path. The port is
 //! fixed (`GHOST_SIGNIN_PORT`) because a registration names its redirect exactly. Ghost's
 //! own client on a server that wants the device flow (GitHub) does without the browser's
@@ -293,6 +294,8 @@ pub struct SignIns {
     state: Arc<Mutex<State>>,
     /// The authorization servers Ghost knows ([`crate::signin_clients::KNOWN_SERVERS`]).
     servers: &'static [KnownServer],
+    /// Ghost's client metadata document, as published.
+    document: &'static str,
 }
 
 impl SignIns {
@@ -303,7 +306,15 @@ impl SignIns {
             on_url: None,
             state: Arc::new(Mutex::new(State::default())),
             servers: crate::signin_clients::KNOWN_SERVERS,
+            document: crate::signin_clients::CIMD_DOCUMENT,
         }
+    }
+
+    /// Another document: a test's, naming its own port.
+    #[cfg(test)]
+    fn with_document(mut self, document: &'static str) -> Self {
+        self.document = document;
+        self
     }
 
     /// Another table of servers: a test's fake one, with a client of Ghost's own.
@@ -313,8 +324,9 @@ impl SignIns {
         self
     }
 
-    fn known(&self, issuer: Option<&str>) -> Option<&'static KnownServer> {
-        crate::signin_clients::known_server_in(self.servers, issuer?)
+    /// The row for this app's server, only when that server serves this app (ADR 0076).
+    fn known(&self, issuer: Option<&str>, app_url: &str) -> Option<&'static KnownServer> {
+        crate::signin_clients::server_for_app(self.servers, issuer, app_url)
     }
 
     pub fn with_port(mut self, port: u16) -> Self {
@@ -353,6 +365,19 @@ impl SignIns {
         if state.flow.as_ref().is_some_and(|f| f.app == app) {
             Self::cancel_flow(&mut state);
         }
+    }
+
+    /// The authorization server the app at `url` names now, as its metadata says (ADR
+    /// 0076): what the person's own client is bound to when they give it.
+    pub async fn issuer_of(&self, url: &str) -> Result<Option<String>, AppError> {
+        let manager = AuthorizationManager::new_allowing_private_addresses(url)
+            .await
+            .map_err(auth_error)?;
+        let resolution = manager.resolve_metadata().await.map_err(auth_error)?;
+        Ok(resolution
+            .metadata
+            .issuer
+            .filter(|_| resolution.source.is_discovered()))
     }
 
     /// The code to type on the service's page, while a device sign-in waits for it.
@@ -691,7 +716,10 @@ impl AppAuth {
         let mut server: Option<&'static KnownServer> = None;
         if with_secret.is_some() && !fresh {
             let resolution = manager.resolve_metadata().await.map_err(auth_error)?;
-            server = self.signins.known(resolution.metadata.issuer.as_deref());
+            let issuer = resolution.metadata.issuer.clone();
+            // The secret refreshes only at the server it was given for.
+            self.own_bound(own.as_ref(), issuer.as_deref())?;
+            server = self.signins.known(issuer.as_deref(), url);
             manager.set_metadata(shaped(resolution.metadata, server, true));
         }
         if fresh {
@@ -724,14 +752,21 @@ impl AppAuth {
         let resolution = manager.resolve_metadata().await.map_err(auth_error)?;
         let metadata = resolution.metadata;
         if server.is_none() {
-            server = self.signins.known(metadata.issuer.as_deref());
+            server = self.signins.known(metadata.issuer.as_deref(), url);
         }
+        // The person's client goes only to the server they gave it for.
+        self.own_bound(own.as_ref(), metadata.issuer.as_deref())?;
+        // The document only for a way back it names: a server checks the redirect against it.
+        let document_names_this_way_back =
+            crate::signin_clients::document_redirects(self.signins.document)
+                .contains(&self.signins.redirect_uri());
         let takes = ServerTakes {
             metadata_document: metadata
                 .additional_fields
                 .get("client_id_metadata_document_supported")
                 .and_then(Value::as_bool)
-                == Some(true),
+                == Some(true)
+                && document_names_this_way_back,
             registration: metadata.registration_endpoint.is_some(),
         };
         let choice = choose(own.as_ref(), server, takes);
@@ -837,6 +872,27 @@ impl AppAuth {
             .await
             .map_err(auth_error)?;
         Ok(AuthClient::new(http, session.auth_manager))
+    }
+}
+
+impl AppAuth {
+    /// The person's client may go to `issuer` only when it is the server it was given for;
+    /// otherwise the app asks for it again, in words (ADR 0076).
+    fn own_bound(&self, own: Option<&OwnClient>, issuer: Option<&str>) -> Result<(), AppError> {
+        let Some(own) = own else {
+            return Ok(());
+        };
+        if crate::signin_clients::own_client_bound(own, issuer) {
+            return Ok(());
+        }
+        warn!(
+            "sign-in: {}: own client not sent to another server",
+            self.spec.name
+        );
+        self.signins.set_needs_client(&self.spec.name, Some(None));
+        Err(AppError::NeedsClient(
+            crate::signin_clients::own_client_moved(&self.spec.shown(), own.issuer.is_some()),
+        ))
     }
 }
 
@@ -1260,30 +1316,6 @@ mod tests {
         server
     }
 
-    /// Every log line, at every level, while `f` runs.
-    #[derive(Clone, Default)]
-    struct Lines(Arc<Mutex<Vec<u8>>>);
-
-    impl std::io::Write for Lines {
-        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            self.0.lock().unwrap().extend_from_slice(buf);
-            Ok(buf.len())
-        }
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
-    fn capture() -> (Lines, tracing::subscriber::DefaultGuard) {
-        let lines = Lines::default();
-        let writer = lines.clone();
-        let subscriber = tracing_subscriber::fmt()
-            .with_max_level(tracing::Level::TRACE)
-            .with_writer(move || writer.clone())
-            .finish();
-        (lines.clone(), tracing::subscriber::set_default(subscriber))
-    }
-
     /// Sign in to `server`'s app as `own`, playing the browser: returns the address the
     /// browser was sent to, and the client or the error.
     async fn sign_in_as(
@@ -1405,15 +1437,15 @@ mod tests {
         .await;
         let dir = tempfile::tempdir().unwrap();
         let (s, opened, port) = browser(dir.path());
-        let (lines, _guard) = capture();
         let own = OwnClient {
             client_id: "own-client".into(),
             client_secret: Some(CLIENT_SECRET.into()),
+            issuer: Some(server.uri()),
         };
         let (url, result) = sign_in_as(&s, &opened, port, &server, Some(own.clone())).await;
         let client = result.unwrap();
         let url = url.unwrap();
-        // first in the order of choice, over the document and registration alike
+        // first in the order of choice, over registration and the document alike
         assert_eq!(query(&url, "client_id").as_deref(), Some("own-client"));
         assert!(!url.contains(CLIENT_SECRET));
         assert_eq!(client.get_access_token().await.unwrap(), "fresh-token");
@@ -1436,9 +1468,8 @@ mod tests {
         assert_eq!(store.client_id().as_deref(), Some("own-client"));
         let kept = std::fs::read_to_string(&store.path).unwrap();
         assert!(!kept.contains(CLIENT_SECRET), "{kept}");
-        let logged = String::from_utf8_lossy(&lines.0.lock().unwrap()).to_string();
-        assert!(!logged.contains(CLIENT_SECRET), "{logged}");
-        assert!(logged.contains("sign-in: acme as own client"), "{logged}");
+        // What the log says is held in its own test binary (`tests/signin_logs.rs`), where a
+        // subscriber is in place before anything logs, under either runner.
     }
 
     #[tokio::test]
@@ -1452,6 +1483,7 @@ mod tests {
             secret_in_body: true,
             make_a_client: "https://acme.example/clients",
             authorize_params: &[("access_type", "offline")],
+            resources: Box::leak(Box::new([authority(&server)])),
         }]));
         let dir = tempfile::tempdir().unwrap();
         let (s, opened, port) = browser(dir.path());
@@ -1459,6 +1491,7 @@ mod tests {
         let own = OwnClient {
             client_id: "own-client".into(),
             client_secret: Some(CLIENT_SECRET.into()),
+            issuer: Some(server.uri()),
         };
         let (url, result) = sign_in_as(&s, &opened, port, &server, Some(own)).await;
         result.unwrap();
@@ -1486,6 +1519,7 @@ mod tests {
             secret_in_body: false,
             make_a_client: "https://acme.example/clients",
             authorize_params: &[],
+            resources: Box::leak(Box::new([authority(&server)])),
         }]));
         let dir = tempfile::tempdir().unwrap();
         let (s, opened, port) = browser(dir.path());
@@ -1507,16 +1541,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_server_that_takes_the_document_gets_ghosts_url_and_no_registration() {
+    async fn a_server_that_takes_only_the_document_gets_ghosts_url() {
+        // No registration offered, and the document names this sign-in's way back.
         let server = fake_server(json!({"client_id_metadata_document_supported": true})).await;
-        Mock::given(method("POST"))
-            .and(path("/register"))
-            .respond_with(ResponseTemplate::new(500))
-            .expect(0)
-            .mount(&server)
-            .await;
         let dir = tempfile::tempdir().unwrap();
         let (s, opened, port) = browser(dir.path());
+        let s = s.with_document(document_for(port));
         let (url, result) = sign_in_as(&s, &opened, port, &server, None).await;
         result.unwrap();
         assert_eq!(
@@ -1527,6 +1557,55 @@ mod tests {
             s.storage("acme").client_id().as_deref(),
             Some(crate::signin_clients::CIMD_URL)
         );
+    }
+
+    /// Ghost's document, as if it named `port` (the published one names 47823 only).
+    fn document_for(port: u16) -> &'static str {
+        let mut doc: Value = serde_json::from_str(crate::signin_clients::CIMD_DOCUMENT).unwrap();
+        doc["redirect_uris"] = json!([format!("http://127.0.0.1:{port}/callback")]);
+        Box::leak(doc.to_string().into_boxed_str())
+    }
+
+    #[tokio::test]
+    async fn a_server_that_offers_both_is_registered_with_as_today() {
+        // Notion, Linear, Atlassian and Sentry advertise both; registration is what works for
+        // them today, so it comes first.
+        let server = fake_server(json!({
+            "client_id_metadata_document_supported": true,
+            "registration_endpoint": "BASE/register",
+        }))
+        .await;
+        Mock::given(method("POST"))
+            .and(path("/register"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+                "client_id": "ghost-registered",
+                "redirect_uris": ["http://127.0.0.1:1/callback"]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        let (s, opened, port) = browser(dir.path());
+        let s = s.with_document(document_for(port));
+        let (url, result) = sign_in_as(&s, &opened, port, &server, None).await;
+        result.unwrap();
+        assert_eq!(
+            query(&url.unwrap(), "client_id").as_deref(),
+            Some("ghost-registered")
+        );
+    }
+
+    #[tokio::test]
+    async fn the_document_is_not_used_for_a_way_back_it_doesnt_name() {
+        // GHOST_SIGNIN_PORT set to another port: the published document names 47823 only, so
+        // the server would refuse the redirect; Ghost doesn't send it there.
+        let server = fake_server(json!({"client_id_metadata_document_supported": true})).await;
+        let dir = tempfile::tempdir().unwrap();
+        let (s, opened, port) = browser(dir.path());
+        assert_ne!(port, DEFAULT_PORT);
+        let (url, result) = sign_in_as(&s, &opened, port, &server, None).await;
+        assert!(url.is_none(), "{url:?}");
+        assert!(matches!(result.err(), Some(AppError::NeedsClient(_))));
     }
 
     #[tokio::test]
@@ -1558,6 +1637,7 @@ mod tests {
             secret_in_body: true,
             make_a_client: "https://acme.example/clients",
             authorize_params: &[],
+            resources: Box::leak(Box::new([authority(&server2)])),
         }]));
         let dir = tempfile::tempdir().unwrap();
         let (s, opened, _) = browser(dir.path());
@@ -1620,6 +1700,7 @@ mod tests {
         let own = OwnClient {
             client_id: "own-client".into(),
             client_secret: Some(CLIENT_SECRET.into()),
+            issuer: Some(server.uri()),
         };
         let client = auth
             .client(reqwest::Client::new(), false, Some(own))
@@ -1689,5 +1770,216 @@ mod tests {
             matches!(auth_error(err), AppError::NeedsSignIn(_)),
             "a refused refresh is a sign-in again, not an error's kind"
         );
+    }
+
+    /// A server's host and port as a row's `resources` names it, for a test's fake.
+    fn authority(server: &MockServer) -> &'static str {
+        Box::leak(server.address().to_string().into_boxed_str())
+    }
+
+    /// An app somewhere else that names `issuer`'s server as its authorization server (the
+    /// review of 2026-11-15): it must never get a token minted for Ghost's own client.
+    async fn app_naming(issuer: &MockServer) -> MockServer {
+        let app = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/.well-known/oauth-protected-resource/mcp"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "resource": format!("{}/mcp", app.uri()),
+                "authorization_servers": [issuer.uri()],
+            })))
+            .mount(&app)
+            .await;
+        app
+    }
+
+    fn row_with_ghosts_client(issuer: &MockServer, auth: ClientAuth) -> &'static [KnownServer] {
+        Box::leak(Box::new([KnownServer {
+            issuer: Box::leak(issuer.uri().into_boxed_str()),
+            service: "Acme",
+            ghost_client: Some(crate::signin_clients::GhostClient {
+                client_id: "ghost-own-client",
+                auth,
+            }),
+            own_secret: crate::signin_clients::SecretNeed::Required,
+            secret_in_body: true,
+            make_a_client: "https://acme.example/clients",
+            authorize_params: &[("access_type", "offline")],
+            resources: Box::leak(Box::new([authority(issuer)])),
+        }]))
+    }
+
+    fn paths_called(requests: &[wiremock::Request]) -> Vec<String> {
+        requests.iter().map(|r| r.url.path().to_string()).collect()
+    }
+
+    #[tokio::test]
+    async fn an_app_elsewhere_cannot_borrow_ghosts_device_client() {
+        let issuer = fake_server(json!({
+            "device_authorization_endpoint": "BASE/device/code",
+        }))
+        .await;
+        Mock::given(method("POST"))
+            .and(path("/device/code"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "device_code": "dev-1", "user_code": "WDJB-MJHT",
+                "verification_uri": format!("{}/login/device", issuer.uri()),
+                "interval": 1, "expires_in": 60
+            })))
+            .mount(&issuer)
+            .await;
+        let evil = app_naming(&issuer).await;
+        let dir = tempfile::tempdir().unwrap();
+        let (s, opened, port) = browser(dir.path());
+        let s = s.with_servers(row_with_ghosts_client(&issuer, ClientAuth::DeviceFlow));
+        let (url, result) = sign_in_as(&s, &opened, port, &evil, None).await;
+        assert!(url.is_none() && s.pending_code("acme").is_none());
+        assert!(matches!(result.err(), Some(AppError::NeedsClient(_))));
+        let called = paths_called(&issuer.received_requests().await.unwrap());
+        assert!(
+            !called.iter().any(|p| p == "/device/code" || p == "/token"),
+            "{called:?}"
+        );
+        assert!(s.storage("acme").get_tokens().is_none());
+    }
+
+    #[tokio::test]
+    async fn an_app_elsewhere_cannot_borrow_ghosts_pkce_client_or_its_parameters() {
+        let issuer = fake_server(json!({})).await;
+        let row = row_with_ghosts_client(&issuer, ClientAuth::Pkce);
+        // At the server's own app: Ghost's client and the row's parameters.
+        let dir = tempfile::tempdir().unwrap();
+        let (s, opened, port) = browser(dir.path());
+        let s = s.with_servers(row);
+        let (url, result) = sign_in_as(&s, &opened, port, &issuer, None).await;
+        result.unwrap();
+        let url = url.unwrap();
+        assert_eq!(
+            query(&url, "client_id").as_deref(),
+            Some("ghost-own-client")
+        );
+        assert_eq!(query(&url, "access_type").as_deref(), Some("offline"));
+        // At an app elsewhere naming the same server: neither.
+        let evil = app_naming(&issuer).await;
+        let dir = tempfile::tempdir().unwrap();
+        let (s, opened, port) = browser(dir.path());
+        let s = s.with_servers(row);
+        let (url, result) = sign_in_as(&s, &opened, port, &evil, None).await;
+        assert!(url.is_none(), "{url:?}");
+        let said = result.err().unwrap().to_string();
+        assert!(
+            said.starts_with("Acme doesn't let Ghost register itself"),
+            "{said}"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_persons_client_goes_only_to_the_server_it_was_given_for() {
+        let given_for = fake_server(json!({})).await;
+        let other = fake_server(json!({})).await;
+        let moved = app_naming(&other).await;
+        let dir = tempfile::tempdir().unwrap();
+        let (s, opened, port) = browser(dir.path());
+        let own = OwnClient {
+            client_id: "own-client".into(),
+            client_secret: Some(CLIENT_SECRET.into()),
+            issuer: Some(given_for.uri()),
+        };
+        let (url, result) = sign_in_as(&s, &opened, port, &moved, Some(own.clone())).await;
+        assert!(url.is_none());
+        let err = result.err().unwrap();
+        assert!(matches!(err, AppError::NeedsClient(_)), "{err}");
+        assert!(
+            err.to_string()
+                .starts_with("Acme now signs in somewhere other than where you gave Ghost"),
+            "{err}"
+        );
+        assert!(!err.to_string().contains(CLIENT_SECRET));
+        for r in other.received_requests().await.unwrap() {
+            assert!(!String::from_utf8_lossy(&r.body).contains(CLIENT_SECRET));
+            assert_ne!(r.url.path(), "/token");
+        }
+        // with no server recorded at all, the same
+        let unbound = OwnClient {
+            issuer: None,
+            ..own
+        };
+        let (_, result) = sign_in_as(&s, &opened, port, &moved, Some(unbound)).await;
+        assert!(matches!(result.err(), Some(AppError::NeedsClient(_))));
+    }
+
+    /// Ghost's device client at `server`'s own app, with the device endpoint answering.
+    async fn device_server() -> (MockServer, &'static [KnownServer]) {
+        let server =
+            fake_server(json!({"device_authorization_endpoint": "BASE/device/code"})).await;
+        Mock::given(method("POST"))
+            .and(path("/device/code"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "device_code": "dev-1", "user_code": "WDJB-MJHT",
+                "verification_uri": format!("{}/login/device", server.uri()),
+                "interval": 1, "expires_in": 60
+            })))
+            .mount(&server)
+            .await;
+        let row = row_with_ghosts_client(&server, ClientAuth::DeviceFlow);
+        (server, row)
+    }
+
+    async fn device_sign_in(
+        s: &SignIns,
+        server: &MockServer,
+    ) -> Result<AuthClient<reqwest::Client>, AppError> {
+        let spec = signs_in("acme", &format!("{}/mcp", server.uri()));
+        let auth = s.auth_for(&spec, true).unwrap();
+        tokio::time::timeout(
+            Duration::from_secs(20),
+            auth.client(reqwest::Client::new(), false, None),
+        )
+        .await
+        .expect("the device sign-in ended")
+    }
+
+    #[tokio::test]
+    async fn a_device_sign_in_rides_out_a_server_that_stumbles() {
+        let (server, row) = device_server().await;
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .respond_with(ResponseTemplate::new(503).set_body_string("<html>busy</html>"))
+            .up_to_n_times(2)
+            .with_priority(1)
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        let s = SignIns::new(dir.path())
+            .with_port(free_port())
+            .with_servers(row);
+        let client = device_sign_in(&s, &server).await.unwrap();
+        assert_eq!(client.get_access_token().await.unwrap(), "fresh-token");
+        let tries = paths_called(&server.received_requests().await.unwrap())
+            .iter()
+            .filter(|p| *p == "/token")
+            .count();
+        assert_eq!(tries, 3);
+        assert!(s.pending_code("acme").is_none());
+    }
+
+    #[tokio::test]
+    async fn a_device_sign_in_that_fails_takes_its_code_off_the_screen() {
+        let (server, row) = device_server().await;
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .respond_with(ResponseTemplate::new(400).set_body_string("not json"))
+            .with_priority(1)
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        let s = SignIns::new(dir.path())
+            .with_port(free_port())
+            .with_servers(row);
+        assert!(device_sign_in(&s, &server).await.is_err());
+        assert!(
+            s.pending_code("acme").is_none(),
+            "the code stayed on screen"
+        );
+        assert!(s.pending_url("acme").is_none());
     }
 }

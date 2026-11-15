@@ -10,10 +10,12 @@
 //!    public client ID registered by Ghost's maker, matched to the server's issuer exactly.
 //!    Ghost ships no secret, so its own client is a public one (PKCE) or uses the device
 //!    flow ([`ClientAuth`]).
-//! 3. **Ghost's client metadata document** ([`CIMD_URL`]), when the server says it takes one
-//!    (`client_id_metadata_document_supported`): a static file on heyghost.app that names
-//!    Ghost and its loopback ways back, so the URL is the client ID.
-//! 4. **Dynamic registration**, when the server offers it.
+//! 3. **Dynamic registration**, when the server offers it: what works for Notion, Linear,
+//!    Atlassian and Sentry today, even where they also take a metadata document.
+//! 4. **Ghost's client metadata document** ([`CIMD_URL`]), when the server takes one
+//!    (`client_id_metadata_document_supported`) and offers no registration, and only when the
+//!    document names this sign-in's way back: a static file on heyghost.app that names Ghost
+//!    and its loopback ways back, so the URL is the client ID.
 //!
 //! When none of them is possible, the sign-in does not fail with an error's kind: it says,
 //! in the product's words, which service needs a client and where the person makes one
@@ -29,6 +31,16 @@ pub const CIMD_URL: &str = "https://heyghost.app/oauth/client.json";
 /// The document itself, as the site publishes it: a test holds its fields to what the
 /// sign-in sends.
 pub const CIMD_DOCUMENT: &str = include_str!("../../../site/public/oauth/client.json");
+
+/// The ways back a client metadata document names (`redirect_uris`); none when it doesn't
+/// read.
+pub fn document_redirects(document: &str) -> Vec<String> {
+    serde_json::from_str::<serde_json::Value>(document)
+        .ok()
+        .and_then(|d| d.get("redirect_uris").cloned())
+        .and_then(|r| serde_json::from_value::<Vec<String>>(r).ok())
+        .unwrap_or_default()
+}
 
 /// How one of Ghost's own clients proves itself. There is no secret: whatever Ghost ships,
 /// anyone can read.
@@ -86,6 +98,10 @@ pub struct KnownServer {
     pub make_a_client: &'static str,
     /// Added to the address the browser opens, for this server only.
     pub authorize_params: &'static [(&'static str, &'static str)],
+    /// The apps this server signs in for, by host (`api.githubcopilot.com`). Ghost's own
+    /// client and this row's parameters are used only for an app at one of them, so an app
+    /// elsewhere that names this server cannot borrow Ghost's client and keep its token.
+    pub resources: &'static [&'static str],
 }
 
 /// The authorization servers Ghost knows. Adding Ghost's own client for one is one line:
@@ -103,6 +119,7 @@ pub const KNOWN_SERVERS: &[KnownServer] = &[
         secret_in_body: true,
         make_a_client: "https://github.com/settings/applications/new",
         authorize_params: &[],
+        resources: &["api.githubcopilot.com"],
     },
     // accounts.google.com: no dynamic registration. Google's Workspace apps (Gmail,
     // Calendar, Drive) take a "Web application" client marked for an AI-powered agent,
@@ -116,6 +133,11 @@ pub const KNOWN_SERVERS: &[KnownServer] = &[
         secret_in_body: false,
         make_a_client: "https://console.cloud.google.com/auth/clients",
         authorize_params: &[("access_type", "offline"), ("prompt", "consent")],
+        resources: &[
+            "gmailmcp.googleapis.com",
+            "calendarmcp.googleapis.com",
+            "drivemcp.googleapis.com",
+        ],
     },
     // mcp.slack.com: no dynamic registration; a Slack app of the person's workspace (an
     // internal app, or one in the Slack Marketplace), approved by its admin. Slack's
@@ -128,6 +150,7 @@ pub const KNOWN_SERVERS: &[KnownServer] = &[
         secret_in_body: true,
         make_a_client: "https://api.slack.com/apps",
         authorize_params: &[],
+        resources: &["mcp.slack.com"],
     },
 ];
 
@@ -152,11 +175,76 @@ pub fn known_server_in(
     servers.iter().find(|s| issuer_key(s.issuer) == wanted)
 }
 
+/// Whether `server`'s row serves the app at `app_url`: its host (and port, when it isn't
+/// the scheme's own) is one the row names, exactly. No user or password in the address, no
+/// other port, no trailing dot, and https only (plain http for a test's 127.0.0.1, which no
+/// real row names). The host is compared as the URL standard writes it, lower case.
+pub fn serves(server: &KnownServer, app_url: &str) -> bool {
+    let Ok(u) = url::Url::parse(app_url) else {
+        return false;
+    };
+    if !u.username().is_empty() || u.password().is_some() {
+        return false;
+    }
+    let Some(host) = u.host_str() else {
+        return false;
+    };
+    let loopback = host == "127.0.0.1";
+    if u.scheme() != "https" && !(loopback && u.scheme() == "http") {
+        return false;
+    }
+    let authority = match u.port() {
+        None => host.to_string(),
+        Some(p) => format!("{host}:{p}"),
+    };
+    server.resources.iter().any(|r| *r == authority)
+}
+
+/// The row for this app: the server it names, and only when that server serves the app.
+/// An app that names a server it isn't one of gets no row: no Ghost client, no parameters,
+/// and the plain sentence of an unknown server.
+pub fn server_for_app(
+    servers: &'static [KnownServer],
+    issuer: Option<&str>,
+    app_url: &str,
+) -> Option<&'static KnownServer> {
+    known_server_in(servers, issuer?).filter(|s| serves(s, app_url))
+}
+
+/// Whether the person's own client may go to `issuer`: the server they gave it for, as
+/// recorded then, is this one (one trailing slash aside). Unknown on either side is no.
+pub fn own_client_bound(own: &OwnClient, issuer: Option<&str>) -> bool {
+    match (own.issuer.as_deref(), issuer) {
+        (Some(given), Some(now)) => issuer_key(given) == issuer_key(now),
+        _ => false,
+    }
+}
+
+/// The sentence when the person's client was given for another server than the app names
+/// now, or for one Ghost never recorded.
+pub fn own_client_moved(app: &str, recorded: bool) -> String {
+    if recorded {
+        format!(
+            "{app} now signs in somewhere other than where you gave Ghost your client ID, so \
+             Ghost won't send it there. If that's expected, give Ghost the client ID again on \
+             {app}'s page."
+        )
+    } else {
+        format!(
+            "Ghost doesn't know where {app} signed in when you gave it your client ID, so it \
+             won't send it anywhere. Give Ghost the client ID again on {app}'s page."
+        )
+    }
+}
+
 /// The person's own client for one app, its secret already taken from the vault.
 #[derive(Clone, PartialEq, Eq)]
 pub struct OwnClient {
     pub client_id: String,
     pub client_secret: Option<String>,
+    /// The authorization server the person gave it for, as recorded then. A sign-in whose
+    /// app now names another sends neither the ID nor the secret there.
+    pub issuer: Option<String>,
 }
 
 impl std::fmt::Debug for OwnClient {
@@ -165,6 +253,7 @@ impl std::fmt::Debug for OwnClient {
         f.debug_struct("OwnClient")
             .field("client_id", &self.client_id)
             .field("client_secret", &self.client_secret.as_ref().map(|_| "…"))
+            .field("issuer", &self.issuer)
             .finish()
     }
 }
@@ -172,7 +261,8 @@ impl std::fmt::Debug for OwnClient {
 /// What the authorization server says it takes, from its metadata.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ServerTakes {
-    /// `client_id_metadata_document_supported` is true.
+    /// `client_id_metadata_document_supported` is true, and Ghost's document names this
+    /// sign-in's way back (it names port 47823 only; `GHOST_SIGNIN_PORT` may differ).
     pub metadata_document: bool,
     /// It names a `registration_endpoint`.
     pub registration: bool,
@@ -206,8 +296,8 @@ impl Choice {
     }
 }
 
-/// The order of choice (ADR 0076): the person's own, Ghost's own for that server, the
-/// metadata document where the server takes one, registration where it offers it.
+/// The order of choice (ADR 0076): the person's own, Ghost's own for that server,
+/// registration where it is offered, the metadata document where only that is taken.
 pub fn choose(own: Option<&OwnClient>, server: Option<&KnownServer>, takes: ServerTakes) -> Choice {
     if let Some(own) = own.filter(|o| !o.client_id.trim().is_empty()) {
         return Choice::Own(own.clone());
@@ -215,11 +305,13 @@ pub fn choose(own: Option<&OwnClient>, server: Option<&KnownServer>, takes: Serv
     if let Some(ghost) = server.and_then(|s| s.ghost_client) {
         return Choice::Ghost(ghost);
     }
-    if takes.metadata_document {
-        return Choice::MetadataDocument;
-    }
+    // Registration where it is offered: it is what works for those servers today, and no
+    // live service has been tried with the document yet.
     if takes.registration {
         return Choice::Register;
+    }
+    if takes.metadata_document {
+        return Choice::MetadataDocument;
     }
     Choice::NeedsClient
 }
@@ -283,6 +375,7 @@ mod tests {
         OwnClient {
             client_id: id.into(),
             client_secret: None,
+            issuer: None,
         }
     }
 
@@ -315,7 +408,19 @@ mod tests {
             choose(Some(&own("  ")), Some(&row), all),
             Choice::Ghost(_)
         ));
-        assert_eq!(choose(None, None, all), Choice::MetadataDocument);
+        // registration first where both are offered; the document only where it isn't
+        assert_eq!(choose(None, None, all), Choice::Register);
+        assert_eq!(
+            choose(
+                None,
+                None,
+                ServerTakes {
+                    metadata_document: true,
+                    registration: false
+                }
+            ),
+            Choice::MetadataDocument
+        );
         assert_eq!(
             choose(
                 None,
@@ -394,6 +499,43 @@ mod tests {
     }
 
     #[test]
+    fn a_row_serves_only_the_apps_it_names_exactly() {
+        let github = known_server("https://github.com/login/oauth").unwrap();
+        assert!(serves(github, "https://api.githubcopilot.com/mcp/"));
+        assert!(serves(github, "https://api.githubcopilot.com:443/mcp/"));
+        // the same host, as a URL writes it in capitals
+        assert!(serves(github, "https://API.githubcopilot.com/mcp/"));
+        for not in [
+            "https://evil.example/mcp",
+            "https://api.githubcopilot.com.evil.example/mcp/",
+            "https://evil.example/api.githubcopilot.com/mcp/",
+            "https://evil.example/?u=https://api.githubcopilot.com/",
+            "https://user@api.githubcopilot.com/mcp/",
+            "https://user:pw@api.githubcopilot.com/mcp/",
+            "https://api.githubcopilot.com:8443/mcp/",
+            "https://api.githubcopilot.com./mcp/",
+            "http://api.githubcopilot.com/mcp/",
+            "https://githubcopilot.com/mcp/",
+            "https://x.api.githubcopilot.com/mcp/",
+            "http://127.0.0.1:47823/mcp",
+            "not a url",
+            "",
+        ] {
+            assert!(!serves(github, not), "{not}");
+        }
+        let google = known_server("https://accounts.google.com").unwrap();
+        for app in crate::catalog::NOT_IN_REGISTRY
+            .iter()
+            .filter(|t| t.issuer == google.issuer)
+        {
+            assert!(serves(google, app.url), "{}", app.url);
+        }
+        assert!(!serves(google, "https://api.githubcopilot.com/mcp/"));
+        let slack = known_server("https://mcp.slack.com").unwrap();
+        assert!(serves(slack, "https://mcp.slack.com/mcp"));
+    }
+
+    #[test]
     fn a_client_id_is_checked_before_it_is_kept() {
         assert!(client_id_problem("Iv23liABC.apps").is_none());
         assert!(client_id_problem("").is_some());
@@ -406,9 +548,18 @@ mod tests {
         let c = OwnClient {
             client_id: "id".into(),
             client_secret: Some("very-secret-value".into()),
+            issuer: None,
         };
         assert!(!format!("{c:?}").contains("very-secret-value"));
         assert!(!format!("{:?}", Choice::Own(c)).contains("very-secret-value"));
+    }
+
+    #[test]
+    fn the_document_names_its_ways_back() {
+        let ways = document_redirects(CIMD_DOCUMENT);
+        assert!(ways.contains(&"http://127.0.0.1:47823/callback".to_string()));
+        assert!(!ways.contains(&"http://127.0.0.1:50000/callback".to_string()));
+        assert!(document_redirects("not json").is_empty());
     }
 
     #[test]

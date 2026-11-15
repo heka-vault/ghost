@@ -41,22 +41,41 @@ pub(super) async fn sign_in(
     if !scopes.is_empty() {
         form.push(("scope", scopes.join(" ")));
     }
-    let started = post(http, device_endpoint, &form).await?;
+    let started = post(http, device_endpoint, &form)
+        .await
+        .map_err(Failed::into_error)?;
     let start = Started::read(&started, issuer)?;
     let id = signins.start_device_flow(app, &start.page, &start.user_code);
+    // Whatever ends the polling, the code comes off the screen.
+    let out = poll(signins, id, http, token_endpoint, client_id, &start).await;
+    signins.end_flow(app).await;
+    out
+}
+
+/// Ask the token endpoint, as often as the server allows, until the code is typed, refused,
+/// expired, or the sign-in replaced. A request that fails on the way (no answer, a 5xx) is
+/// tried again at the next interval, within the same deadline.
+async fn poll(
+    signins: &SignIns,
+    id: u64,
+    http: &reqwest::Client,
+    token_endpoint: &str,
+    client_id: &str,
+    start: &Started,
+) -> Result<OAuthTokenResponse, AppError> {
     let deadline = Instant::now() + Duration::from_secs(start.expires_in).min(MAX_WAIT);
     let mut interval = start.interval;
-    let out = loop {
+    loop {
         tokio::time::sleep(Duration::from_secs(interval)).await;
         if !signins.flow_open(id) {
-            break Err(AppError::NeedsSignIn("the sign-in was replaced".into()));
+            return Err(AppError::NeedsSignIn("the sign-in was replaced".into()));
         }
         if Instant::now() >= deadline {
-            break Err(AppError::NeedsSignIn(
+            return Err(AppError::NeedsSignIn(
                 "the code expired before it was entered".into(),
             ));
         }
-        let answer = post(
+        let answer = match post(
             http,
             token_endpoint,
             &[
@@ -65,21 +84,29 @@ pub(super) async fn sign_in(
                 ("grant_type", GRANT.to_string()),
             ],
         )
-        .await?;
+        .await
+        {
+            Ok(answer) => answer,
+            Err(Failed::Transient(kind)) => {
+                warn!("sign-in: device flow: {kind}, trying again");
+                continue;
+            }
+            Err(failed) => return Err(failed.into_error()),
+        };
         match answer.get("error").and_then(Value::as_str) {
-            None => match serde_json::from_value::<OAuthTokenResponse>(answer) {
-                Ok(token) => break Ok(token),
-                Err(_) => break Err(AppError::Connect("TokenExchangeFailed".into())),
-            },
+            None => {
+                return serde_json::from_value::<OAuthTokenResponse>(answer)
+                    .map_err(|_| AppError::Connect("TokenExchangeFailed".into()));
+            }
             Some("authorization_pending") => {}
             Some("slow_down") => interval = (interval + 5).min(60),
             Some("expired_token") => {
-                break Err(AppError::NeedsSignIn(
+                return Err(AppError::NeedsSignIn(
                     "the code expired before it was entered".into(),
                 ));
             }
             Some("access_denied") => {
-                break Err(AppError::NeedsSignIn(
+                return Err(AppError::NeedsSignIn(
                     "the sign-in was refused (access_denied)".into(),
                 ));
             }
@@ -90,14 +117,27 @@ pub(super) async fn sign_in(
                     .take(40)
                     .collect();
                 warn!("sign-in: device flow: {short}");
-                break Err(AppError::NeedsSignIn(format!(
+                return Err(AppError::NeedsSignIn(format!(
                     "the sign-in was refused ({short})"
                 )));
             }
         }
-    };
-    signins.end_flow(app).await;
-    out
+    }
+}
+
+/// How a request failed: on the way (worth another try), or for good. By kind only.
+#[derive(Debug)]
+enum Failed {
+    Transient(String),
+    Final(String),
+}
+
+impl Failed {
+    fn into_error(self) -> AppError {
+        match self {
+            Failed::Transient(kind) | Failed::Final(kind) => AppError::Connect(kind),
+        }
+    }
 }
 
 /// What the server said to show the person.
@@ -159,7 +199,7 @@ async fn post(
     http: &reqwest::Client,
     endpoint: &str,
     form: &[(&str, String)],
-) -> Result<Value, AppError> {
+) -> Result<Value, Failed> {
     let body = url::form_urlencoded::Serializer::new(String::new())
         .extend_pairs(form.iter().map(|(k, v)| (*k, v.as_str())))
         .finish();
@@ -173,23 +213,26 @@ async fn post(
         .body(body)
         .send()
         .await
-        .map_err(|_| AppError::Connect("HttpError".into()))?;
+        .map_err(|_| Failed::Transient("HttpError".into()))?;
     let status = response.status();
     let mut body = Vec::new();
     let mut response = response;
     while let Some(chunk) = response
         .chunk()
         .await
-        .map_err(|_| AppError::Connect("HttpError".into()))?
+        .map_err(|_| Failed::Transient("HttpError".into()))?
     {
         if body.len() + chunk.len() > MAX_BODY {
-            return Err(AppError::Connect("DeviceFlowRefused".into()));
+            return Err(Failed::Final("DeviceFlowRefused".into()));
         }
         body.extend_from_slice(&chunk);
     }
     match serde_json::from_slice::<Value>(&body) {
         Ok(v @ Value::Object(_)) if status.is_success() || v.get("error").is_some() => Ok(v),
-        _ => Err(AppError::Connect(format!(
+        _ if status.is_server_error() || status.as_u16() == 429 => {
+            Err(Failed::Transient(format!("DeviceFlow{}", status.as_u16())))
+        }
+        _ => Err(Failed::Final(format!(
             "DeviceFlow{}",
             if status.is_success() {
                 "Refused".to_string()

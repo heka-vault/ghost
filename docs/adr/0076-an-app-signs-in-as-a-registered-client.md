@@ -35,21 +35,39 @@ What the vendors say (checked 2026-11-15; the PR that made this ADR has the link
    gave Ghost on the app's page or when connecting it. It is `client_id` in the app's entry in
    `apps.json`. Its secret, where the service wants one, is a password in the vault (ADR 0036),
    named by `client_secret` as `${NAME}` and nothing else; a value written there is refused.
+   **It is bound to the server it was given for**: when the person gives it, Ghost asks the app
+   where it signs in and keeps that issuer beside it (`client_issuer`); an app that names none
+   can't be given one. A sign-in, or a refresh with the secret, whose app names another issuer
+   now (its address changed, or what it advertises did) sends neither the ID nor the secret: the
+   app is `needs_client` with a sentence ("Acme now signs in somewhere other than where you gave
+   Ghost your client ID, so Ghost won't send it there. …"), and giving it again binds it to the
+   new one. A client with no recorded issuer (a hand-written entry) is refused the same way.
 2. **Ghost's own client for that authorization server**, from `KNOWN_SERVERS`: a typed, closed
    table keyed by the server's issuer, matched exactly (one trailing slash aside, since Google's
    resource metadata writes one), never by substring. A row names the service, Ghost's public
    client ID once one is registered, how that client proves itself (`Pkce`, or `DeviceFlow` for
    a server whose code flow wants a secret), what the person's own client needs (no secret, an
    optional one, a required one), whether the secret goes in the body, the vendor's page where a
-   person makes a client, and parameters a server needs on the browser's address (Google's
-   offline access). Ghost ships no secret: anything in the binary is public. No row has a client
-   ID until the maker registers one; adding it is one line and the table's test.
-3. **Ghost's client metadata document**, where the server says it takes one
-   (`client_id_metadata_document_supported`): `https://heyghost.app/oauth/client.json`, a static
-   file in the site (`site/public/oauth/client.json`), whose URL is the client ID. It names Ghost
-   and its loopback ways back, which the specification allows for a native client; a test holds
-   it to what the sign-in sends.
-4. **Dynamic registration**, where the server offers it, as before.
+   person makes a client, parameters a server needs on the browser's address (Google's offline
+   access), and **the apps it serves, by host** (`resources`: `api.githubcopilot.com`; Google's
+   three; `mcp.slack.com`). A row counts for an app only when the app's address is https and its
+   host is one of those exactly (no user or password in it, no other port, no trailing dot; the
+   host as the URL standard writes it): otherwise the app is treated as at an unknown server, so
+   it gets neither Ghost's client nor the row's parameters. Without this an app at
+   `evil.example` naming `github.com/login/oauth` as its server would have Ghost run GitHub's
+   device flow as Ghost and hand it the token (the review of 2026-11-15). Ghost ships no
+   secret: anything in the binary is public. No row has a client ID until the maker registers
+   one; adding it is one line and the table's test.
+3. **Dynamic registration**, where the server offers it, as before. It comes before the
+   document because it is what works today for Notion, Linear, Atlassian and Sentry, which
+   advertise both, and no live service has been tried with the document yet.
+4. **Ghost's client metadata document**, where the server takes one
+   (`client_id_metadata_document_supported`) and offers no registration, and only when the
+   document names this sign-in's way back: `https://heyghost.app/oauth/client.json`, a static
+   file in the site (`site/public/oauth/client.json`), whose URL is the client ID. It names
+   Ghost and its loopback ways back (port 47823), which the specification allows for a native
+   client; with `GHOST_SIGNIN_PORT` set to another port it is not used. A test holds it to what
+   the sign-in sends.
 
 **When none is possible, the sign-in says so in words** (`AppError::NeedsClient`, the app's
 state `needs_client`): which service, that it lets in only apps registered with it, and what to
@@ -76,7 +94,14 @@ phone or an app's text sets a client ID or a secret (`no_tool_sets_a_sign_in_cli
 operator's route is `PUT /apps/{name}/sign-in-client` and the client fields of `POST /apps`. A
 pasted config's client is not taken, since another tool's client is that tool's (ADR 0068).
 Vendor metadata is untrusted: a device flow's code must look like one, its page must be on the
-issuer's own host over https, every answer is bounded, and its waits are capped.
+issuer's own host over https, every answer is bounded, and its waits are capped. A request
+that fails on the way (no answer, a 5xx, a 429) is tried again at the next interval within the
+same 15 minutes; whatever ends the device flow takes its code off the screen.
+
+**A secret is kept until the person says otherwise.** Changing the client ID with the secret
+field left empty keeps the stored secret; taking it away is its own choice (`forget_secret`,
+"Remove the stored secret"). Connecting an app again over its entry (`replace`) with no client
+removes the secret the old entry named from the vault.
 
 ## What leaves the machine
 

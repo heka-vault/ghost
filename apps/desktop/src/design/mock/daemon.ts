@@ -1959,14 +1959,17 @@ export class MockDaemon {
     return { apps: [this.appView(f)], sign_in_url: url, problems: [] };
   }
   /** PUT /apps/{name}/sign-in-client (ADR 0076): the person's own client, then a sign-in with it. */
-  private setSignInClient(f: AppFixture, b: { client_id?: string | null; client_secret?: string | null }): AppConnectResult {
+  private setSignInClient(f: AppFixture, b: { client_id?: string | null; client_secret?: string | null; forget_secret?: boolean | null }): AppConnectResult {
     if (f.view.kind !== "sign_in") throw new HttpError(422, "a client ID is for an app Ghost signs in to");
     const id = (b.client_id ?? "").trim();
     const secret = (b.client_secret ?? "").trim();
     if (!id && secret) throw new HttpError(422, "a client secret goes with a client ID");
+    if (secret && b.forget_secret) throw new HttpError(422, "give a new client secret or forget the stored one, not both");
     if (/\s/.test(id)) throw new HttpError(422, "a client ID has no spaces in it");
     const was = f.view.sign_in_client ?? { client_id: null, has_secret: false, service: null, make_a_client: null, secret: "optional" as const };
-    f.view.sign_in_client = { ...was, client_id: id || null, has_secret: !!(id && secret) };
+    // An empty secret keeps the stored one; only forget_secret takes it away (as the daemon).
+    const hasSecret = !id ? false : secret ? true : b.forget_secret ? false : was.has_secret;
+    f.view.sign_in_client = { ...was, client_id: id || null, has_secret: hasSecret };
     if (!id && was.service) {
       Object.assign(f.view, { state: "needs_client", problem: needsClientSentence(f.view.title, was), sign_in_url: null });
       this.appsChanged(f.view.name);

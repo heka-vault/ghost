@@ -223,6 +223,11 @@ pub trait SignInPort: Send + Sync {
     fn pending_code(&self, _app: &str) -> Option<String> {
         None
     }
+    /// The authorization server the app at `url` names now (ADR 0076): what a client the
+    /// person gives is bound to. None when it names none.
+    async fn issuer_of(&self, _url: &str) -> Result<Option<String>, AppError> {
+        Ok(None)
+    }
     /// The service the app's last sign-in needed a client for, when it did (ADR 0076).
     fn needs_client(
         &self,
@@ -249,6 +254,10 @@ impl SignInPort for SignIns {
 
     fn pending_code(&self, app: &str) -> Option<String> {
         SignIns::pending_code(self, app)
+    }
+
+    async fn issuer_of(&self, url: &str) -> Result<Option<String>, AppError> {
+        SignIns::issuer_of(self, url).await
     }
 
     fn needs_client(

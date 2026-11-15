@@ -849,6 +849,7 @@ async fn the_persons_own_client_is_kept_and_its_secret_never_comes_back_out() {
     // secret goes into the vault; apps.json names it; no response, list or audit says it.
     let mut w = World::new();
     with_apps(&mut w);
+    w.signins = Some(Arc::new(common::FakeSignIns::new()));
     let c = w.client();
     c.get("/catalog").await;
     let r = c
@@ -881,6 +882,11 @@ async fn the_persons_own_client_is_kept_and_its_secret_never_comes_back_out() {
         gmail.client_secret.as_deref(),
         Some("${GHOST_APP_GMAIL_CLIENT_SECRET}")
     );
+    // bound to the server Gmail named when the client was given (ADR 0076)
+    assert_eq!(
+        gmail.client_issuer.as_deref(),
+        Some("https://accounts.google.com")
+    );
     let file = std::fs::read_to_string(apps_file(&w)).unwrap();
     assert!(!file.contains(CLIENT_SECRET), "{file}");
     assert_eq!(
@@ -895,7 +901,8 @@ async fn the_persons_own_client_is_kept_and_its_secret_never_comes_back_out() {
         assert!(!r.text.contains(CLIENT_SECRET), "{path}: {}", r.text);
     }
 
-    // Changed on the app's page: a new ID with no secret takes the old secret away.
+    // Changed on the app's page: a new ID with the secret field left empty keeps the secret
+    // (Google requires one; an empty field is not "none").
     let r = c
         .put(
             "/apps/gmail/sign-in-client",
@@ -903,13 +910,41 @@ async fn the_persons_own_client_is_kept_and_its_secret_never_comes_back_out() {
         )
         .await;
     assert_eq!(r.status, 200, "{}", r.text);
-    assert_eq!(r["apps"][0]["sign_in_client"]["has_secret"], false);
-    assert!(w.vault.value("GHOST_APP_GMAIL_CLIENT_SECRET").is_none());
+    assert_eq!(r["apps"][0]["sign_in_client"]["has_secret"], true);
+    assert_eq!(
+        w.vault
+            .value("GHOST_APP_GMAIL_CLIENT_SECRET")
+            .unwrap()
+            .as_str(),
+        CLIENT_SECRET
+    );
     let saved = load_apps(&apps_file(&w));
     assert_eq!(
         saved.get("gmail").unwrap().client_id.as_deref(),
         Some("456-def.apps.googleusercontent.com")
     );
+    assert_eq!(
+        saved.get("gmail").unwrap().client_secret.as_deref(),
+        Some("${GHOST_APP_GMAIL_CLIENT_SECRET}")
+    );
+    // Taking the secret away is its own, explicit choice.
+    let r = c
+        .put(
+            "/apps/gmail/sign-in-client",
+            json!({"client_id": "456-def.apps.googleusercontent.com", "forget_secret": true}),
+        )
+        .await;
+    assert_eq!(r.status, 200, "{}", r.text);
+    assert_eq!(r["apps"][0]["sign_in_client"]["has_secret"], false);
+    assert!(w.vault.value("GHOST_APP_GMAIL_CLIENT_SECRET").is_none());
+    // a new secret and "forget it" at once is a contradiction
+    let r = c
+        .put(
+            "/apps/gmail/sign-in-client",
+            json!({"client_id": "x", "client_secret": "y-secret-value", "forget_secret": true}),
+        )
+        .await;
+    assert_eq!(r.status, 422, "{}", r.text);
     // null takes the client back
     let r = c
         .put("/apps/gmail/sign-in-client", json!({"client_id": null}))
@@ -951,4 +986,67 @@ async fn a_client_in_a_pasted_config_is_not_taken() {
     assert_eq!(r.status, 200, "{}", r.text);
     let saved = load_apps(&apps_file(&w));
     assert_eq!(saved.get("slack").unwrap().client_id, None);
+}
+
+#[tokio::test]
+async fn a_client_is_kept_only_for_an_app_that_says_where_it_signs_in() {
+    // ADR 0076: the client is bound to the server the app names when it is given; an app
+    // that names none can't be given one, and nothing is written.
+    let mut w = World::new();
+    with_apps(&mut w);
+    let signins = Arc::new(common::FakeSignIns::new());
+    *signins.issuer.lock().unwrap() = None;
+    w.signins = Some(signins);
+    let c = w.client();
+    c.get("/catalog").await;
+    let r = c
+        .post(
+            "/apps",
+            Some(json!({"catalog": "ghost/gmail", "option": "remote-0",
+                        "client_id": "abc", "client_secret": "s3cret-value-123"})),
+        )
+        .await;
+    assert_eq!(r.status, 422, "{}", r.text);
+    assert!(
+        r.detail().contains("doesn't say where it signs in"),
+        "{}",
+        r.text
+    );
+    assert!(load_apps(&apps_file(&w)).get("gmail").is_none());
+    assert!(w.vault.value("GHOST_APP_GMAIL_CLIENT_SECRET").is_none());
+}
+
+#[tokio::test]
+async fn connecting_again_without_a_client_forgets_its_secret() {
+    // `replace` with no client fields: the entry has no client any more, so its secret
+    // doesn't stay behind in the vault (the review of 2026-11-15).
+    let mut w = World::new();
+    with_apps(&mut w);
+    w.signins = Some(Arc::new(common::FakeSignIns::new()));
+    let c = w.client();
+    c.get("/catalog").await;
+    let r = c
+        .post(
+            "/apps",
+            Some(
+                json!({"catalog": "ghost/gmail", "option": "remote-0", "name": "gmail",
+                        "client_id": "abc", "client_secret": CLIENT_SECRET}),
+            ),
+        )
+        .await;
+    assert_eq!(r.status, 200, "{}", r.text);
+    assert!(w.vault.value("GHOST_APP_GMAIL_CLIENT_SECRET").is_some());
+    let r = c
+        .post(
+            "/apps",
+            Some(
+                json!({"catalog": "ghost/gmail", "option": "remote-0", "name": "gmail",
+                        "replace": true}),
+            ),
+        )
+        .await;
+    assert_eq!(r.status, 200, "{}", r.text);
+    let saved = load_apps(&apps_file(&w));
+    assert_eq!(saved.get("gmail").unwrap().client_id, None);
+    assert!(w.vault.value("GHOST_APP_GMAIL_CLIENT_SECRET").is_none());
 }

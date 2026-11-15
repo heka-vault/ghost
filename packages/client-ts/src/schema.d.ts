@@ -4710,11 +4710,14 @@ export interface components {
         };
         /**
          * @description The person's own client for an app (ADR 0076). The secret goes into Ghost's vault and
-         *     never comes back out; null clears the client and its secret.
+         *     never comes back out; a null client ID clears the client and its secret. A secret left
+         *     empty keeps the one stored; `forget_secret` takes it away.
          */
         SignInClientUpdate: {
             client_id?: string | null;
             client_secret?: string | null;
+            /** @description Take the stored secret away; only with no new one. */
+            forget_secret?: boolean | null;
         };
         /** @description How an app signs in, for its page (ADR 0076). */
         SignInClientView: {

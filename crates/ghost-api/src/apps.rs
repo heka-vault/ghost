@@ -738,14 +738,18 @@ fn own_client(
         secrets,
         req.client_id.as_deref(),
         req.client_secret.as_deref(),
+        false,
     )
 }
 
+/// A secret left empty keeps the one the entry names (an empty field is not "none");
+/// `forget_secret` takes it away, and only with no new one.
 fn set_own_client(
     spec: &mut AppSpec,
     secrets: &mut BTreeMap<String, String>,
     client_id: Option<&str>,
     client_secret: Option<&str>,
+    forget_secret: bool,
 ) -> ApiResult<()> {
     let id = client_id.map(str::trim).filter(|s| !s.is_empty());
     let secret = client_secret.map(str::trim).filter(|s| !s.is_empty());
@@ -768,15 +772,51 @@ fn set_own_client(
         return Err(ApiError::unprocessable(why));
     }
     if let Some(secret) = secret {
+        if forget_secret {
+            return Err(ApiError::unprocessable(
+                "give a new client secret or forget the stored one, not both",
+            ));
+        }
         check_len(&["body", "client_secret"], secret, 1, 500)?;
     }
     spec.client_id = Some(id.to_string());
-    spec.client_secret = secret.map(|value| {
-        let env = secret_name(&spec.name, "client_secret");
-        secrets.insert(env.clone(), value.to_string());
-        format!("${{{env}}}")
-    });
+    match secret {
+        Some(value) => {
+            let env = secret_name(&spec.name, "client_secret");
+            secrets.insert(env.clone(), value.to_string());
+            spec.client_secret = Some(format!("${{{env}}}"));
+        }
+        None if forget_secret => spec.client_secret = None,
+        None => {} // the stored one stays
+    }
     Ok(())
+}
+
+/// Bind the person's client to the server the app names now (ADR 0076): its sign-in sends
+/// the client there and nowhere else. An app that names none can't be given one.
+async fn bind_client(deps: &Deps, spec: &mut AppSpec) -> ApiResult<()> {
+    if spec.client_id.is_none() {
+        spec.client_issuer = None;
+        return Ok(());
+    }
+    let signins = deps
+        .signins
+        .as_ref()
+        .ok_or_else(|| ApiError::unavailable("signing in is not available"))?;
+    let url = spec.url.clone().unwrap_or_default();
+    let shown = spec.shown();
+    match signins.issuer_of(&url).await {
+        Ok(Some(issuer)) => {
+            spec.client_issuer = Some(issuer);
+            Ok(())
+        }
+        Ok(None) => Err(ApiError::unprocessable(format!(
+            "{shown} doesn't say where it signs in, so Ghost can't keep a client ID for it."
+        ))),
+        Err(_) => Err(ApiError::unprocessable(format!(
+            "Ghost couldn't reach {shown} to check where it signs in. Try again when it answers."
+        ))),
+    }
 }
 
 /// Connect these apps: every check first, then `apps.json` (the one writer, `edit_apps`),
@@ -820,8 +860,35 @@ pub(crate) async fn connect_specs(
         .map(|(k, v)| (k.clone(), Some(v.clone())))
         .collect();
     check_passwords(&as_values)?; // a refused password changes nothing either
+    // Connecting again over an entry: the passwords Ghost kept for the old one that the new
+    // one no longer names (a client secret given before and not now) leave the vault.
+    let orphaned: BTreeMap<String, Option<String>> = if replace {
+        specs
+            .iter()
+            .filter_map(|spec| apps.spec(&spec.name).map(|old| (old, spec)))
+            .flat_map(|(old, spec)| {
+                let still = spec.secrets();
+                own_secrets(deps, &old)
+                    .into_iter()
+                    .filter(move |k| !still.contains(k))
+            })
+            .filter(|k| !secrets.contains_key(k))
+            .filter(|k| deps.passwords.as_ref().is_some_and(|v| v.contains(k)))
+            .map(|k| (k, None))
+            .collect()
+    } else {
+        BTreeMap::new()
+    };
+    if !orphaned.is_empty() && !deps.passwords.as_ref().is_some_and(|v| v.is_open()) {
+        return Err(ApiError::locked(
+            "Your keyring is locked. Unlock it, then connect again.",
+        ));
+    }
     save(deps, specs, None)?; // first: a file that won't take the entry changes nothing
     keep_secrets(deps, secrets)?;
+    if !orphaned.is_empty() {
+        save_passwords(deps, &orphaned)?;
+    }
     let url = start(deps, specs).await;
     let views = specs
         .iter()
@@ -843,10 +910,13 @@ async fn connect_app(
 ) -> ApiResult<Json<AppConnectResult>> {
     need_apps(&deps)?;
     let Asked {
-        specs,
+        mut specs,
         secrets,
         notes,
     } = specs_from(&deps, &req)?;
+    for spec in &mut specs {
+        bind_client(&deps, spec).await?;
+    }
     let (views, url) = connect_specs(&deps, &specs, &secrets, req.replace.unwrap_or(false)).await?;
     let code = views.iter().find_map(|v| v.sign_in_code.clone());
     Ok(Json(AppConnectResult {
@@ -912,8 +982,9 @@ async fn set_sign_in_client(
         &mut secrets,
         req.client_id.as_deref(),
         req.client_secret.as_deref(),
+        req.forget_secret.unwrap_or(false),
     )?;
-    // A secret given before and not now goes from the vault; a new one replaces it.
+    // A secret the entry no longer names goes from the vault; a new one replaces it.
     let env = secret_name(&name, "client_secret");
     let mut changes: BTreeMap<String, Option<String>> = secrets
         .iter()
@@ -930,6 +1001,7 @@ async fn set_sign_in_client(
             "Your keyring is locked. Unlock it, then give the client again.",
         ));
     }
+    bind_client(&deps, &mut spec).await?;
     check_passwords(&changes)?;
     save(&deps, std::slice::from_ref(&spec), None)?;
     if !changes.is_empty() {

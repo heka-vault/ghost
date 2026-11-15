@@ -975,6 +975,7 @@ impl App {
                     .as_deref()
                     .map(|s| fill_secrets(s, &*self.environ))
                     .transpose()?,
+                issuer: spec.client_issuer.clone(),
             }),
             _ => None,
         };

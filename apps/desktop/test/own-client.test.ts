@@ -11,6 +11,7 @@ import { composeFixtures } from "../src/design/mock/fixtures";
 import { scenarioByName } from "../src/design/mock/scenarios";
 import { connectOutcome } from "../src/screens/apps/ConnectDialog";
 import { stateWords } from "../src/screens/apps/model";
+import { ownClientBody } from "../src/screens/apps/OwnClient";
 
 const view = (state: AppView["state"]): AppView => ({ name: "gmail", title: "Gmail", kind: "sign_in", state, problem: null, catalog: null, icon: null, actions: [], settings: [], limits: { timeout: null, connect_timeout: null, result_chars: null, pinned: [], default_timeout: 300, default_connect_timeout: 60, default_result_chars: 24000 } });
 
@@ -42,6 +43,20 @@ describe("an app that needs a client ID of the person's own", () => {
     expect(again.apps[0].sign_in_client).toMatchObject({ client_id: "123.apps.googleusercontent.com", has_secret: true });
     expect(JSON.stringify(again)).not.toContain(secret);
     expect(JSON.stringify(await d.handle("GET", "/apps", q, null))).not.toContain(secret);
+    // an empty secret field keeps the stored secret; only forget_secret takes it away
+    const kept = (await d.handle("PUT", "/apps/gmail/sign-in-client", q, { client_id: "456.apps.googleusercontent.com" })) as AppConnectResult;
+    expect(kept.apps[0].sign_in_client).toMatchObject({ client_id: "456.apps.googleusercontent.com", has_secret: true });
+    const forgot = (await d.handle("PUT", "/apps/gmail/sign-in-client", q, { client_id: "456.apps.googleusercontent.com", forget_secret: true })) as AppConnectResult;
+    expect(forgot.apps[0].sign_in_client?.has_secret).toBe(false);
+  });
+});
+
+describe("the client fields' body", () => {
+  it("keeps the stored secret unless the switch says to remove it", () => {
+    expect(ownClientBody({ client_id: " abc ", client_secret: "", forget_secret: false })).toEqual({ client_id: "abc", client_secret: null });
+    expect(ownClientBody({ client_id: "abc", client_secret: " new ", forget_secret: false })).toEqual({ client_id: "abc", client_secret: "new" });
+    // the switch wins over a typed secret: one or the other, never both
+    expect(ownClientBody({ client_id: "abc", client_secret: "typed", forget_secret: true })).toEqual({ client_id: "abc", client_secret: null, forget_secret: true });
   });
 });
 

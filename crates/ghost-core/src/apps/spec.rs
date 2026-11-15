@@ -39,7 +39,7 @@ const TRANSPORTS: [&str; 5] = [
     "streamable_http",
     "streamableHttp",
 ];
-const APP_KEYS: [&str; 15] = [
+const APP_KEYS: [&str; 16] = [
     "type",
     "command",
     "args",
@@ -55,6 +55,7 @@ const APP_KEYS: [&str; 15] = [
     "pinned",
     "client_id",
     "client_secret",
+    "client_issuer",
 ];
 /// A literal that is probably a token: a known prefix, or a bearer value with no reference.
 static SECRET_SHAPES: LazyLock<Regex> = LazyLock::new(|| {
@@ -205,6 +206,9 @@ pub struct AppSpec {
     /// That client's secret, as `${NAME}`: a password in Ghost's vault (ADR 0036), never
     /// the value.
     pub client_secret: Option<String>,
+    /// The authorization server the app named when the person gave the client (ADR 0076):
+    /// the client and its secret go to that server and no other.
+    pub client_issuer: Option<String>,
 }
 
 impl AppSpec {
@@ -275,6 +279,7 @@ impl Default for AppSpec {
             pinned: Vec::new(),
             client_id: None,
             client_secret: None,
+            client_issuer: None,
         }
     }
 }
@@ -602,6 +607,7 @@ fn parse_entry(
         }
         None => None,
     };
+    let client_issuer = text_of("client_issuer").filter(|_| client_id.is_some());
     Ok(AppSpec {
         name: name.to_string(),
         title: text_of("title").unwrap_or_default(),
@@ -618,6 +624,7 @@ fn parse_entry(
         pinned,
         client_id,
         client_secret,
+        client_issuer,
     })
 }
 
@@ -681,6 +688,12 @@ fn render_entry(spec: &AppSpec) -> Ordered {
                     entry.insert(
                         "client_secret".into(),
                         Ordered::Other(Value::String(secret.clone())),
+                    );
+                }
+                if let Some(issuer) = &spec.client_issuer {
+                    entry.insert(
+                        "client_issuer".into(),
+                        Ordered::Other(Value::String(issuer.clone())),
                     );
                 }
             }

@@ -44,18 +44,24 @@ Signing in, Ghost has to be an app the service knows (ADR 0076). Most services l
 introduce itself; GitHub, Google (Gmail, Calendar, Drive) and Slack let in only apps
 registered with them beforehand. Ghost tries, in order:
 
-1. **Your own client ID** for that app, if you gave one;
-2. **Ghost's own** for that service, once Ghost's maker has registered one;
-3. **Ghost's public description of itself** (`https://heyghost.app/oauth/client.json`),
-   for a service that reads one;
-4. **introducing itself** (registering), for a service that allows it.
+1. **Your own client ID** for that app, if you gave one, and only at the service the app
+   named when you gave it: if the app later names another, Ghost says so and sends nothing
+   there until you give it again;
+2. **Ghost's own** for that service, once Ghost's maker has registered one, and only for
+   that service's own apps (GitHub's at `api.githubcopilot.com`, Google's three, Slack's), so
+   an app elsewhere can't borrow it;
+3. **introducing itself** (registering), for a service that allows it;
+4. **Ghost's public description of itself** (`https://heyghost.app/oauth/client.json`),
+   for a service that reads one and doesn't take registration, when Ghost signs in on its
+   usual port.
 
 When none works, the app says so instead of failing with a code: "GitHub only lets in apps
 registered with it, and Ghost isn't yet. Register one of your own with GitHub, then give
 Ghost its client ID and secret on GitHub's page and sign in again." Its page has a button to
 the service's own page for making one, and two fields: the client ID, and the client secret
 where the service wants one. The secret is a password: it goes into Ghost's vault and is
-never shown again. Connecting, the same two fields are under **I have my own client ID**.
+never shown again. Leaving the secret empty when you change the client ID keeps the one
+stored; **Remove the stored secret** takes it away. Connecting, the same two fields are under **I have my own client ID**.
 Neither is a field anyone else sees, and no agent, run, outside tool or the phone can set
 them.
 
