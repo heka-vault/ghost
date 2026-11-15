@@ -788,6 +788,31 @@ async fn no_tool_changes_a_permission() {
 }
 
 #[tokio::test]
+async fn no_tool_makes_a_yes_or_a_no_stick() {
+    // ADR 0070: "don't ask again" and "never do this" are the operator's click on the
+    // desktop's card. No agent, and no outside client (served a part of these same tools,
+    // ADR 0048), sets one, takes one back, or answers a waiting change in a way that writes
+    // a rule: an app's text telling a model to "always allow" would otherwise be a standing
+    // grant.
+    let w = world().await;
+    for t in w.server.tools() {
+        let n = t.name.to_lowercase();
+        for word in ["always", "sticky", "choice", "allow", "block", "grant"] {
+            assert!(!n.contains(word), "{n}");
+        }
+        let about = t.description.as_deref().unwrap_or_default().to_lowercase();
+        for words in [
+            "don't ask again",
+            "don’t ask again",
+            "policy.toml",
+            "always allow",
+        ] {
+            assert!(!about.contains(words), "{n}: {about}");
+        }
+    }
+}
+
+#[tokio::test]
 async fn no_tool_reads_or_writes_the_other_tools_on_this_computer() {
     // ADR 0068: what Claude Code, Cursor and Codex keep is read, imported and written by
     // the operator's own click or `ghostd setup`, never by an agent: no tool for it, and

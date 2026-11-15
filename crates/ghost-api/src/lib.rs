@@ -26,6 +26,7 @@ pub mod models;
 pub mod openapi;
 pub mod other_tools;
 pub mod passwords;
+pub mod permission_choices;
 pub mod questions;
 pub mod reach;
 pub mod realtime;

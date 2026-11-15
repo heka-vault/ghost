@@ -1,5 +1,8 @@
+import type { AlwaysChoice, AlwaysOffer } from "@ghost/client-ts";
+import { ChevronDown } from "lucide-react";
 import { type RefObject, useEffect, useId, useRef, useState } from "react";
 
+import { ALWAYS_TOGGLE, alwaysWords } from "./always";
 import { Button } from "./Button";
 import { cx } from "./cx";
 
@@ -27,6 +30,16 @@ export interface PendingChangeProps {
    * clamped to two lines, then Confirm and Cancel side by side as 56px full-width buttons.
    */
   touch?: boolean;
+  /**
+   * What the daemon offers to make the decision stick (`change.always`, ADR 0070): "Yes, and
+   * don’t ask again" and "No, and never" for this change's own tool, behind "More choices" so
+   * neither is ever the default or reached by Enter alone. Shown only with `onAlways`.
+   */
+  always?: AlwaysOffer | null;
+  /** Must call `client.decideAlways(id, choice)` and nothing else: the click is the operator's own. */
+  onAlways?: (choice: AlwaysChoice) => void;
+  /** Start with the choices shown. Gallery specimens and screenshots only. */
+  alwaysOpen?: boolean;
   /** Pin the clock to this epoch-ms time. Gallery specimens and screenshots only; omit in the app. */
   now?: number;
   className?: string;
@@ -59,7 +72,7 @@ const clock = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2,
  * its Confirm is on screen, its summary is fully on screen too (not under the compact page
  * bar, the dock or the panel edge), and logs a console error if not.
  */
-export function PendingChange({ summary, rationale, operation, expiresAt, onConfirm, onCancel, busy = false, disabled = false, compact, touch, now, className }: PendingChangeProps) {
+export function PendingChange({ summary, rationale, operation, expiresAt, onConfirm, onCancel, busy = false, disabled = false, compact, touch, always, onAlways, alwaysOpen = false, now, className }: PendingChangeProps) {
   const left = useSecondsLeft(expiresAt, now);
   const expired = left === 0;
   const urgent = left != null && left > 0 && left <= 10;
@@ -67,6 +80,11 @@ export function PendingChange({ summary, rationale, operation, expiresAt, onConf
   const root = useRef<HTMLElement>(null);
   const summaryRef = useRef<HTMLParagraphElement>(null);
   const confirmRef = useRef<HTMLButtonElement>(null);
+  const [more, setMore] = useState(alwaysOpen);
+  const moreId = useId();
+  // The sticky choice is the desktop's main cards' only: never the phone's touch card.
+  const sticky = always && onAlways && !touch ? alwaysWords(always) : null;
+  const off = expired || disabled || !!busy;
 
   // One spoken announcement at 10 seconds and one at expiry; the ticking number stays silent.
   const [said, setSaid] = useState("");
@@ -113,7 +131,27 @@ export function PendingChange({ summary, rationale, operation, expiresAt, onConf
         <Button variant="ghost" size={compact ? "sm" : touch ? "lg" : "md"} fullWidth={touch} disabled={expired || disabled || (!!busy && busy !== "cancel")} loading={busy === "cancel"} onClick={onCancel}>
           Cancel
         </Button>
+        {sticky && (
+          <button type="button" className="g-pending__toggle" aria-expanded={more} aria-controls={moreId} disabled={expired || disabled} onClick={() => setMore((m) => !m)}>
+            {ALWAYS_TOGGLE}
+            <ChevronDown size={14} aria-hidden className={cx("g-pending__chevron", more && "is-open")} />
+          </button>
+        )}
       </div>
+      {sticky && more && (
+        <div id={moreId} className="g-pending__always" role="group" aria-label="Make this choice stick">
+          {sticky.yes ? (
+            <Button variant="secondary" size="sm" disabled={off} onClick={() => onAlways!("allow")}>
+              <span data-user-content>{sticky.yes}</span>
+            </Button>
+          ) : (
+            <p className="g-pending__held">{sticky.held}</p>
+          )}
+          <Button variant="danger-ghost" size="sm" disabled={off} onClick={() => onAlways!("block")}>
+            <span data-user-content>{sticky.no}</span>
+          </Button>
+        </div>
+      )}
       <span className="sr-only" role="status">{said}</span>
     </section>
   );

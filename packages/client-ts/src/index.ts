@@ -27,6 +27,10 @@ export type ListeningView = Schemas["ListeningView"];
 export type Turn = Schemas["Turn"];
 export type PendingProposal = Schemas["PendingProposal"];
 export type OutcomeView = Schemas["OutcomeView"];
+export type AlwaysOffer = Schemas["AlwaysOffer"];
+export type AlwaysChoice = Schemas["AlwaysChoice"];
+export type AlwaysResult = Schemas["AlwaysResult"];
+export type PermissionChoiceView = Schemas["PermissionChoiceView"];
 export type AuditPage = Schemas["AuditPage"];
 export type AuditEntry = Schemas["AuditEntry"];
 export type SourceInfo = Schemas["SourceInfo"];
@@ -299,6 +303,22 @@ export class GhostClient {
   }
   cancelProposal(id: string) {
     return unwrap(this.api.POST("/proposals/{proposal_id}/cancel", { params: { path: { proposal_id: id } } }));
+  }
+  /**
+   * Decide a waiting change and make it stick (ADR 0070): `allow` is "Yes, and don't ask again"
+   * (the change runs, and its tool runs without asking from now on), `block` is "No, and never".
+   * The rule is the change's own tool, chosen by the daemon; the click is the operator's own.
+   */
+  decideAlways(id: string, choice: AlwaysChoice) {
+    return unwrap(this.api.POST("/proposals/{proposal_id}/always", { params: { path: { proposal_id: id } }, body: { choice } }));
+  }
+  /** The rules set from a decision, newest first (Settings › Permissions). */
+  permissionChoices() {
+    return unwrap(this.api.GET("/permissions/choices"));
+  }
+  /** Take a rule set from a decision back out of policy.toml. */
+  removePermissionChoice(id: number) {
+    return unwrap(this.api.DELETE("/permissions/choices/{choice_id}", { params: { path: { choice_id: id } } }));
   }
 
   // --- the waiting list (ADR 0029) ------------------------------------------------

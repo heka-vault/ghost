@@ -354,6 +354,11 @@ impl WriteGate {
         Ok(op)
     }
 
+    /// The arguments a rule's patterns match for this proposal, as the gate resolves it.
+    pub fn args_of(p: &Proposal) -> Map<String, Value> {
+        Self::call_args(&p.target, &p.changes)
+    }
+
     fn call_args(target: &Target, changes: &ChangeSet) -> Map<String, Value> {
         let mut args = target.rule_args();
         args.extend(changes.rule_args());
