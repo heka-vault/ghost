@@ -103,7 +103,7 @@ export default function waiting(s: Scenario): WaitingItemView[] {
       },
     });
     items.push({
-      key: "app:linear",
+      key: "app:linear:sign-in",
       source: "ghost",
       title: "Linear needs you to sign in again",
       state: "new",

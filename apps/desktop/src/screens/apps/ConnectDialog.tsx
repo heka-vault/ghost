@@ -3,6 +3,8 @@
  * way to connect when the entry offers several, fill its settings (a secret is a password
  * field, sent once and never shown again), and, under Advanced, the name rules use. An app
  * that signs in opens the browser; the dialog then waits for the operator to finish there.
+ * One whose sign-in lets in only registered apps asks for the person's own client ID (ADR
+ * 0076), and "I have my own client ID" gives one up front.
  */
 import { ApiError, type AppView, type CatalogEntryView } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
@@ -16,6 +18,7 @@ import { AboutApp } from "./AboutApp";
 import { AppIcon } from "./AppIcon";
 import { count, optionHelp, sentence } from "./model";
 import { abilityOf } from "./plain";
+import { OwnClientFields, useOwnClient } from "./OwnClient";
 import { expectSignIn, openSignIn } from "./signin";
 
 /**
@@ -23,9 +26,10 @@ import { expectSignIn, openSignIn } from "./signin";
  * didn't answer: the first app that failed (with its problem), else whether one is still
  * connecting.
  */
-export function connectOutcome(apps: AppView[]): { failed: AppView | null; connecting: boolean } {
+export function connectOutcome(apps: AppView[]): { failed: AppView | null; connecting: boolean; needsClient: AppView | null } {
   const failed = apps.find((a) => a.state === "failed" || a.state === "stopped") ?? null;
-  return { failed, connecting: !failed && apps.some((a) => a.state === "connecting") };
+  const needsClient = apps.find((a) => a.state === "needs_client") ?? null;
+  return { failed, connecting: !failed && !needsClient && apps.some((a) => a.state === "connecting"), needsClient };
 }
 
 /** The dialog's notice text for an app that was saved and then didn't connect. */
@@ -50,7 +54,11 @@ export function ConnectDialog({ entry: e, onClose, onConnected, onOpen }: { entr
   /** Connected, or waiting for it to be: the last pane of the flow. */
   const [done, setDone] = useState<{ name: string; app: AppView | null } | null>(null);
   /** After a connect that signs in: the page Ghost opened, and whether it could open it. */
-  const [signIn, setSignIn] = useState<{ url: string; opened: boolean; name: string } | null>(null);
+  const [signIn, setSignIn] = useState<{ url: string; opened: boolean; name: string; code?: string | null } | null>(null);
+  /** Its sign-in lets in only registered apps: the person's own client ID is asked for. */
+  const [needsClient, setNeedsClient] = useState<AppView | null>(null);
+  const own = useOwnClient();
+  const [ownMissing, setOwnMissing] = useState(false);
 
   const value = (key: string) => values[`${option?.id}:${key}`] ?? "";
   const set = (key: string, v: string) => {
@@ -71,15 +79,19 @@ export function ConnectDialog({ entry: e, onClose, onConnected, onOpen }: { entr
     expectSignIn(appName);
     try {
       const vals = Object.fromEntries(option.settings.map((s) => [s.key, value(s.key).trim()]).filter(([, v]) => v));
-      const r = await client.connectApp({ catalog: e.name, option: option.id, name: appName, values: vals, replace: replace || saved || undefined });
+      const mine = option.kind === "sign_in" ? own.body() : { client_id: null, client_secret: null };
+      const r = await client.connectApp({ catalog: e.name, option: option.id, name: appName, values: vals, replace: replace || saved || undefined, ...mine });
       onConnected();
-      const { failed, connecting } = connectOutcome(r.apps);
-      if (failed) {
+      const { failed, connecting, needsClient: needs } = connectOutcome(r.apps);
+      if (needs) {
+        setSaved(true);
+        setNeedsClient(needs);
+      } else if (failed) {
         setSaved(true);
         setError({ title: `Ghost couldn’t connect to ${e.title}`, text: failedText(failed), taken: false, failed: true });
       } else if (r.sign_in_url) {
         const opened = await openSignIn(r.sign_in_url, { again: true, mock });
-        setSignIn({ url: r.sign_in_url, opened, name: r.apps[0]?.title ?? e.title });
+        setSignIn({ url: r.sign_in_url, opened, name: r.apps[0]?.title ?? e.title, code: r.sign_in_code });
         setDone({ name: appName, app: null });
       } else if (connecting) {
         // Still reaching it: the dialog waits with it and shows the tools once it answers.
@@ -90,6 +102,40 @@ export function ConnectDialog({ entry: e, onClose, onConnected, onOpen }: { entr
     } catch (err) {
       const taken = err instanceof ApiError && err.status === 409;
       setError({ title: taken ? "Already connected under that name" : `Couldn’t connect ${e.title}`, text: sentence(errorText(err)), taken });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** The needs-a-client pane's Sign in: PUT /apps/{name}/sign-in-client, then as a connect. */
+  const giveClient = async () => {
+    if (!needsClient || busy || !online) return;
+    const body = own.body();
+    if (!body.client_id) {
+      setOwnMissing(true);
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    expectSignIn(needsClient.name);
+    try {
+      const r = await client.setSignInClient(needsClient.name, body);
+      onConnected();
+      const app = r.apps[0] ?? null;
+      if (r.sign_in_url) {
+        const opened = await openSignIn(r.sign_in_url, { again: true, mock });
+        setSignIn({ url: r.sign_in_url, opened, name: app?.title ?? e.title, code: r.sign_in_code });
+        setNeedsClient(null);
+        setDone({ name: needsClient.name, app: null });
+      } else if (app?.state === "needs_client" || app?.state === "failed") {
+        setNeedsClient(app);
+        setError({ title: `${app.title} didn’t take it`, text: app.problem ? sentence(app.problem) : "Check the client ID and try again.", taken: false });
+      } else {
+        setNeedsClient(null);
+        setDone({ name: needsClient.name, app: app?.state === "connected" ? app : null });
+      }
+    } catch (err) {
+      setError({ title: `Couldn’t give ${e.title} the client ID`, text: sentence(errorText(err)), taken: false });
     } finally {
       setBusy(false);
     }
@@ -118,6 +164,11 @@ export function ConnectDialog({ entry: e, onClose, onConnected, onOpen }: { entr
             setSignIn(null);
             setSaved(true);
             setError({ title: `Ghost couldn’t connect to ${e.title}`, text: failedText(a), taken: false, failed: true });
+          } else if (a.state === "needs_client") {
+            setDone(null);
+            setSignIn(null);
+            setSaved(true);
+            setNeedsClient(a);
           }
         })
         .catch(() => {});
@@ -129,6 +180,46 @@ export function ConnectDialog({ entry: e, onClose, onConnected, onOpen }: { entr
   }, [client, done, e.title, onConnected]);
 
   if (done?.app?.state === "connected") return <Connected app={done.app} onClose={onClose} onOpen={onOpen} />;
+  if (needsClient) {
+    const service = needsClient.sign_in_client?.service ?? needsClient.title;
+    return (
+      <Dialog
+        open
+        onClose={onClose}
+        dismissible={!busy}
+        size="md"
+        title={`${needsClient.title} needs a client ID of your own`}
+        description={<span data-user-content>{needsClient.problem ? sentence(needsClient.problem) : `${service} only lets in apps registered with it.`}</span>}
+        footer={
+          <>
+            <Button variant="ghost" onClick={onClose} disabled={busy}>
+              Later
+            </Button>
+            <Button variant="primary" loading={busy} disabled={!online} onClick={() => void giveClient()}>
+              Sign in with it
+            </Button>
+          </>
+        }
+      >
+        <OwnClientFields
+          client={needsClient.sign_in_client}
+          said
+          value={own.value}
+          missing={ownMissing}
+          onChange={(v) => {
+            own.setValue(v);
+            setOwnMissing(false);
+          }}
+        />
+        <p className="t-small t-3">{needsClient.title} is saved under Apps; you can give it a client ID there later too.</p>
+        {error && (
+          <Notice tone="danger" title={error.title} className="apps-form__notice">
+            {error.text}
+          </Notice>
+        )}
+      </Dialog>
+    );
+  }
   if (done && !signIn) {
     return (
       <Dialog open onClose={onClose} size="md" title={`Connecting to ${e.title}…`} description="Ghost is reaching it. Its tools show here once it answers; you can close this and it carries on." footer={<Button variant="secondary" onClick={onClose}>Close</Button>}>
@@ -157,6 +248,7 @@ export function ConnectDialog({ entry: e, onClose, onConnected, onOpen }: { entr
           </>
         }
       >
+        {signIn.code && <SignInCode code={signIn.code} />}
         <p className="apps-signin-url t-mono t-small t-3">{new URL(signIn.url).host}</p>
         <p className="apps-wait" aria-live="polite">
           <Spinner size={14} label="" /> <span className="t-2">Waiting for you to sign in. This moves on by itself.</span>
@@ -244,6 +336,13 @@ export function ConnectDialog({ entry: e, onClose, onConnected, onOpen }: { entr
 
         {option?.kind === "local" && <p className="t-small t-3">Ghost needs the tool it runs (npx, uvx or docker) installed on this computer.</p>}
 
+        {option?.kind === "sign_in" && (
+          <Disclosure summary="I have my own client ID">
+            <p className="t-small t-2">Only if {e.title} asked you to register an app with it. Ghost signs in as that one instead of itself.</p>
+            <OwnClientFields client={null} value={own.value} onChange={own.setValue} />
+          </Disclosure>
+        )}
+
         {/* Who made it, where it runs and its code: the registry's own words, after the choice (the flow review, 2026-11-14). */}
         <Disclosure summary="Who made this app">
           <AboutApp entry={e} onOpen={onOpen} />
@@ -275,6 +374,18 @@ export function ConnectDialog({ entry: e, onClose, onConnected, onOpen }: { entr
         <button type="submit" hidden aria-hidden tabIndex={-1} />
       </form>
     </Dialog>
+  );
+}
+
+/** A device sign-in's code: typed on the service's own page, which Ghost opened. */
+export function SignInCode({ code }: { code: string }) {
+  return (
+    <div className="apps-signin-code">
+      <p className="t-small t-2">Type this code on the page Ghost opened:</p>
+      <p className="apps-signin-code__code t-mono" aria-live="polite">
+        {code}
+      </p>
+    </div>
   );
 }
 

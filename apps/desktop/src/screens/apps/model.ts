@@ -55,6 +55,8 @@ export function stateWords(a: AppView): { label: string; tone: Tone } {
       return { label: "Connecting…", tone: "info" };
     case "needs_sign_in":
       return { label: "Needs you to sign in again", tone: "danger" };
+    case "needs_client":
+      return { label: "Needs a client ID of yours", tone: "danger" };
     default:
       return { label: "Not connected", tone: "danger" };
   }

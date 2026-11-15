@@ -15,9 +15,11 @@ import { ChevronLeft, ExternalLink, Megaphone, MoreHorizontal, RotateCw, SearchX
 import { useCallback, useEffect, useState } from "react";
 
 import { Link, hrefFor, navigate } from "../../app/router";
-import { Badge, Button, Card, EmptyState, Field, IconButton, LineGlyph, Menu, Notice, Page, SegmentedControl, Section, Skeleton, SkeletonText, Switch, agentName, errorText, quoted, relativeTime, useLive, useToast } from "../../ui";
+import { Badge, Button, Card, Disclosure, EmptyState, Field, IconButton, LineGlyph, Menu, Notice, Page, SegmentedControl, Section, Skeleton, SkeletonText, Switch, agentName, errorText, quoted, relativeTime, useLive, useToast } from "../../ui";
 import { formatBytes } from "../watching/model";
 import { useAppActions } from "./actions";
+import { SignInCode } from "./ConnectDialog";
+import { OwnClientFields, useOwnClient } from "./OwnClient";
 import { useAppLimits } from "./AppLimits";
 import { abilityOf, callsOf, latelyWords, limitsWords, twinsOf } from "./plain";
 import { AppIcon } from "./AppIcon";
@@ -186,6 +188,7 @@ export function AppDetail({ name }: { name: string }) {
       ) : (
         <>
           <StateNotice app={app} onReopen={() => void actions.reopen(app)} />
+          {app.kind === "sign_in" && app.sign_in_client && <OwnClientPanel app={app} busy={busy} online={online} onGive={(body) => actions.giveClient(app, body)} />}
           {twins.length > 0 && (
             <Notice tone="info" title={`One of ${twins.length + 1} ${app.title.replace(/\s*\(.*\)$/, "")} connections`} className="apps-notice">
               The others: {twins.map((t, i) => (
@@ -337,18 +340,74 @@ export function AppDetail({ name }: { name: string }) {
   );
 }
 
+/**
+ * The person's own client (ADR 0076): asked for when the sign-in was refused for lack of one,
+ * otherwise under "I have my own client ID", never a field everybody sees.
+ */
+function OwnClientPanel({ app: a, busy, online, onGive }: { app: AppView; busy: boolean; online: boolean; onGive: (body: { client_id: string | null; client_secret: string | null }) => Promise<boolean> }) {
+  const c = a.sign_in_client!;
+  const own = useOwnClient(null);
+  const [missing, setMissing] = useState(false);
+  const give = async () => {
+    const body = own.body();
+    if (!body.client_id) {
+      setMissing(true);
+      return;
+    }
+    if (await onGive(body)) own.setValue({ client_id: "", client_secret: "" });
+  };
+  const form = (
+    <>
+      <OwnClientFields
+        client={c}
+        said={a.state === "needs_client"}
+        value={own.value}
+        missing={missing}
+        onChange={(v) => {
+          own.setValue(v);
+          setMissing(false);
+        }}
+      />
+      <div className="apps-own-client__actions">
+        <Button variant={a.state === "needs_client" ? "primary" : "secondary"} loading={busy} disabled={!online} onClick={() => void give()}>
+          Sign in with it
+        </Button>
+        {c.client_id && (
+          <Button variant="ghost" disabled={!online || busy} onClick={() => void onGive({ client_id: null, client_secret: null })}>
+            Stop using my client ID
+          </Button>
+        )}
+      </div>
+    </>
+  );
+  if (a.state === "needs_client")
+    return (
+      <Notice tone="danger" title={`${a.title} needs a client ID of yours`} className="apps-notice">
+        <span data-user-content>{a.problem ? sentence(a.problem) : `${c.service ?? a.title} only lets in apps registered with it.`}</span>
+        {form}
+      </Notice>
+    );
+  return (
+    <Disclosure className="apps-notice" summary={c.client_id ? "Your own client ID" : "I have my own client ID"}>
+      <p className="t-small t-2">{c.client_id ? `Ghost signs in to ${a.title} as your client.` : `Only if ${a.title} asked you to register an app with it. Ghost signs in as that one instead of itself.`}</p>
+      {form}
+    </Disclosure>
+  );
+}
+
 /** What's in the way: a sign-in waiting in the browser, one to do again, or why it isn't connected. Never amber: amber is a waiting okay. */
 function StateNotice({ app: a, onReopen }: { app: AppView; onReopen: () => void }) {
   if (a.sign_in_url)
     return (
       <Notice tone="info" title="Finish signing in in your browser" className="apps-notice" action={<Button size="sm" variant="secondary" leadingIcon={<ExternalLink />} onClick={onReopen}>Open it again</Button>}>
-        {a.title} connects once you’ve signed in there.
+        {a.sign_in_code ? <SignInCode code={a.sign_in_code} /> : `${a.title} connects once you’ve signed in there.`}
       </Notice>
     );
+  if (a.state === "needs_client") return null; // OwnClientPanel says it, with the fields
   if (a.state === "needs_sign_in")
     return (
       <Notice tone="danger" title={`${a.title} needs you to sign in again`} className="apps-notice">
-        <span data-user-content>{a.problem ? `${sentence(a.problem)} ` : ""}</span>
+        {/* The sign-in can't be refreshed any more: the title says so; no error's kind beside it. */}
         Until you do, Ghost can’t use it and says so if asked. Signing in again keeps its tools, your permissions and its limits as they are.
       </Notice>
     );

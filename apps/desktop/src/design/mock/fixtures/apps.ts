@@ -169,6 +169,45 @@ function sentryConnecting(): AppFixture {
   };
 }
 
+/** Gmail connected, its sign-in refused until the person gives a client ID of their own (ADR 0076). */
+export function gmailNeedsClient(): AppFixture {
+  return {
+    view: {
+      name: "gmail",
+      title: "Gmail",
+      kind: "sign_in",
+      state: "needs_client",
+      problem: needsClientSentence("Gmail", GOOGLE_CLIENT),
+      catalog: "ghost/gmail",
+      icon: null,
+      sign_in_url: null,
+      sign_in_client: GOOGLE_CLIENT,
+      settings: [],
+    },
+    tools: GENERIC_TOOLS,
+  };
+}
+
+/** GitHub signing in with a code typed on github.com (the device flow, ADR 0076). */
+export function githubDeviceSignIn(): AppFixture {
+  return {
+    view: {
+      name: "github",
+      title: "GitHub",
+      kind: "sign_in",
+      state: "connecting",
+      problem: null,
+      catalog: "io.github.github/github-mcp-server",
+      icon: ICONS.github,
+      sign_in_url: "https://github.com/login/device",
+      sign_in_code: "WDJB-MJHT",
+      sign_in_client: { client_id: null, has_secret: false, service: "GitHub", make_a_client: "https://github.com/settings/applications/new", secret: "required" },
+      settings: [],
+    },
+    tools: GITHUB_TOOLS,
+  };
+}
+
 export default function apps(s: Scenario): AppFixture[] {
   // No apps.json yet (the empty and first-run scenarios): nothing connected.
   if (s.data === "empty") return [];
@@ -215,9 +254,13 @@ const onGitHub = (name: string): Publisher => ({ name, verified: "github" });
 const domain = (name: string): Publisher => ({ name, verified: "domain" });
 const own = (product: string, ...evidence: Maker["evidence"]): Pick<CatalogEntryView, "maker" | "product"> => ({ maker: { product, evidence }, product });
 
-export interface CatalogSeed extends Omit<CatalogEntryView, "connected" | "suggested_name" | "version" | "website" | "repository" | "others"> {
+export interface CatalogSeed extends Omit<CatalogEntryView, "connected" | "suggested_name" | "version" | "website" | "repository" | "others" | "listed_by_ghost"> {
   /** The short name Ghost suggests (the registry entry's app_name). */
   app: string;
+  /** From Ghost's own list of first-party apps the registry lacks (ADR 0076). */
+  listed_by_ghost?: boolean;
+  /** Its sign-in lets in only registered apps, and Ghost has none there (ADR 0076). */
+  needs_client?: NonNullable<AppView["sign_in_client"]>;
   version?: string;
   website?: string | null;
   repository?: string | null;
@@ -228,6 +271,19 @@ export interface CatalogSeed extends Omit<CatalogEntryView, "connected" | "sugge
  * the product maker's own, where it runs. Search "posthog" for the six results the operator saw
  * on 2026-10-28: PostHog's own first, four more folded under it, and one other product.
  */
+/** How Google's and Slack's sign-ins take a person's own client (ADR 0076). */
+export const GOOGLE_CLIENT: NonNullable<AppView["sign_in_client"]> = {
+  client_id: null,
+  has_secret: false,
+  service: "Google",
+  make_a_client: "https://console.cloud.google.com/auth/clients",
+  secret: "required",
+};
+const SLACK_CLIENT: NonNullable<AppView["sign_in_client"]> = { ...GOOGLE_CLIENT, service: "Slack", make_a_client: "https://api.slack.com/apps", secret: "optional" };
+/** The sentence the daemon says when a sign-in needs the person's own client (`signin_clients::needs_a_client`). */
+export const needsClientSentence = (app: string, c: NonNullable<AppView["sign_in_client"]>) =>
+  `${c.service} only lets in apps registered with it, and Ghost isn't yet. Register one of your own with ${c.service}, then give Ghost ${c.secret === "required" ? "its client ID and secret" : "its client ID"} on ${app}'s page and sign in again.`;
+
 export const CATALOG: CatalogSeed[] = [
   {
     name: "io.github.github/github-mcp-server",
@@ -504,6 +560,33 @@ export const CATALOG: CatalogSeed[] = [
     product_maker: "io.github.github/github-mcp-server",
     options: [pkg("pypi", "mcparmory-github")],
   },
+  // Ghost's own list (ADR 0076): first-party apps the public registry doesn't list.
+  {
+    name: "ghost/gmail",
+    app: "gmail",
+    title: "Gmail",
+    description: "Search, read and draft email in your Gmail. Google's own app, in Google's Workspace Developer Preview.",
+    icon: null,
+    featured: true,
+    listed_by_ghost: true,
+    website: "https://developers.google.com/workspace/gmail/api/guides/configure-mcp-server",
+    ...own("Gmail", "listed", "remote"),
+    needs_client: GOOGLE_CLIENT,
+    options: [signIn("gmailmcp.googleapis.com")],
+  },
+  {
+    name: "ghost/slack",
+    app: "slack",
+    title: "Slack",
+    description: "Search and read your Slack, and send messages as you. Slack's own app.",
+    icon: null,
+    featured: true,
+    listed_by_ghost: true,
+    website: "https://docs.slack.dev/ai/slack-mcp-server/",
+    ...own("Slack", "listed", "remote"),
+    needs_client: SLACK_CLIENT,
+    options: [signIn("mcp.slack.com")],
+  }
 ];
 
 /** Ghost's defaults for an app's own limits (ADR 0046), as GET /apps/{name} reports them. */
