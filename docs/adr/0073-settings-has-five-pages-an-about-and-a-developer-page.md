@@ -20,8 +20,9 @@ share back the results".
 ## Decision
 
 **Five pages for everyone: General, Model, Sound, Permissions, About.** General is how Ghost
-starts and shows itself (Set up Ghost, Start at login, where Ghost appears, how Ghost reaches
-you, connections, error reports, Remove Ghost from this computer); Model and Permissions are as
+starts and shows itself, in about ten controls since the flow review (amended below): Start at
+login, where Ghost appears, how Ghost reaches you, your phone, the error-reports switch, and one
+row that opens Remove Ghost from this computer; Model and Permissions are as
 they were (Permissions leads with "What you've decided", ADR 0070); Sound is as it was; About is
 new. Each old page's address redirects to its new home (`REDIRECTS` in `app/routes.tsx`), and
 `screens/settings/moved.ts` lists every control there was and where it is now, held by a test.
@@ -103,6 +104,33 @@ the daemon reads.
 No tool of Ghost's own app, run, outside client, phone route, app or model reaches the
 switches, debug mode or a report: the routes are the control API's (ADR 0013), and tests on the
 phone's routes, the outside listener's tools and Ghost's own tools hold it.
+
+## Amended 2026-11-14: the flow review
+
+A review of the whole app as a newcomer meets it counted 22 to 26 controls on General against a
+target of about ten, and found variable names, device ids and repo paths on pages everyone
+sees. The owner approved a trim; nothing was removed, only moved (`moved.ts` and its test):
+
+- **Where Ghost appears** is one choice (over your work, in the window); the monitor, the
+  placement, captions and screen sharing are behind **Floating options…** under it
+  (`#/settings/general/floating` opens them).
+- **How Ghost reaches you** keeps its three switches and one link to the rest; its quiet hours are
+  in the person's own clock.
+- **Your phone**: Pair a phone. **Apps** left General: it is the rail's own place.
+- **Error reports**: General keeps the switch; **What was sent** is on About beside the diagnostic
+  report (`#/settings/about/sent`).
+- **Remove Ghost from this computer** is one row that opens its own page,
+  `#/settings/general/remove`, holding the six kinds unchanged in behaviour.
+- **Set up Ghost** left General: Developer › Tests › Replay the first run is the way back for
+  anyone, and General shows **Finish setting up Ghost** only while a first run that was started
+  has a skipped step or wasn't finished.
+- Sound and General name no environment variable, device id or path: a microphone is called by
+  the system's own name (`deviceWords`), Ghost's echo-cancelled input “Your microphone, without
+  Ghost’s voice”, a voice by its name; the speech-to-text model's id and the model folder are
+  behind the voice models' Details. The variables stay on Developer and in the settings file.
+  `test/plain-words.test.ts` reads what the everyday pages render from the mock and fails on a
+  `GHOST_*` name, an `hw:` id, `ghost.mic`, a dotted tool id, a repo path, a hostname or a
+  24-hour time outside the developer page and Details.
 
 ## Consequences
 

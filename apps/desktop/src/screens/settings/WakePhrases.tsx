@@ -34,7 +34,7 @@ export function WakePhrasesField({
   disabled?: boolean;
 }) {
   return (
-    <Field id={id} label="Wake phrases" detail={WAKE_KEY} help={help} error={error}>
+    <Field id={id} label="Wake phrases" help={help} error={error}>
       <ChipsInput kind="phrase" noun="phrase" items={phrases} placeholder="hey ghost" check={check} onEntryError={onEntryError} onChange={onChange} disabled={disabled} />
     </Field>
   );

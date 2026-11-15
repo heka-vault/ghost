@@ -338,3 +338,9 @@ line.meter-trace__line { stroke: var(--text-3); }
 .dev-result pre { margin: 0; max-height: 320px; overflow: auto; padding: var(--space-2); border-radius: var(--radius-sm); background: var(--bg-sunken); font-family: var(--font-mono); font-size: var(--text-xs); line-height: var(--leading-xs); color: var(--text-2); }
 .dev-result__head { margin: 0; font-size: var(--text-sm); color: var(--text-2); }
 .set-row-actions { display: inline-flex; align-items: center; gap: var(--space-1); flex-wrap: wrap; justify-content: flex-end; }
+/* A row's Details: the ids under what the row says in words (the flow review, 2026-11-14). */
+.set-details-line { margin: 0 0 var(--space-2); font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-2); }
+/* General's “Floating options…”: a row of the card, its choices inside, divided like the card's rows. */
+.float-options { padding: var(--space-3) var(--space-4); }
+.float-options__rows { display: flex; flex-direction: column; margin: var(--space-2) calc(var(--space-4) * -1) calc(var(--space-3) * -1); }
+.float-options__rows > * + * { border-top: 1px solid var(--border-subtle); }

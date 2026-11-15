@@ -289,32 +289,57 @@ export function echoOfferNow(m: { case: string; problem: string | null } | null 
 export const TAKES_ON_WAKE = "Ghost keeps a recording of each time it hears its name, on this computer.";
 
 /** One thing on the wake beat, under its title, while it waits for the name. */
-export type WakeItem = "float" | "mic" | "echo" | "takes" | "other-ways";
+export type WakeItem = "float" | "mic" | "takes";
+
+/** The most the wake beat shows under its title besides Wisp (the flow review, 2026-11-14). */
+export const WAKE_ITEMS_MAX = 3;
 
 /**
  * Everything the wake beat shows under its title while it waits for “Hey Ghost”, in order:
- * each is one line or one control (2026-11-14, the simplification pass: the moment that should
- * be the simplest in the product). The screen renders this list and nothing else in that
+ * each is one line (2026-11-14, the simplification pass, then the flow review: at most three
+ * things besides Wisp and the heading). The screen renders this list and nothing else in that
  * state, and test/onboarding.test.ts holds its length, so a control added here fails a test.
  *
  * - `float`: the floating switch and its one line, where the desktop can float (else the one
  *   sentence saying it answers here).
- * - `mic`: “Listening through …” with Change.
- * - `echo`: one line, only where `echoOfferNow` says so.
+ * - `mic`: “Listening through …” with Change; on open speakers with nothing taking Ghost's
+ *   voice out (`echoOfferNow`), the same line goes on with the echo canceller's offer, so the
+ *   microphone and what it hears stay one thing.
  * - `takes`: only while wake takes are being kept (the trained detector, ADR 0065): the kept
  *   recording begins with the first wake, which happens on this beat, so it is said here and
  *   not only afterwards. Under transcript wake, a fresh install's default, nothing is kept and
  *   nothing is said here; What Ghost keeps and sends says so.
- * - `other-ways`: one quiet disclosure: Type instead, Wake it with a click, other phrases.
+ *
+ * Other ways to start (type instead, wake it with a click, the other phrases) is the footer's,
+ * beside Skip, not a thing under the title.
  */
-export function wakeItems(f: { floatKnown: boolean; mic: boolean; echoNow: boolean; keepingTakes: boolean }): WakeItem[] {
+export function wakeItems(f: { floatKnown: boolean; mic: boolean; keepingTakes: boolean }): WakeItem[] {
   const out: WakeItem[] = [];
   if (f.floatKnown) out.push("float");
   if (f.mic) out.push("mic");
-  if (f.echoNow) out.push("echo");
   if (f.keepingTakes) out.push("takes");
-  out.push("other-ways");
   return out;
+}
+
+/**
+ * The first run's one count (the flow review, 2026-11-14: it read “1 of 3”, then “2 of 3” with
+ * step 3 open, then “2 of 6 done” beside a list of nine). One denominator, the six numbered
+ * tasks on the rail; the bar under it is the same fraction.
+ */
+export function countLine(p: Pick<Progress, "done" | "total" | "met">): string {
+  if (p.done === p.total) return "All done";
+  return p.met ? `You’ve met Ghost · ${p.done} of ${p.total} done` : `${p.done} of ${p.total} done`;
+}
+
+/**
+ * What Ghost keeps and sends, its first sentence: it says how many switches are on the page,
+ * so it never says “two” over one (the trained detector off leaves only error reports).
+ */
+export function keepsLead(f: { takesSwitch: boolean; reportsSwitch: boolean }): string {
+  const n = Number(f.takesSwitch) + Number(f.reportsSwitch);
+  if (n === 2) return "Two things are on unless you turn them off. Both are in Settings later.";
+  if (n === 1) return f.reportsSwitch ? "Error reports are on unless you turn them off. Settings › General has the switch later." : "Keeping wake recordings is on unless you turn it off. Settings › Sound has the switch later.";
+  return "Nothing here needs a choice: this is what Ghost keeps and sends.";
 }
 
 /* ------------------------------------------------------------------ resume (localStorage) */

@@ -3,6 +3,7 @@
  * lives on the page, whether the daemon picks it up live, and how to check it. Pure data and
  * functions; no React.
  */
+import { deviceWords, ECHO_MIC_WORDS } from "./plain";
 import type { DevicesView, ModelConnectionView, SettingsView } from "@ghost/client-ts";
 
 /**
@@ -15,6 +16,7 @@ export type SectionId =
   | "about"
   | "updates"
   | "reports"
+  | "sent"
   | "remove"
   | "secrets"
   | "model"
@@ -45,6 +47,7 @@ export const SECTION_TITLE: Record<SectionId, string> = {
   about: "About Ghost",
   updates: "Updates",
   reports: "Error reports",
+  sent: "Error reports sent",
   remove: "Remove Ghost from this computer",
   secrets: "Passwords",
   model: "Model",
@@ -75,7 +78,7 @@ export const SECTION_TITLE: Record<SectionId, string> = {
  * The pages this screen draws (SETTINGS_SCREEN_PAGES and DEVELOPER_SCREEN_PAGES in
  * app/routes.tsx): `passwords` and `tools` are Developer's sub-pages, `phone` General's.
  */
-export type PageId = "general" | "model" | "sound" | "about" | "developer" | "passwords" | "phone" | "tools" | "live";
+export type PageId = "general" | "model" | "sound" | "about" | "developer" | "passwords" | "phone" | "tools" | "live" | "remove";
 
 /** The settings page each section is on (#/settings/<page>). */
 export const SECTION_PAGE: Record<SectionId, string> = {
@@ -85,7 +88,8 @@ export const SECTION_PAGE: Record<SectionId, string> = {
   reach: "general",
   connections: "general",
   reports: "general",
-  remove: "general",
+  remove: "remove",
+  sent: "about",
   privacy: "general",
   about: "about",
   updates: "about",
@@ -253,7 +257,7 @@ export function fuzzyWords(t: number): string {
 
 export const JEV_OPTIONS = [
   { value: "auto", label: "Automatic" },
-  { value: "on", label: "Always Jev" },
+  { value: "on", label: "Always a model" },
   { value: "off", label: "Word list only" },
 ] as const;
 
@@ -267,17 +271,17 @@ export interface Draft {
 
 const isSet = (s: SettingsView | null, name: string) => !!s?.secrets.find((x) => x.name === name)?.set;
 
-export const JEV_NEEDS_KEY = "Jev needs a TypeSafe or OpenRouter password. Add one under Passwords, or choose Automatic.";
+export const JEV_NEEDS_KEY = "Hearing your yes with a model needs a TypeSafe or OpenRouter password. Add one under Passwords, or choose Automatic.";
 
 /** Which Jev path is live (or would be after a restart) for these values and secrets. */
 export function jevNow(mode: string, s: SettingsView | null, draftSecrets: Record<string, string>): { label: string; ok: boolean } {
   const has = (k: string) => isSet(s, k) || !!draftSecrets[k];
   const key = has("TYPESAFE_API_KEY") ? "TypeSafe" : has("OPENROUTER_API_KEY") ? "OpenRouter" : null;
   const m = mode || "auto";
-  if (m === "off") return { label: "The word list hears your yes.", ok: true };
-  if (key) return { label: `Jev hears your yes, through ${key}.`, ok: true };
+  if (m === "off") return { label: "A fixed word list hears your yes.", ok: true };
+  if (key) return { label: `A small model hears your yes, through ${key}; a fixed word list stands in when it can’t.`, ok: true };
   if (m === "on") return { label: JEV_NEEDS_KEY, ok: false };
-  return { label: "No Jev password yet, so the word list hears your yes.", ok: true };
+  return { label: "No password for that model yet, so a fixed word list hears your yes.", ok: true };
 }
 
 /** Field errors for the current draft, by key. Empty when it can be saved. */
@@ -370,12 +374,12 @@ export { isSet };
 /** Input devices the operator can pick, plus ghost.mic once echo cancellation exists. */
 export function micOptions(d: DevicesView | null, current: string): { value: string; label: string }[] {
   const opts: { value: string; label: string }[] = [{ value: "", label: "System default" }];
-  if (d?.echo_cancel_source_present) opts.push({ value: "ghost.mic", label: "ghost.mic · cancels Ghost’s own voice" });
+  if (d?.echo_cancel_source_present) opts.push({ value: "ghost.mic", label: ECHO_MIC_WORDS });
   for (const dev of d?.devices ?? []) {
     if (dev.max_input_channels <= 0 || dev.name === "ghost.mic" || dev.name === "default") continue;
-    opts.push({ value: dev.name, label: dev.name });
+    opts.push({ value: dev.name, label: deviceWords(dev.name) });
   }
-  if (current && !opts.some((o) => o.value === current)) opts.push({ value: current, label: `${current} · not found` });
+  if (current && !opts.some((o) => o.value === current)) opts.push({ value: current, label: `${deviceWords(current)} · not found` });
   return opts;
 }
 
@@ -386,16 +390,16 @@ export function micOptions(d: DevicesView | null, current: string): { value: str
  */
 export function wakeMicOptions(d: DevicesView | null, current: string): { value: string; label: string }[] {
   const opts: { value: string; label: string }[] = [{ value: "", label: "Same as the microphone" }];
-  if (d?.echo_cancel_source_present) opts.push({ value: "ghost.mic", label: "ghost.mic · cancels Ghost’s own voice" });
+  if (d?.echo_cancel_source_present) opts.push({ value: "ghost.mic", label: ECHO_MIC_WORDS });
   for (const dev of d?.devices ?? []) {
     if (dev.max_input_channels <= 0 || dev.name === "ghost.mic" || dev.name === "default") continue;
-    if (dev.max_input_channels > 1) opts.push({ value: `${dev.name}#0`, label: `${dev.name} · first channel alone` });
-    opts.push({ value: dev.name, label: dev.name });
+    if (dev.max_input_channels > 1) opts.push({ value: `${dev.name}#0`, label: deviceWords(`${dev.name}#0`) });
+    opts.push({ value: dev.name, label: deviceWords(dev.name) });
   }
   for (const sug of d?.microphone?.suggest ?? []) {
-    if (sug.key === "GHOST_WAKE_INPUT_DEVICE" && !opts.some((o) => o.value === sug.value)) opts.splice(1, 0, { value: sug.value, label: `${sug.value} · suggested` });
+    if (sug.key === "GHOST_WAKE_INPUT_DEVICE" && !opts.some((o) => o.value === sug.value)) opts.splice(1, 0, { value: sug.value, label: `${deviceWords(sug.value)} · suggested` });
   }
-  if (current && !opts.some((o) => o.value === current)) opts.push({ value: current, label: `${current} · not found` });
+  if (current && !opts.some((o) => o.value === current)) opts.push({ value: current, label: `${deviceWords(current)} · not found` });
   return opts;
 }
 
@@ -412,7 +416,7 @@ export const MIC_CASE_LABEL: Record<string, string> = {
 export const installerNotNeeded = (detail: string | null | undefined) => /no host echo canceller is needed/.test(detail ?? "");
 
 /** The microphone Ghost is listening on now, in words. The daemon reports null for the system default. */
-export const micInUse = (d: DevicesView | null) => (d?.input_device ? String(d.input_device) : "System default");
+export const micInUse = (d: DevicesView | null) => deviceWords(d?.input_device ? String(d.input_device) : null);
 
 /** True when the saved microphone isn't the one Ghost opened at its last start. */
 export const micDiffers = (d: DevicesView | null, saved: string | undefined) => !!d && (d.input_device ? String(d.input_device) : "") !== (saved ?? "").trim();

@@ -1,6 +1,6 @@
 /**
- * Owner: settings. Error reports (ADR 0067), in General beside Updates: the switch, what a
- * report carries in one sentence, and the last reports this install sent, exactly as sent.
+ * Owner: settings. Error reports (ADR 0067): on General the switch and what a report carries in
+ * one sentence; on About the last reports this install sent, exactly as sent.
  * On by default in a released build, so the first run says so too (`ErrorReportsLine`). A
  * build from the checkout carries no key and says it sends nothing.
  */
@@ -39,7 +39,6 @@ export function ErrorReportsSection() {
   const { client } = useGhost();
   const toast = useToast();
   const [view, setView] = useReports();
-  const [open, setOpen] = useState(false);
   if (!view) return null;
 
   const toggle = async (send: boolean) => {
@@ -62,7 +61,22 @@ export function ErrorReportsSection() {
         ) : (
           <ListRow title="Error reports" description="This is a development build: it has no key for error reports and sends none." />
         )}
-        {view.kept.length > 0 && (
+      </Card>
+    </Section>
+  );
+}
+
+/**
+ * The reports this computer sent, exactly as sent: on About beside the diagnostic report (the
+ * flow review, 2026-11-14; General keeps the switch). `#/settings/about/sent`.
+ */
+export function SentReportsSection() {
+  const [view] = useReports();
+  const [open, setOpen] = useState(false);
+  if (!view || view.kept.length === 0) return null;
+  return (
+    <Section id={sectionDomId("sent")} title={SECTION_TITLE.sent} className="set-section">
+      <Card list>
           <ListRow
             title="What was sent"
             description={
@@ -88,7 +102,7 @@ export function ErrorReportsSection() {
               </Button>
             }
           />
-        )}
+        
       </Card>
     </Section>
   );
