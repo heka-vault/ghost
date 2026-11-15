@@ -13,7 +13,8 @@ export const PLACES: Record<Place, { path: string; label: string }> = {
   passwords: { path: "/settings/passwords", label: "Open Settings › Passwords" },
   "outside-tools": { path: "/settings/tools", label: "Open Settings › Outside tools" },
   apps: { path: "/apps", label: "Open Apps" },
-  watching: { path: "/watching", label: "Open Watching" },
+  // The daemon still calls this place `watching`; the operator meets it as On its own.
+  watching: { path: "/on-its-own", label: "See what Ghost does on its own" },
 };
 
 /**

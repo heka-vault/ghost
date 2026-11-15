@@ -1,4 +1,4 @@
-/* The rail, the two postures and the room (docs/design-system.md, The two postures). */
+/* The rail (docs/design-system.md, The two postures). */
 
 /* ---------------------------------------------------------------------------- the rail */
 .rail {
@@ -103,112 +103,26 @@
 .rail__dev { align-self: center; color: var(--accent-text); }
 .rail__dev .lucide { width: var(--icon-sm); height: var(--icon-sm); }
 
-/* ---------------------------------------------------------------------------- postures */
-.posture, .posture__desk { min-height: 100vh; }
-.posture__desk {
-  transform-origin: 50% 40%;
-  transition: transform var(--duration-posture) var(--ease-emphasized), filter var(--duration-posture) var(--ease-emphasized), opacity var(--duration-posture) var(--ease-emphasized);
-}
-/* The room over the desk: the desk eases back and dims as the room rises. */
-.posture.is-room:not(.is-session-room) .posture__desk { transform: scale(0.97); filter: blur(6px) saturate(0.6); opacity: 0.35; }
-/* The room on the conversation screen: the rail steps out, the panel takes the window. */
-.posture.is-session-room .shell { grid-template-columns: 0 minmax(0, 1fr); }
-.posture.is-session-room .rail { transform: translateX(-100%); opacity: 0; pointer-events: none; }
-.posture.is-session-room .shell__main { margin: 0; border-color: transparent; border-radius: 0; box-shadow: none; height: 100vh; transition: margin var(--duration-posture) var(--ease-emphasized), border-radius var(--duration-posture) var(--ease-emphasized); }
-
-/* ---------------------------------------------------------------------------- the room */
-.room-layer {
-  --hue: var(--phase-passive);
-  position: fixed; inset: 0; z-index: var(--z-banner);
-  display: grid; grid-template-rows: auto minmax(0, 1fr) auto;
-  gap: var(--space-6);
-  padding: clamp(var(--space-6), 4vw, var(--space-16));
-  background: var(--room-bg); color: var(--text-1);
-  overflow: hidden;
-  animation: room-in var(--duration-posture) var(--ease-emphasized) both;
-}
-.room-layer.is-listening { --hue: var(--phase-listening); }
-.room-layer.is-thinking { --hue: var(--phase-thinking); }
-.room-layer.is-speaking { --hue: var(--phase-speaking); }
-.room-layer.is-starting { --hue: var(--phase-starting); }
-.room-layer.is-offline { --hue: var(--phase-offline); }
-.room-layer.is-off { --hue: var(--danger); }
-@keyframes room-in { from { opacity: 0; transform: translateY(var(--space-4)) scale(1.01); } to { opacity: 1; transform: none; } }
-
-.room-layer__top { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-6); }
-.room-layer__clock { display: flex; flex-direction: column; margin: 0; font-size: var(--text-4xl); line-height: var(--leading-4xl); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-tighter); }
-.room-layer__date { font-size: var(--text-xl); line-height: var(--leading-xl); font-weight: var(--weight-regular); color: var(--text-2); letter-spacing: 0; }
-.room-layer__hint, .room-layer__key { margin: 0; font-size: var(--text-lg); color: var(--text-3); }
-
-.room-layer__middle { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: clamp(var(--space-8), 5vw, var(--space-20)); align-items: center; min-height: 0; }
-.room-layer__presence { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-3); min-width: 0; }
-.room-layer__glow {
-  position: absolute; left: calc(var(--space-20) * -1); top: calc(var(--space-20) * -2); width: 520px; height: 520px; border-radius: var(--radius-full);
-  background: radial-gradient(circle, color-mix(in oklab, var(--hue) 28%, transparent) 0%, transparent 65%);
-  pointer-events: none; animation: room-glow 5s var(--ease-in-out) infinite;
-}
-@keyframes room-glow { 0%, 100% { opacity: 0.7; transform: scale(0.96); } 50% { opacity: 1; transform: scale(1.04); } }
-.room-layer__wisp { position: relative; color: var(--accent-text); margin-bottom: var(--space-4); }
-.room-layer__word {
-  position: relative; display: flex; align-items: center; gap: var(--space-4); margin: 0;
-  font-size: clamp(var(--text-4xl), 5.4vw, var(--text-6xl)); line-height: 1.1; font-weight: var(--weight-semibold); letter-spacing: var(--tracking-tighter);
-}
-.room-layer__off { width: 0.8em; height: 0.8em; color: var(--danger); flex: none; }
-.room-layer__sub { position: relative; margin: 0; font-size: clamp(var(--text-xl), 1.8vw, var(--text-3xl)); line-height: 1.35; color: var(--text-2); }
-.room-layer__wave { position: relative; width: min(100%, 420px); color: var(--phase-speaking); }
-.room-layer__reply {
-  position: relative; margin: var(--space-4) 0 0; max-width: 28ch;
-  font-size: clamp(var(--text-2xl), 2.6vw, var(--text-5xl)); line-height: 1.25; font-weight: var(--weight-medium); letter-spacing: var(--tracking-tighter);
-  display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden;
-}
-
-.room-layer__needs { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
-.room-layer__label { margin: 0; font-size: var(--text-xl); font-weight: var(--weight-medium); color: var(--text-2); }
-.room-needs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-3); }
-.room-need {
-  --mark: var(--text-3);
-  position: relative; padding: var(--space-5) var(--space-6) var(--space-5) calc(var(--space-6) + var(--space-1));
-  border-radius: var(--radius-xl); background: var(--bg-canvas); border: 1px solid var(--border);
-}
-.room-need::before { content: ""; position: absolute; left: var(--space-3); top: var(--space-5); bottom: var(--space-5); width: 4px; border-radius: var(--radius-full); background: var(--mark); }
-.room-need.is-decide { --mark: var(--warn); border-color: var(--warn-border); }
-.room-need.is-answer { --mark: var(--accent); }
-.room-need.is-clear { --mark: var(--ok); }
-.room-need__kind { margin: 0 0 var(--space-1); font-size: var(--text-xl); line-height: var(--leading-xl); font-weight: var(--weight-medium); color: var(--text-2); }
-.room-need.is-decide .room-need__kind { color: var(--warn); }
-.room-need__line {
-  margin: 0; font-size: clamp(var(--text-2xl), 2.3vw, var(--text-4xl)); line-height: 1.25; font-weight: var(--weight-medium); letter-spacing: var(--tracking-tighter);
-  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere;
-}
-.room-need__meta { margin: var(--space-2) 0 0; font-size: var(--text-xl); color: var(--text-2); }
-.room-layer__more { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--text-xl); color: var(--accent-text); }
-.room-layer__more .lucide { width: var(--icon-lg); height: var(--icon-lg); }
-.room-layer__say { margin: 0; font-size: var(--text-xl); color: var(--text-3); }
-
-.room-layer__bottom { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-6); flex-wrap: wrap; padding-top: var(--space-5); border-top: 1px solid var(--border-subtle); }
-.room-work ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-3) var(--space-8); }
-.room-work__item { display: flex; align-items: center; gap: var(--space-3); font-size: var(--text-xl); }
-.room-work__live { width: var(--space-2_5); height: var(--space-2_5); border-radius: var(--radius-full); background: var(--kind-run); animation: rail-pulse 1.6s var(--ease-in-out) infinite; }
-.room-work__who { font-weight: var(--weight-semibold); }
-.room-work__what { color: var(--text-2); }
-.room-work__meta { color: var(--text-3); }
-.room-work__quiet { margin: 0; font-size: var(--text-xl); color: var(--text-3); }
-.room-layer__day { display: flex; gap: var(--space-6); margin: 0; font-size: var(--text-xl); color: var(--text-2); }
-.room-stat strong { color: var(--text-1); font-weight: var(--weight-semibold); }
-
-/* A narrow window (beside other work): the room stacks, the type steps down. */
-@media (max-width: 860px) {
-  .room-layer__middle { grid-template-columns: 1fr; align-content: start; gap: var(--space-8); overflow-y: auto; }
-  .room-layer__glow { width: 320px; height: 320px; }
-  .room-layer__clock { font-size: var(--text-3xl); line-height: var(--leading-3xl); }
-}
-@media (max-height: 640px) {
-  .room-layer__wisp { display: none; }
-}
+/* The floating room's switch (FloatingSwitch.tsx): lit while Ghost floats when called. */
+.rail__float.is-pressed { color: var(--accent-text); }
 
 @media (prefers-reduced-motion: reduce) {
-  .room-layer, .room-layer__glow, .rail__pulse, .room-work__live, .rail__agent .rail__agent-mark::after { animation: none !important; }
-  .posture__desk, .shell, .rail, .shell__main { transition: none !important; }
+  .rail__pulse, .rail__agent .rail__agent-mark::after { animation: none !important; }
+  .shell, .rail, .shell__main { transition: none !important; }
 }
 /* A new version (ADR 0066): quiet, in the accent, never a badge that counts. */
 .rail__update .rail__icon { color: var(--accent); }
+
+/* All agents (the owner's simplification, 2026-11-14): the agents the rail leaves out, and
+   hiring. The same row as an agent, its mark the Agents icon on the hover tint, with how many
+   more as a quiet count on its corner (never the accent: nothing waits on the operator there). */
+.rail__all-mark { width: var(--control-md); height: var(--control-md); color: var(--text-2); }
+.rail__all-mark .lucide { width: var(--icon-lg); height: var(--icon-lg); }
+.rail__all.is-current .rail__all-mark { color: var(--accent-text); }
+.rail__more {
+  position: absolute; top: calc(var(--space-1) * -1); right: calc(var(--space-2) * -1);
+  min-width: var(--count-size); height: var(--count-size); padding: 0 var(--space-1); border-radius: var(--radius-full);
+  display: grid; place-items: center;
+  background: var(--bg-surface); color: var(--text-2); border: 1px solid var(--border);
+  font-size: var(--text-xs); font-weight: var(--weight-medium);
+}

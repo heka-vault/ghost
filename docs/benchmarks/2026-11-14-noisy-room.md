@@ -3,7 +3,7 @@
 Reported while testing 2026.11.1 with other people around a laptop: "once they respond,
 they are picking up all the background noise." Ghost answered things nobody said to it,
 couldn't tell when the person had finished, and the session didn't end. This is the
-measurement behind [ADR 0071](../adr/0071-a-desk-session-tells-the-person-from-the-room-by-level.md):
+measurement behind [ADR 0072](../adr/0072-a-desk-session-tells-the-person-from-the-room-by-level.md):
 a baseline on main, where each false turn came from, and the fix.
 
 A laptop's built-in microphone is not the hardware Ghost is tested with (the reSpeaker
@@ -120,7 +120,7 @@ loud**: 729 and 1,387 at baseline. Per room, the "well below" ones are almost al
 
 ## After
 
-What changed (ADR 0071): the idle clock no longer stops for good on a wordless turn; on a
+What changed (ADR 0072): the idle clock no longer stops for good on a wordless turn; on a
 microphone other than the tested array, the speech-in stage holds back a segment under
 the person's level and no louder than the room, the person's level seeded from the
 segment that woke Ghost; the person's segment ends when they go quiet under the room; a

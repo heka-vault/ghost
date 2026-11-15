@@ -1,6 +1,6 @@
 /**
  * Today's records, loaded once by the shell for everything that shows them: Today (the
- * briefing), the rail's counts and the room. A day other than today is Today's own load
+ * briefing) and the rail's counts. A day other than today is Today's own load
  * (`loadDay`), so moving through time never disturbs the shell.
  *
  * Reloads when the daemon says the waiting list, the agents or the apps changed, when a

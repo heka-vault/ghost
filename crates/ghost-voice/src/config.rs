@@ -165,7 +165,7 @@ pub struct VoiceSettings {
     /// debugging. Unset and unfilled (the phone, a test): on.
     pub echo_warmup: Option<bool>,
     /// Whether a desk session holds back speech far under the person's own level, unless it
-    /// calls Ghost by name (ADR 0071, `crate::room`). A property of the microphone, which
+    /// calls Ghost by name (ADR 0072, `crate::room`). A property of the microphone, which
     /// the daemon fills (`ghostd::microphone::Plan::room_gate`: on, except on the tested
     /// array, which aims at the talker and cancels its own output); `GHOST_ROOM_GATE`
     /// overrides it. Unset and unfilled (the phone, a test, the harness): off.
@@ -177,7 +177,7 @@ pub struct VoiceSettings {
     pub room_late_margin_db: f64,
     pub room_window_secs: f64,
     /// The person's level from the segment that woke Ghost, when the wake heard the session's
-    /// input (`ghostd`, ADR 0071); never from the environment.
+    /// input (`ghostd`, ADR 0072); never from the environment.
     pub room_person_db: Option<f64>,
     pub turn_grace_secs: f64,
     /// `GHOST_TURN_CONFIDENT_GRACE_SECS`, `GHOST_TURN_CONFIDENT_PROB` (ADR 0049): the grace
@@ -598,7 +598,7 @@ impl VoiceSettings {
         ghost_infer::ParakeetPaths::huggingface_cache().unwrap_or(cached)
     }
 
-    /// The person-or-room gate's settings (ADR 0071).
+    /// The person-or-room gate's settings (ADR 0072).
     pub fn room(&self) -> crate::room::RoomSettings {
         crate::room::RoomSettings {
             margin_db: self.room_margin_db,

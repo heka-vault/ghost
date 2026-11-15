@@ -1,350 +1,21 @@
 /**
- * Owner: watching. Schedules (ADR 0047), from GET /schedules: what each agent does on its
- * own and when, with its next run, how the last one ended, a switch to pause it, Run now,
- * Stop for a run that is going, what its last runs said, Edit, Remove, and a form to add
- * or change one (what to do, who, when, how loud, and under More: the hours it may run in,
- * a check to look first, its time zone and the skills it starts with). A schedule an agent
- * set up itself shows here too, with who made it. Every write waits for Ghost to be
- * reachable.
+ * Owner: watching. A schedule's form and its history (ADR 0047), for On its own: the form adds
+ * or changes one (what to do, who, when, how loud, and under More: the hours it may run in, a
+ * check to look first, its time zone and the skills it starts with), reached from Set it up by
+ * hand and a row's Edit…; `RunsDialog` is what a row's runs did, newest first. The list itself
+ * is `index.tsx`. Every write waits for Ghost to be reachable.
  */
-import type { AppView, ConversationView, ScheduleInfo, ScheduleRequest, ScheduleRunInfo, SchedulesView, SkillInfo } from "@ghost/client-ts";
+import type { AppView, ConversationView, ScheduleInfo, ScheduleRequest, ScheduleRunInfo, SkillInfo } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
+import { History } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+
+import { Button, Checkbox, Dialog, Disclosure, EmptyState, Field, Input, Notice, SegmentedControl, Select, Skeleton, Textarea, agentName, errorText, useLive } from "../../ui";
 import { RunCard, useAppTitles, useRunReach } from "./Runs";
 import { WhenPicker } from "./WhenPicker";
 import { PLAIN_DEFAULT, type Plain, plainOf, requestOf } from "./when";
-import { CalendarClock, History, MoreHorizontal, Pencil, Play, Plus, Square, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
 
-import {
-  Badge,
-  Button,
-  Card,
-  Checkbox,
-  Dialog,
-  Disclosure,
-  EmptyState,
-  Field,
-  IconButton,
-  Input,
-  LineGlyph,
-  ListRow,
-  Menu,
-  Notice,
-  Section,
-  SegmentedControl,
-  Select,
-  Skeleton,
-  Switch,
-  Textarea,
-  agentName,
-  errorText,
-  relativeTime,
-  useConfirm,
-  useLive,
-  useToast,
-} from "../../ui";
-import { toolTitle } from "../settings/tools";
-import { DELIVERY, KINDS, OUTCOME, type ScheduleKind, URGENCY, count, madeBy, runErrorWords, untilWords, whenWords } from "./model";
-
-/** How often the list is read again while the screen is open: next and last runs move. */
-const REFRESH_MS = 15_000;
-
-export interface SchedulesProps {
-  onProblems?: (problems: string[]) => void;
-  /** Show only this agent's schedules (the page's agent filter), and add new ones for it. */
-  agent?: string | null;
-  /** Every schedule as read, for the page's agent filter. */
-  onSchedules?: (s: ScheduleInfo[]) => void;
-}
-
-export function Schedules({ onProblems, agent: only = null, onSchedules }: SchedulesProps = {}) {
-  const { client, waitingVersion } = useGhost();
-  const { online } = useLive();
-  const toast = useToast();
-  const { confirm, dialog: confirmDialog } = useConfirm();
-  const [view, setView] = useState<SchedulesView | null>(null);
-  const [agents, setAgents] = useState<ConversationView[]>([]);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [failed, setFailed] = useState<string | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [adding, setAdding] = useState(false);
-  const [editing, setEditing] = useState<ScheduleInfo | null>(null);
-  const [runsOf, setRunsOf] = useState<ScheduleInfo | null>(null);
-  const [tick, setTick] = useState(0);
-
-  useEffect(() => {
-    const id = setInterval(() => setTick((n) => n + 1), REFRESH_MS);
-    return () => clearInterval(id);
-  }, []);
-
-  useEffect(() => {
-    let on = true;
-    client
-      .schedules()
-      .then((v) => on && (setView(v), setLoadError(null), onProblems?.(v.problems), onSchedules?.(v.schedules)))
-      .catch((e) => on && setLoadError(errorText(e)));
-    return () => {
-      on = false;
-    };
-    // A run's answer lands on Today: read the list again when that changes.
-  }, [client, waitingVersion, tick]);
-
-  useEffect(() => {
-    let on = true;
-    client
-      .conversations(false)
-      .then((list) => on && setAgents(list))
-      .catch(() => {});
-    return () => {
-      on = false;
-    };
-  }, [client]);
-
-  const nameOf = useCallback((slug: string) => agentName(slug, agents.find((a) => a.slug === slug)?.name), [agents]);
-  const put = (s: ScheduleInfo) => setView((v) => (v ? { ...v, schedules: v.schedules.map((x) => (x.id === s.id ? s : x)) } : v));
-
-  /** One write: the row is busy while it goes, and a refusal is said above the list. */
-  const act = async (s: ScheduleInfo, what: string, fn: () => Promise<void>) => {
-    if (busy) return;
-    setBusy(s.id);
-    setFailed(null);
-    try {
-      await fn();
-    } catch (e) {
-      setFailed(`Ghost couldn’t ${what} ${s.name}: ${errorText(e)}`);
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const toggle = (s: ScheduleInfo, enabled: boolean) => act(s, enabled ? "resume" : "pause", async () => put(enabled ? await client.resumeSchedule(s.id) : await client.pauseSchedule(s.id)));
-
-  const runNow = (s: ScheduleInfo) =>
-    act(s, "run", async () => {
-      await client.runSchedule(s.id);
-      put({ ...s, running: true });
-      toast({ title: "Started", description: `${nameOf(s.agent)} is on it. The answer goes to Today.` });
-    });
-
-  /** Stop the run that is going (or waiting): it records that it was stopped. */
-  const stop = (s: ScheduleInfo) =>
-    act(s, "stop", async () => {
-      const { runs } = await client.scheduleRuns(s.id, 5);
-      const going = runs.find((r) => r.status === "running" || r.status === "queued");
-      if (!going) throw new Error("no run of it is going now");
-      await client.cancelRun(going.id);
-      put({ ...s, running: false });
-      toast({ title: "Stopped", description: `${nameOf(s.agent)} stops where it is. What it already changed is in the audit.` });
-    });
-
-  const remove = async (s: ScheduleInfo) => {
-    const ok = await confirm({
-      title: `Remove ${s.name}?`,
-      description: "It stops running, and what its runs said goes with it. What it already put on Today stays.",
-      confirmLabel: `Remove ${s.name}`,
-      tone: "danger",
-    });
-    if (!ok) return;
-    await act(s, "remove", async () => {
-      await client.removeSchedule(s.id);
-      setView((v) => (v ? { ...v, schedules: v.schedules.filter((x) => x.id !== s.id) } : v));
-    });
-  };
-
-  return (
-    <Section
-      id="wat-schedules"
-      title="Schedules"
-      description={<>What your agents do on their own, with nobody there. Each run uses the agent’s tools under your permissions, and its answer goes to Today.</>}
-      actions={
-        view != null && view.schedules.length > 0 ? (
-          <Button variant="secondary" size="sm" leadingIcon={<Plus />} onClick={() => setAdding(true)} disabled={!online}>
-            Add schedule
-          </Button>
-        ) : undefined
-      }
-    >
-      {failed && (
-        <Notice tone="danger" title="That didn’t happen" onDismiss={() => setFailed(null)} className="wat-notice">
-          {failed}
-        </Notice>
-      )}
-      {view == null && loadError ? (
-        <Notice tone="danger" title="Couldn’t load the schedules">
-          {loadError}
-        </Notice>
-      ) : view == null ? (
-        <Card list aria-busy="true" aria-label="Loading">
-          {[0, 1].map((i) => (
-            <div key={i} className="wat-skel-row">
-              <Skeleton width={20} height={20} radius="var(--radius-sm)" />
-              <span className="stack gap-2 grow">
-                <Skeleton width={i ? 120 : 160} height={12} />
-                <Skeleton width={i ? 240 : 300} height={10} />
-              </span>
-            </div>
-          ))}
-        </Card>
-      ) : view.schedules.length === 0 || (only && !view.schedules.some((s) => s.agent === only)) ? (
-        <Card>
-          <EmptyState
-            size="compact"
-            icon={<CalendarClock />}
-            title={only ? `${nameOf(only)} has nothing scheduled` : "Nothing is scheduled"}
-            description={<>Add one here, or tell an agent: “check the build every morning at nine and tell me if it’s red.” It sets the schedule up itself, and it shows here.</>}
-            actions={
-              <Button leadingIcon={<Plus />} onClick={() => setAdding(true)} disabled={!online}>
-                Add schedule
-              </Button>
-            }
-          />
-        </Card>
-      ) : (
-        <Card list>
-          {view.schedules.filter((s) => !only || s.agent === only).map((s) => (
-            <ScheduleRow
-              key={s.id}
-              s={s}
-              zone={view.time_zone}
-              agent={nameOf(s.agent)}
-              maker={nameOf}
-              busy={busy === s.id}
-              online={online}
-              onToggle={(on) => void toggle(s, on)}
-              onRun={() => void runNow(s)}
-              onStop={() => void stop(s)}
-              onEdit={() => setEditing(s)}
-              onRuns={() => setRunsOf(s)}
-              onRemove={() => void remove(s)}
-            />
-          ))}
-        </Card>
-      )}
-      <ScheduleDialog
-        open={adding || editing != null}
-        onClose={() => {
-          setAdding(false);
-          setEditing(null);
-        }}
-        agents={agents}
-        defaultAgent={only}
-        zone={view?.time_zone ?? ""}
-        editing={editing}
-        onSaved={(s) => {
-          const added = editing == null;
-          setAdding(false);
-          setEditing(null);
-          setView((v) => (v ? { ...v, schedules: added ? [...v.schedules, s] : v.schedules.map((x) => (x.id === s.id ? s : x)) } : v));
-          toast({ title: added ? "Added" : "Saved", description: `${nameOf(s.agent)} runs it ${untilWords(s.next_run) || "at its time"}.` });
-        }}
-      />
-      <RunsDialog schedule={runsOf} onClose={() => setRunsOf(null)} />
-      {confirmDialog}
-    </Section>
-  );
-}
-
-interface RowProps {
-  s: ScheduleInfo;
-  zone: string;
-  agent: string;
-  maker: (slug: string) => string;
-  busy: boolean;
-  online: boolean;
-  onToggle: (on: boolean) => void;
-  onRun: () => void;
-  onStop: () => void;
-  onEdit: () => void;
-  onRuns: () => void;
-  onRemove: () => void;
-}
-
-function ScheduleRow({ s, zone, agent, maker, busy, online, onToggle, onRun, onStop, onEdit, onRuns, onRemove }: RowProps) {
-  const when = whenWords(s, zone);
-  const by = madeBy(s.created_by);
-  const last = s.last_outcome ? OUTCOME[s.last_outcome] : null;
-  const state = s.running ? (
-    <Badge tone="info" dot size="sm">
-      Running
-    </Badge>
-  ) : !s.enabled ? (
-    <Badge tone="neutral" dot size="sm">
-      Paused
-    </Badge>
-  ) : last ? (
-    <Badge tone={last.tone} dot size="sm">
-      {last.label}
-    </Badge>
-  ) : (
-    <Badge tone="neutral" dot size="sm">
-      Not run yet
-    </Badge>
-  );
-  return (
-    <ListRow
-      align="start"
-      leading={<LineGlyph slug={s.agent} name={agent} size="lg" />}
-      title={
-        <span className="wat-title">
-          <span data-user-content>{s.name}</span>
-          {state}
-        </span>
-      }
-      description={
-        <span className="wat-desc">
-          <span>
-            {agent} · <span title={when.detail}>{when.text}</span>
-            {when.mono && (
-              <>
-                {" "}
-                <span className="t-mono">{when.mono}</span>
-              </>
-            )}
-            {s.active_hours ? `, between ${s.active_hours.start} and ${s.active_hours.end}` : ""}.
-          </span>
-          <span className="t-3">
-            Tells you {URGENCY[s.urgency]}
-            {s.check && (
-              <>
-                , and only when <span className="t-mono">{`${s.check.app}.${s.check.read}`}</span> has changed
-              </>
-            )}
-            {by.you ? "" : ` · set up by ${"tool" in by ? toolTitle(by.tool) : maker(by.slug)}`}
-          </span>
-          {s.last_error && last && last.tone !== "ok" && (
-            <span className="wat-error" title={s.last_error}>
-              Last run didn’t finish: {runErrorWords(s.last_error)}.
-            </span>
-          )}
-        </span>
-      }
-      trailing={
-        <span className="wat-sched-end">
-          <span className="wat-end">
-            <span className="wat-end__counts t-num">{s.enabled ? (s.next_run ? `Next ${untilWords(s.next_run)}` : "No next run") : "Not running"}</span>
-            <span className="wat-end__when">{s.last_run ? `ran ${relativeTime(s.last_run)}` : "no run yet"}</span>
-          </span>
-          <Switch checked={s.enabled} onChange={onToggle} disabled={busy || !online} size="sm" aria-label={`Run ${s.name} on its schedule`} />
-          <Menu
-            align="end"
-            trigger={<IconButton label={`More for ${s.name}`} icon={<MoreHorizontal />} variant="ghost" size="sm" />}
-            items={[
-              s.running
-                ? { label: "Stop this run", icon: <Square />, onSelect: onStop, disabled: busy || !online }
-                : { label: "Run now", icon: <Play />, onSelect: onRun, disabled: busy || !online },
-              { label: "What it said…", icon: <History />, onSelect: onRuns },
-              { label: "Edit…", icon: <Pencil />, onSelect: onEdit, disabled: busy || !online },
-              "separator",
-              { label: "Remove…", icon: <Trash2 />, danger: true, onSelect: onRemove, disabled: busy || !online },
-            ]}
-          />
-        </span>
-      }
-    />
-  );
-}
-
-interface DialogProps {
+export interface DialogProps {
   open: boolean;
   onClose: () => void;
   agents: ConversationView[];
@@ -412,7 +83,7 @@ function draftOf(s: ScheduleInfo | null | undefined, agent?: string | null): Dra
 
 const HOUR = /^([01]\d|2[0-3]):[0-5]\d$/;
 
-function ScheduleDialog({ open, onClose, agents, defaultAgent, zone, editing, onSaved }: DialogProps) {
+export function ScheduleDialog({ open, onClose, agents, defaultAgent, zone, editing, onSaved }: DialogProps) {
   const { client } = useGhost();
   const { online } = useLive();
   const [d, setD] = useState<Draft>(() => draftOf(editing, defaultAgent));
@@ -600,34 +271,32 @@ function ScheduleDialog({ open, onClose, agents, defaultAgent, zone, editing, on
   );
 }
 
-function RunsDialog({ schedule, onClose }: { schedule: ScheduleInfo | null; onClose: () => void }) {
-  const { client } = useGhost();
+/** What one row's runs did, newest first: a schedule's, or a watch's that acts. */
+export function RunsDialog({ title, load, onClose }: { title: string | null; load: (() => Promise<ScheduleRunInfo[]>) | null; onClose: () => void }) {
   const [runs, setRuns] = useState<ScheduleRunInfo[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const id = schedule?.id ?? null;
   const reach = useRunReach(runs);
   const appTitle = useAppTitles();
 
   useEffect(() => {
-    if (!id) return;
+    if (!load) return;
     let on = true;
     setRuns(null);
     setError(null);
-    client
-      .scheduleRuns(id, 10)
-      .then((r) => on && setRuns(r.runs))
+    load()
+      .then((r) => on && setRuns(r))
       .catch((e) => on && setError(errorText(e)));
     return () => {
       on = false;
     };
-  }, [client, id]);
+  }, [load]);
 
   return (
     <Dialog
-      open={schedule != null}
+      open={load != null}
       onClose={onClose}
       size="md"
-      title={schedule ? `What ${schedule.name} said` : "What it said"}
+      title={title ? `What ${title} did` : "What it did"}
       description="Its last runs, newest first: how each ended, how long it took, what it reached and what it said."
       footer={
         <Button variant="secondary" onClick={onClose}>

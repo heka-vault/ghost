@@ -11,6 +11,7 @@ pub mod floating;
 mod reports;
 mod supervisor;
 mod tray;
+mod uninstall;
 mod updater;
 mod webkit_exit;
 
@@ -145,7 +146,8 @@ pub fn run() {
             updater::update_set_check,
             updater::update_install,
             updater::update_cancel,
-            reports::report_page_error
+            reports::report_page_error,
+            uninstall::remove_ghost
         ])
         .setup(|app| {
             let floating = floating::setup(app.handle());

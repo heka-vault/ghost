@@ -88,3 +88,11 @@ lists agents without grouping.
   for now by the operator; either can come back as a field on an agent when one is needed.
 - **Drop agents too.** Rejected: hire, persona, voice and private memory are cheap, and the
   phone's "open the agent a question belongs to" (#22) builds on them.
+
+## Amendment, 2026-11-14
+
+The desktop's *Watching* screen is now **On its own** (`#/on-its-own`; `#/watching`
+redirects), one list of everything Ghost does without being asked, each row a sentence; the
+way to make one is to ask Ghost in words, and the forms are under Set it up by hand
+(ADR 0061 as amended that day, docs/design-system.md). Nothing here changes otherwise:
+schedules, watches, webhooks and runs work as this record says.

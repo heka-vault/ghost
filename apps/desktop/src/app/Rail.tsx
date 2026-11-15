@@ -1,8 +1,11 @@
 /**
  * The rail: the desk posture's one way around (docs/design-system.md, The two postures). Ghost
- * at the top, alive (Wisp in the voice phase, the way to the conversation), then Today,
- * Watching and Apps with their labels under them, then the agents themselves (each its mark
- * and name, with its live state) and + to hire one, then the room, the microphone and Settings.
+ * at the top, alive (Wisp in the voice phase, the way to the conversation), then Today, On its
+ * own and Apps with their labels under them, then the agents that matter now (each its mark and
+ * name, with its live state; `railAgents.ts` picks them and holds their order) and All agents
+ * for the rest and for hiring, then Settings, the floating room's switch and the microphone.
+ * Four places and the agents (the owner's simplification, 2026-11-14): the Hearing test is
+ * reached from Settings › Sound and the microphone's notes, not from here.
  * Choosing an agent opens the conversation with it; its settings are under Settings › Agents
  * (the owner, 2026-11-12).
  *
@@ -10,17 +13,17 @@
  * the label and the count: “Today, 2 need you”.
  */
 import { useGhost } from "@ghost/ui";
-import { AudioWaveform, Blocks, CircleArrowUp, Eye, FlaskConical, MonitorUp, Plus, Settings2, Sun } from "lucide-react";
-import { type ReactNode, Suspense, lazy, useRef, useState } from "react";
+import { Blocks, CircleArrowUp, FlaskConical, MessagesSquare, Repeat, Settings2, Sun } from "lucide-react";
+import { type ReactNode, Suspense, lazy, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { useDesign } from "../design/context";
-import { GhostChip, IconButton, LineGlyph, Tooltip, cx, formatShortcut, liveLabel, useLive, versionLine } from "../ui";
-import { type RailAgent, railAgents } from "./railAgents";
+import { GhostChip, LineGlyph, Tooltip, cx, liveLabel, useLive, versionLine } from "../ui";
+import { RAIL_MAX, type RailAgent, fitOf, holdStill, railAgents, railShown } from "./railAgents";
 import { ListeningSwitch, useListeningShortcut } from "./ListeningSwitch";
 import { notListening, notListeningSub, sessionWords, typedSession } from "./listening";
 import { markStateOf, moodOf } from "./mood";
-import { usePostureControl } from "./PostureContext";
-import { hrefFor, navigate, usePath } from "./router";
+import { FloatingSwitch } from "./FloatingSwitch";
+import { hrefFor, usePath } from "./router";
 import { navMatch } from "./routes";
 import { nameOf, useToday } from "./today";
 import { availableLine, useUpdate } from "./update";
@@ -40,7 +43,7 @@ interface Item {
 
 const MAIN: Item[] = [
   { id: "today", to: "/", label: "Today", icon: <Sun />, match: ["today"] },
-  { id: "watching", to: "/watching", label: "Watching", icon: <Eye />, match: ["watching"] },
+  { id: "watching", to: "/on-its-own", label: "On its own", icon: <Repeat />, match: ["watching"] },
   { id: "apps", to: "/apps", label: "Apps", icon: <Blocks />, match: ["apps"] },
 ];
 
@@ -53,7 +56,6 @@ export function Rail() {
   const { status } = useGhost();
   const { connection, phase } = useLive();
   const today = useToday();
-  const posture = usePostureControl();
   useListeningShortcut();
   const [hover, setHover] = useState(false);
 
@@ -78,16 +80,20 @@ export function Rail() {
             : "Listening for its name";
   const needs = today.needs.decide.length + today.needs.answer.length;
   const working = today.working.length + (inSession ? 1 : 0);
-  const inSettings = path.startsWith("/settings");
-  const agents = railAgents({ agents: today.agents, working: today.working, needs: [...today.needs.decide, ...today.needs.answer], session: inSession ? (status?.conversation ?? "ghost") : null, phase });
+  const inRoster = path === "/settings/agents" || path.startsWith("/settings/agents/");
+  const inSettings = path.startsWith("/settings") && !inRoster;
+  const all = railAgents({ agents: today.agents, working: today.working, needs: [...today.needs.decide, ...today.needs.answer], session: inSession ? (status?.conversation ?? "ghost") : null, phase });
   const openAgent = path.startsWith("/agents/") ? decodeURIComponent(path.slice("/agents/".length)) : null;
-  const hire = () => {
-    // The roster's own dialog, opened from its address (?open=new, before the hash).
-    const q = new URLSearchParams(window.location.search);
-    q.set("open", "new");
-    window.history.replaceState(window.history.state, "", `${window.location.pathname}?${q}${window.location.hash}`);
-    navigate("/settings/agents");
-  };
+  // The room the agents have, measured, and their order held while the pointer is on them.
+  const { navRef, mainRef, groupRef, listRef, fit } = useRailFit();
+  const [hold, setHold] = useState(false);
+  const { shown: picked, hidden } = railShown(all, fit);
+  const before = useRef<string[]>([]);
+  const order = useMemo(() => holdStill(before.current, picked.map((a) => a.slug), hold), [picked.map((a) => a.slug).join(","), hold]); // eslint-disable-line react-hooks/exhaustive-deps
+  before.current = order;
+  const bySlug = new Map(all.map((a) => [a.slug, a]));
+  const agents = order.map((s) => bySlug.get(s)).filter((a): a is RailAgent => !!a);
+  const allWords = all.length === 0 ? "none hired yet" : hidden > 0 ? `${hidden} more` : `${all.length} in all`;
   const showSwitch = connection !== "offline" && connection !== "connecting";
   // ADR 0066: a new version, said quietly; Settings › General has the button.
   const [update] = useUpdate(DESKTOP_VERSION);
@@ -95,8 +101,11 @@ export function Rail() {
   const version = useRef<{ line: string; other: string | null } | null>(null);
   if (status?.version) version.current = { line: versionLine(status.version, status.build), other: difference(status)?.window ?? null };
 
+  const running = today.working.filter((r) => r.status === "running").length;
   const badge = (id: string): { n: number | null; label: string } | null => {
     if (id === "today" && needs) return { n: needs, label: `${needs} need${needs === 1 ? "s" : ""} you` };
+    // Running now stays loud: a pulse on the place where it can be stopped.
+    if (id === "watching" && running) return { n: null, label: `${running} running now` };
     return null;
   };
 
@@ -129,8 +138,8 @@ export function Rail() {
         </a>
       </Tooltip>
 
-      <nav className="rail__nav" aria-label="Main">
-        <ul role="list">
+      <nav className="rail__nav" aria-label="Main" ref={navRef}>
+        <ul role="list" ref={mainRef}>
           {MAIN.map((it) => {
             const on = !!current && it.match.includes(current);
             const b = badge(it.id);
@@ -147,28 +156,42 @@ export function Rail() {
             );
           })}
         </ul>
-        <div className="rail__agents" role="group" aria-label="Agents">
-          <IconButton label="Hire an agent" tooltipSide="right" icon={<Plus />} onClick={hire} className="rail__hire" />
-          <ul role="list">
+        <div
+          className="rail__agents"
+          role="group"
+          aria-label="Agents"
+          ref={groupRef}
+          onPointerEnter={() => setHold(true)}
+          onPointerLeave={() => setHold(false)}
+          onFocus={() => setHold(true)}
+          onBlur={(e) => !e.currentTarget.contains(e.relatedTarget as Node | null) && setHold(false)}
+        >
+          <ul role="list" ref={listRef}>
             {agents.map((a) => (
               <li key={a.slug}>
                 <AgentRow a={a} on={openAgent === a.slug} />
               </li>
             ))}
           </ul>
+          <Tooltip side="right" content={`Every agent, and hiring one · ${allWords}`} asChild>
+            <a
+              className={cx("rail__agent rail__all", inRoster && "is-current")}
+              href={hrefFor("/settings/agents")}
+              aria-current={inRoster ? "page" : undefined}
+              aria-label={`All agents, ${allWords}`}
+            >
+              <span className="rail__agent-mark rail__all-mark">
+                <MessagesSquare />
+                {hidden > 0 && <span className="rail__more t-num" aria-hidden>+{hidden}</span>}
+              </span>
+              <span className="rail__label rail__agent-name">All agents</span>
+            </a>
+          </Tooltip>
         </div>
       </nav>
 
       <div className="rail__foot">
         <ul role="list">
-          <li>
-            <a className={cx("rail__item rail__item--small", current === "hear" && "is-current")} href={hrefFor("/hear")} aria-current={current === "hear" ? "page" : undefined}>
-              <span className="rail__icon">
-                <AudioWaveform />
-              </span>
-              <span className="rail__label">Hearing</span>
-            </a>
-          </li>
           {updateLine && (
             <li>
               <Tooltip side="right" content={updateLine} asChild>
@@ -191,7 +214,7 @@ export function Rail() {
           </li>
         </ul>
         <div className="rail__controls">
-          <IconButton label={`Room (${formatShortcut("mod+.")})`} tooltipSide="right" icon={<MonitorUp />} onClick={() => posture.hold("room")} className="rail__room" />
+          <FloatingSwitch />
           {showSwitch && <ListeningSwitch rail />}
         </div>
         {design && DevMenu && (
@@ -202,6 +225,38 @@ export function Rail() {
       </div>
     </aside>
   );
+}
+
+/**
+ * How many agent rows fit in the rail's nav without scrolling, measured from the layout and again
+ * whenever the nav changes size (the window, the names going under 760px, an update row at the foot).
+ */
+function useRailFit() {
+  const navRef = useRef<HTMLElement>(null);
+  const mainRef = useRef<HTMLUListElement>(null);
+  const groupRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+  const [fit, setFit] = useState(RAIL_MAX);
+  useLayoutEffect(() => {
+    const nav = navRef.current;
+    if (!nav || typeof ResizeObserver === "undefined") return;
+    const measure = () => {
+      // All agents is a row of the same shape: one row's height (the Tooltip holds its ref).
+      const main = mainRef.current, group = groupRef.current, list = listRef.current, one = group?.querySelector<HTMLElement>(".rail__all");
+      if (!main || !group || !list || !one) return;
+      const css = getComputedStyle(nav);
+      const gap = parseFloat(getComputedStyle(list).rowGap) || 0;
+      // Everything the nav holds but the agents' own rows: the places, the group's edge and
+      // margin, All agents, the nav's padding (its fade at the foot included).
+      const rest = parseFloat(css.paddingTop) + parseFloat(css.paddingBottom) + main.offsetHeight + parseFloat(getComputedStyle(group).marginTop) + group.offsetHeight - list.offsetHeight;
+      setFit(fitOf({ navHeight: nav.clientHeight + gap, restHeight: rest, rowPitch: one.offsetHeight + gap }));
+    };
+    const ro = new ResizeObserver(measure);
+    ro.observe(nav);
+    measure();
+    return () => ro.disconnect();
+  }, []);
+  return { navRef, mainRef, groupRef, listRef, fit };
 }
 
 /** One agent on the rail: its mark with its live state, its name under it; opens its conversation. */

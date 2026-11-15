@@ -1,5 +1,5 @@
 /** Owner: onboarding. The first run's frame: the step rail, a step's header and footer, the hero presence. */
-import { ArrowLeft, Check, Flag, Hand, Minus } from "lucide-react";
+import { ArrowLeft, Check, Flag, Hand, Minus, Lock } from "lucide-react";
 import { createContext, Fragment, type FormEvent, type KeyboardEvent, type ReactNode, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
@@ -100,6 +100,8 @@ export function Rail({ current, progress, checking, onGo, speech }: RailProps) {
                     <Minus size={12} strokeWidth={2.5} />
                   ) : s.id === "welcome" ? (
                     <Hand size={12} strokeWidth={2} />
+                  ) : s.id === "keeps" ? (
+                    <Lock size={12} strokeWidth={2} />
                   ) : s.id === "done" ? (
                     <Flag size={12} strokeWidth={2} />
                   ) : (

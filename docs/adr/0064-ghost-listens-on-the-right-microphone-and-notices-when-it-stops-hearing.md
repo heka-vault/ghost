@@ -37,8 +37,8 @@ Until now Ghost listened on one input, `ghost.mic` by default: PipeWire's WebRTC
   - A desk session's reads count the same way (2026-11-13): each segment's level and word count, never its words or audio (`stt::OnRead`); not a segment heard while Ghost spoke, and not the phone's.
   - The note says Repair restarts the echo canceller (when it is in use) and reopens the microphone.
   - When the hardware cancels on chip, the note adds that Ghost can listen to it directly.
-  - A segment the room gate let go (ADR 0071) is not a read: it never counts toward deafness.
-- **Noisy** (ADR 0071, 2026-11-14): on a microphone other than the tested array, a session let the room's speech go five times, or the room's steady level came within 6 dB of the person's. For half an hour the note says the room is too loud for this microphone and that a headset, or the reSpeaker XVF3800 Ghost is tested with, would help. Repair is not its fix and is never run for it.
+  - A segment the room gate let go (ADR 0072) is not a read: it never counts toward deafness.
+- **Noisy** (ADR 0072, 2026-11-14): on a microphone other than the tested array, a session let the room's speech go five times, or the room's steady level came within 6 dB of the person's. For half an hour the note says the room is too loud for this microphone and that a headset, or the reSpeaker XVF3800 Ghost is tested with, would help. Repair is not its fix and is never run for it.
 
 A problem is a note of Ghost's own on the waiting list (`input:degraded`), shown and never said, and it leads to Settings › Sound (`WaitingPlace::Sound`).
 

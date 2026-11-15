@@ -1,4 +1,4 @@
-//! The person or the room (ADR 0071): whether a stretch of speech the VAD found in a desk
+//! The person or the room (ADR 0072): whether a stretch of speech the VAD found in a desk
 //! session is the person talking to Ghost, judged by how loud it is against the person's
 //! own level on this microphone, and by Ghost's name.
 //!

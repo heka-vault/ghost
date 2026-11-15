@@ -442,7 +442,7 @@ pub type Reach = Arc<dyn Fn(&Profile) -> Vec<ToolSource> + Send + Sync>;
 
 /// The waiting list's key for the realtime voice's note (ADR 0063).
 pub const REALTIME_NOTE_KEY: &str = "voice:realtime";
-/// How recent the passive segment must be to be the one that woke the session (ADR 0071).
+/// How recent the passive segment must be to be the one that woke the session (ADR 0072).
 pub(crate) const WAKE_LEVEL_FOR: Duration = Duration::from_secs(10);
 
 pub struct Daemon {
@@ -514,7 +514,7 @@ pub struct Daemon {
     pub mic: Arc<Mic>,
     /// What the microphone path is and how it is doing (ADR 0064).
     pub(crate) mic_health: Arc<Mutex<crate::microphone::Health>>,
-    /// The last passive segment read with words, as its level (ADR 0071).
+    /// The last passive segment read with words, as its level (ADR 0072).
     wake_level: Arc<Mutex<Option<(Instant, f64)>>>,
     /// The plan and when it was made: the facts are read again after `PLAN_FOR`.
     mic_plan: Mutex<Option<(Instant, crate::microphone::Plan)>>,
@@ -916,7 +916,7 @@ impl Daemon {
             return;
         };
         let p = gate.pending(&session_id, None).ok().flatten();
-        let view = p.map(|p| ghost_api::pending_view(&p, None));
+        let view = p.map(|p| ghost_api::pending_view(&p, None, &gate.autonomy().permissions));
         let now = view.as_ref().map(|v| v.id.clone());
         let was = self.state.pending().map(|p| p.id);
         if now != was {
@@ -1137,7 +1137,7 @@ impl Daemon {
     fn stt_factory(&self, models: &Arc<Models>) -> SttFactory {
         let stt = models.stt.clone();
         // The level of each passive segment read with words, the last one only, as a
-        // number in memory (ADR 0071): the one that woke Ghost tells the session how loud
+        // number in memory (ADR 0072): the one that woke Ghost tells the session how loud
         // the person is. Never the words or the audio.
         let heard = self.wake_level.clone();
         Arc::new(move |params| {
@@ -1150,7 +1150,7 @@ impl Daemon {
         })
     }
 
-    /// The person's level from the segment that woke Ghost (ADR 0071): the last passive
+    /// The person's level from the segment that woke Ghost (ADR 0072): the last passive
     /// segment read with words, taken once, if it ended within `WAKE_LEVEL_FOR`.
     pub(crate) fn take_wake_level(&self) -> Option<f64> {
         lock(&self.wake_level)
@@ -2829,6 +2829,13 @@ impl Daemon {
                 Arc::new(crate::reports::ReportsDesk(r.clone()))
                     as Arc<dyn ghost_api::reports::ReportsPort>
             }),
+            uninstall: Some(Arc::new(crate::uninstall::UninstallDesk {
+                places: crate::uninstall::places(
+                    &self.cfg.lock().unwrap_or_else(|e| e.into_inner()),
+                    &self.voice.lock().unwrap_or_else(|e| e.into_inner()),
+                    &self.started_env,
+                ),
+            })),
             wake_takes: Some(crate::wake_takes::WakeTakesDesk::new(
                 self.wake_takes(),
                 Arc::downgrade(self),

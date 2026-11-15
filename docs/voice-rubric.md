@@ -136,7 +136,7 @@ while you are not talking (music residue opening segments). Wakes: `detector hea
 (`detector hit not confirmed: "..."`): under music it writes the phrase as "a ghost", "it
 goes", "there it goes" (#13).
 
-## Part I: a noisy room (ADR 0071)
+## Part I: a noisy room (ADR 0072)
 
 Two people talk across the room (or a podcast plays from a speaker a few metres away) for
 the whole part; the operator stays at the desk at their usual level. On the reSpeaker

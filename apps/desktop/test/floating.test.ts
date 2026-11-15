@@ -9,7 +9,6 @@ const base: SceneInput = { posture: "float", capture: "no", phase: "listening", 
 describe("sceneOf", () => {
   it("rests at the line unless the posture rule floats the session", () => {
     expect(sceneOf({ ...base, posture: "desk" })).toBe("line");
-    expect(sceneOf({ ...base, posture: "room" })).toBe("line");
     expect(sceneOf(base)).toBe("listening");
   });
 
@@ -77,7 +76,7 @@ describe("sceneOf", () => {
 
   it("is fed by the one posture rule", () => {
     const deskSession = { hold: "auto" as const, deskSession: true, idleMs: 0, awayAfterMs: null, sessionIdleMs: null };
-    const p = (windowActive: boolean, floating: boolean) => postureOf({ ...deskSession, windowActive, floating }).posture;
+    const p = (windowActive: boolean, floating: boolean) => postureOf({ ...deskSession, windowActive, floating });
     expect(sceneOf({ ...base, posture: p(false, true) })).toBe("listening");
     // The main window is the one in use: the session stays there.
     expect(sceneOf({ ...base, posture: p(true, true) })).toBe("line");

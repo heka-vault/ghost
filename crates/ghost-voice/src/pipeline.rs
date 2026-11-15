@@ -435,7 +435,7 @@ pub struct SessionHooks {
     /// microphone's health (ADR 0064). Never the words or the audio.
     pub on_read: Option<crate::stt::OnRead>,
     /// Told once a session that the room is too loud to tell the person from it
-    /// (`crate::stt::OnTooLoud`, ADR 0071): the microphone's health note says so.
+    /// (`crate::stt::OnTooLoud`, ADR 0072): the microphone's health note says so.
     pub on_too_loud: Option<crate::stt::OnTooLoud>,
 }
 
@@ -932,7 +932,7 @@ pub fn build_session(p: SessionParams) -> GhostSession {
     let wake_phrases: Vec<String> = p
         .wake_phrases
         .unwrap_or_else(|| DEFAULT_WAKE_PHRASES.iter().map(|s| s.to_string()).collect());
-    // The person or the room (ADR 0071): where the daemon turned it on for this microphone.
+    // The person or the room (ADR 0072): where the daemon turned it on for this microphone.
     let room = (settings.room_gate == Some(true)).then(|| {
         crate::stt::RoomGuard::new(
             settings.room(),

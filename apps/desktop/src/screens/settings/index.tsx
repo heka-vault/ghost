@@ -34,7 +34,7 @@
  */
 import type { DevicesView, ModelConnectionView, ModelsView, SettingsView } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
-import { MoreHorizontal, ShieldCheck, Trash2 } from "lucide-react";
+import { AudioWaveform, MoreHorizontal, ShieldCheck, Trash2 } from "lucide-react";
 import {
   type FocusEvent,
   type FormEvent,
@@ -51,10 +51,11 @@ import {
 
 import { hrefFor, navigate } from "../../app/router";
 import { ListeningButton } from "../../app/ListeningSwitch";
-import { RoomSettings } from "../../app/RoomSettings";
+import { FloatingRoomSettings } from "../../app/FloatingSettings";
 import { listeningSentence, notListening } from "../../app/listening";
 import { VersionNotice, VersionRows } from "./About";
 import { ErrorReportsSection } from "./ErrorReports";
+import { RemoveGhostSection } from "./RemoveGhost";
 import { UpdatesSection } from "./Updates";
 import { SpeechModelsRow } from "../onboarding/speech";
 import { type RouteProps, SETTINGS_PAGES, SETTINGS_SCREEN_PAGES } from "../../app/routes";
@@ -920,8 +921,8 @@ export default function SettingsScreen({ params: route }: RouteProps) {
         {s && page === "general" && (
           <>
             {showSetup && <SetupSection steps={steps} onGo={(id) => go(id)} />}
-            <Section id="room" title="The room" description="The desk is this screen as you work at it; the room is Ghost read from across the room." className="set-section">
-              <RoomSettings />
+            <Section id="floating" title="The floating room" description="To have Ghost big and present, let it float: when you call it, it comes forward over your desktop instead of staying in this window." className="set-section">
+              <FloatingRoomSettings />
             </Section>
             <Section id={sectionDomId("about")} title={SECTION_TITLE.about} className="set-section">
               <VersionNotice status={status} />
@@ -950,6 +951,7 @@ export default function SettingsScreen({ params: route }: RouteProps) {
                 <Prototype only="privacy" />
               </Suspense>
             )}
+            <RemoveGhostSection confirmOpen={mock && new URLSearchParams(window.location.search).get("remove") === "confirm"} />
           </>
         )}
 
@@ -1099,9 +1101,15 @@ export default function SettingsScreen({ params: route }: RouteProps) {
                       tone="warn"
                       title="The microphone isn’t hearing well"
                       action={
-                        <Button size="sm" loading={repairBusy} disabled={!online || !micPath.can_repair} onClick={() => void repairMic()}>
-                          Repair
-                        </Button>
+                        <span className="row gap-3">
+                          {/* The Hearing test is off the rail (2026-11-14): reached from here. */}
+                          <Button size="sm" variant="ghost" href={hrefFor("/hear")}>
+                            Test what Ghost hears
+                          </Button>
+                          <Button size="sm" loading={repairBusy} disabled={!online || !micPath.can_repair} onClick={() => void repairMic()}>
+                            Repair
+                          </Button>
+                        </span>
                       }
                     >
                       {micPath.problem}
@@ -1199,6 +1207,15 @@ export default function SettingsScreen({ params: route }: RouteProps) {
                         />
                       </Field>
                     </Row>
+                    <ListRow
+                      title="Test what Ghost hears"
+                      description="Read a few lines aloud and see what Ghost made of each, how often it woke, and how well it heard: the Hearing test."
+                      trailing={
+                        <Button size="sm" variant="secondary" leadingIcon={<AudioWaveform />} href={hrefFor("/hear")}>
+                          Open the Hearing test
+                        </Button>
+                      }
+                    />
                     <ListRow
                       title="Speakers"
                       description="Ghost uses the system output. Change it in your sound settings."

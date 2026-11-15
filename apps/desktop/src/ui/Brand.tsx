@@ -109,7 +109,7 @@ export interface LineGlyphProps {
 /**
  * Every agent's look, by slug (`"<shape>:<colour>"`, a field on the agent): provided once by
  * the shell from the agents it has loaded, read by every `LineGlyph`, so the rail, Today, the
- * room and every list draw an agent the same way without being handed its look.
+ * conversation and every list draw an agent the same way without being handed its look.
  */
 export const AgentLooksContext = createContext<ReadonlyMap<string, string | null>>(new Map());
 

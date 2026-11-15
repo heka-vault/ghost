@@ -328,7 +328,7 @@ impl Plan {
     }
 
     /// Whether a desk session holds back speech far under the person's own level (ADR
-    /// 0071, `ghost_voice::room`). Off on an array whose chip cancels Ghost's own output
+    /// 0072, `ghost_voice::room`). Off on an array whose chip cancels Ghost's own output
     /// (the reSpeaker XVF3800 Ghost is tested with): it aims at the talker, its own gain
     /// control sits between the person and Ghost, and it must not change. On everywhere
     /// else: a laptop's built-in microphone, a webcam, a headset, or a path Ghost could not
@@ -680,7 +680,7 @@ pub enum Problem {
     /// Loud stretches read as nothing, again and again.
     Deaf { reads: usize },
     /// The room is too loud for this microphone: a session let the room's speech go again
-    /// and again, or the room was as loud as the person (ADR 0071). Only where the room
+    /// and again, or the room was as loud as the person (ADR 0072). Only where the room
     /// gate runs, so never on the tested array.
     Noisy,
 }
@@ -735,7 +735,7 @@ impl Health {
         }
     }
 
-    /// A session found the room too loud to tell the person from it (ADR 0071).
+    /// A session found the room too loud to tell the person from it (ADR 0072).
     pub fn noisy(&mut self, now: Instant) {
         self.noisy = Some(now);
     }
@@ -1360,7 +1360,7 @@ mod tests {
 
     #[test]
     fn the_room_gate_is_left_off_on_the_tested_array_and_on_everywhere_else() {
-        // ADR 0071: the array aims at the talker and cancels its own output, with its own
+        // ADR 0072: the array aims at the talker and cancels its own output, with its own
         // gain control between Ghost and the room: a level of the person's means less there,
         // and it is the setup Ghost is tested with. Leave it exactly as it was.
         assert!(!plan(None, None, None, Some(&array_desk(false))).room_gate());

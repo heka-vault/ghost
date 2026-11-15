@@ -1,7 +1,8 @@
 /**
  * Owner: today. Today, `#/`: the briefing, the desk's home (docs/design/overhaul-2026-11.md,
- * the combined direction). One sentence with the day's real counts; the instruments (what is
- * working now, how much Ghost did, what it can reach, how fast it answers); then the timeline,
+ * the combined direction). One sentence with the day's real counts, a problem said in it; the
+ * instruments (what is working now, how much Ghost did, what it can reach, how fast it answers)
+ * one remembered step away, closed for a new install (the simplification pass, 2026-11-14); then the timeline,
  * the spine of the app: Now at its head with what needs the operator (Decide, Answer, Know) and
  * the agents at work, then the day going back hour by hour. `[` and `]` move a day, `t` comes
  * back to today; the talk bar is the way to Ghost without leaving the page.
@@ -10,16 +11,17 @@
  * or Decline, Got it, Later, Open) is on its item.
  */
 import { useGhost } from "@ghost/ui";
-import { ChevronLeft, ChevronRight, Settings2 } from "lucide-react";
+import { AlertTriangle, ChevronLeft, ChevronRight, Settings2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import type { RouteProps } from "../../app/routes";
 import { loadDay, useToday } from "../../app/today";
+import { useDesign } from "../../design/context";
 import { Button, IconButton, Notice, Page, Skeleton, errorText, useLive, useSetupPromptHere } from "../../ui";
-import { type DayCounts, type Moment, cluster, countsOf, dayLabel, headline, isSameDay, momentsOf, shiftDay } from "./model";
+import { appsDownOf, type DayCounts, type Moment, cluster, countsOf, dayLabel, headline, isSameDay, momentsOf, shiftDay, SLOW_FIRST_WORD_MS } from "./model";
 import { Now } from "./Needs";
-import { Signal } from "./Signal";
-import { TalkBar } from "./TalkBar";
+import { Instruments } from "./Signal";
+import { TalkBar, useLiveSession } from "./TalkBar";
 import { Timeline } from "./Timeline";
 import "./today.css";
 
@@ -28,14 +30,23 @@ const MAX_BACK_DAYS = 30;
 
 export default function TodayScreen(_: RouteProps) {
   const today = useToday();
+  // A live session is seen here when Ghost doesn't float (the room view removed, 2026-11-14).
+  const live = useLiveSession();
   const { client } = useGhost();
+  const design = useDesign();
   const { online, setupNeeded, setupLocked, setupHref, loadingModels } = useLive();
   const [day, setDay] = useState(() => new Date());
   const isToday = isSameDay(day, new Date());
   const past = usePastDay(isToday ? null : day, client);
   const moments: Moment[] = isToday ? today.moments : past.moments;
   const counts: DayCounts = isToday ? today.counts : countsOf({ decide: [], answer: [], know: [] }, past.moments);
-  const h = headline(counts, isToday);
+  const h = headline(counts, isToday, {
+    failedChanges: today.counts.failedChanges,
+    failedCalls: today.tally.failed,
+    appsDown: appsDownOf(today.apps),
+    slowModel: !!today.speed && today.speed.ms > SLOW_FIRST_WORD_MS,
+  });
+  const forceOpen = import.meta.env.DEV && design && new URLSearchParams(window.location.search).get("instruments") === "open" ? true : undefined;
   const needsSetup = online && !loadingModels && setupNeeded;
   useSetupPromptHere(needsSetup && isToday);
 
@@ -65,7 +76,7 @@ export default function TodayScreen(_: RouteProps) {
   const working = today.working.length;
 
   return (
-    <Page title="Today" bare width="wide" className="today" dock={isToday ? <TalkBar /> : undefined}>
+    <Page title="Today" bare width="wide" className="today" dock={isToday ? <TalkBar live={live} /> : undefined}>
       <header className="today-head">
         <div className="today-day">
           <IconButton size="sm" variant="ghost" label={`The day before (${"["})`} icon={<ChevronLeft />} onClick={() => go(-1)} />
@@ -96,9 +107,15 @@ export default function TodayScreen(_: RouteProps) {
             <span className="today-headline__lead">{h.lead}</span> {h.rest && <span className="today-headline__rest">{h.rest}</span>}
           </p>
         )}
+        {/* What the instruments would show as a problem, in plain words, open or closed. */}
+        {h.problems.length > 0 && !needsSetup && (
+          <p className="today-problems" role="note">
+            <AlertTriangle size={14} aria-hidden /> {h.problems.join(" · ")}
+          </p>
+        )}
 
-        {/* The telemetry appears once there is something true to say: a run, a change, a call or an app. */}
-        {isToday && (working > 0 || counts.runs + counts.changes > 0 || today.reach.apps > 0 || today.tally.calls > 0) && <Signal />}
+        {/* The instruments, one step away, once there is something true to say: a run, a change, a call or an app. */}
+        {isToday && (working > 0 || counts.runs + counts.changes > 0 || today.reach.apps > 0 || today.tally.calls > 0) && <Instruments forceOpen={forceOpen} />}
       </header>
 
       {today.error && isToday && (
@@ -120,7 +137,7 @@ export default function TodayScreen(_: RouteProps) {
       {(isToday && !today.loaded) || (!isToday && past.loading) ? (
         <TimelineSkeleton />
       ) : (
-        <Timeline key={day.toDateString()} moments={moments} agents={today.agents} isToday={isToday} head={isToday ? <Now /> : null} />
+        <Timeline key={day.toDateString()} moments={moments} agents={today.agents} isToday={isToday} head={isToday ? <Now pending={live.pending} question={live.question} /> : null} />
       )}
     </Page>
   );

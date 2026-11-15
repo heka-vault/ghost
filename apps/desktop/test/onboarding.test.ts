@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { EMPTY, type Facts, firstSentence, MEET, micHealthyOf, parseSaved, inputName, pathToMoment, progressOf, requiredAt, routeAfter, STEPS, taskNumber, TASKS, timeLeft, wakeHelp } from "../src/screens/onboarding/state";
+import { answeredHere, echoOfferNow, EMPTY, type Facts, firstSentence, MEET, micHealthyOf, parseSaved, inputName, pathToMoment, progressOf, requiredAt, routeAfter, STEPS, taskNumber, TASKS, timeLeft, wakeHelp, wakeItems } from "../src/screens/onboarding/state";
 import { offerOnce } from "../src/app/floating";
 import { exchangeOf } from "../src/screens/onboarding/watch";
 
 
-const known: Facts = { modelReady: false, modelChecked: null, speechReady: true, echo: false, apps: 0, agents: 0, voiceSet: false };
+const known: Facts = { modelReady: false, modelChecked: null, speechReady: true, echo: false, apps: 0, voiceSet: false };
 
 describe("the first run's progress", () => {
   it("numbers the tasks the count counts, and not the welcome and done pages", () => {
@@ -19,7 +19,7 @@ describe("the first run's progress", () => {
   it("counts only what Ghost reports as done", () => {
     const p = progressOf(known, EMPTY);
     expect(p.done).toBe(0);
-    expect(p.total).toBe(7);
+    expect(p.total).toBe(6);
     expect(p.next).toBe("model");
     expect(p.canTalk).toBe(false);
   });
@@ -38,7 +38,7 @@ describe("the first run's progress", () => {
   });
 
   it("says unknown, not open, when Ghost isn't answering", () => {
-    const off: Facts = { modelReady: null, modelChecked: null, speechReady: null, echo: null, apps: null, agents: null, voiceSet: null };
+    const off: Facts = { modelReady: null, modelChecked: null, speechReady: null, echo: null, apps: null, voiceSet: null };
     const p = progressOf(off, EMPTY);
     expect(p.state.model).toBe("unknown");
     expect(p.state.app).toBe("unknown");
@@ -50,8 +50,8 @@ describe("the first run's progress", () => {
     const p = progressOf({ ...known, modelReady: true }, { ...EMPTY, skipped: ["hear"] });
     expect(p.state.hear).toBe("skipped");
     expect(p.next).toBe("wake");
-    const all = progressOf({ modelReady: true, modelChecked: true, speechReady: true, echo: true, apps: 1, agents: 1, voiceSet: true }, { ...EMPTY, heard: "voice", answered: true });
-    expect(all.done).toBe(7);
+    const all = progressOf({ modelReady: true, modelChecked: true, speechReady: true, echo: true, apps: 1, voiceSet: true }, { ...EMPTY, heard: "voice", answered: true });
+    expect(all.done).toBe(6);
     expect(all.next).toBe("done");
     expect(all.state.done).toBe("done");
     expect(all.canTalk).toBe(true);
@@ -127,8 +127,8 @@ describe("the path to the moment (2026-11-14)", () => {
   it("puts the three beats first and everything else after them, optional", () => {
     expect(MEET.map((s) => s.id)).toEqual(["model", "hear", "wake"]);
     const order = STEPS.map((s) => s.id);
-    for (const later of ["voice", "app", "agent", "ask"] as const) expect(order.indexOf(later)).toBeGreaterThan(order.indexOf("wake"));
-    expect(STEPS.filter((s) => s.part === "yours").map((s) => s.id)).toEqual(["voice", "app", "agent", "ask"]);
+    for (const later of ["keeps", "voice", "app", "ask"] as const) expect(order.indexOf(later)).toBeGreaterThan(order.indexOf("wake"));
+    expect(STEPS.filter((s) => s.part === "yours").map((s) => s.id)).toEqual(["voice", "app", "ask"]);
   });
 
   // The PR's table. A required action added before the wake beat fails here.
@@ -154,16 +154,18 @@ describe("the path to the moment (2026-11-14)", () => {
   });
 
   it("goes back to the model after a moment with none, then on to a first real question", () => {
-    expect(routeAfter("wake", fresh, { met: "voice", waitingForEars: false })).toBe("model");
+    // What Ghost keeps and sends comes first, always, then the model or Make it yours.
+    expect(routeAfter("wake", fresh, { met: "voice", waitingForEars: false })).toBe("keeps");
+    expect(routeAfter("keeps", fresh, { met: "voice", waitingForEars: false })).toBe("model");
     expect(routeAfter("model", { ...fresh, modelReady: true }, { met: "voice", waitingForEars: false })).toBe("ask");
-    expect(routeAfter("wake", { ...fresh, modelReady: true }, { met: "voice", waitingForEars: false })).toBe("voice");
+    expect(routeAfter("keeps", { ...fresh, modelReady: true }, { met: "voice", waitingForEars: false })).toBe("voice");
   });
 
   it("comes back to the moment once Ghost's ears are here, from wherever they made it theirs", () => {
     const s = { met: null, waitingForEars: true };
     expect(routeAfter("voice", { ...fresh, speechReady: false }, s)).toBe("app");
     expect(routeAfter("voice", fresh, s)).toBe("wake");
-    expect(routeAfter("agent", fresh, s)).toBe("wake");
+    expect(routeAfter("app", fresh, s)).toBe("wake");
     // Once met, Make it yours goes on in order.
     expect(routeAfter("voice", fresh, { met: "voice", waitingForEars: true })).toBe("app");
   });
@@ -219,5 +221,78 @@ describe("the floating room's first-run offer (ADR 0059 as amended 2026-11-14)",
 describe("the microphone's name", () => {
   it("calls a sound card on the board the built-in microphone", () => {
     expect(inputName("alsa_input.pci-0000_00_1f.3.analog-stereo")).toBe("the built-in microphone");
+  });
+});
+
+describe("answeredHere: the moment in this window (the room view removed, 2026-11-14)", () => {
+  const ok = { support: { kind: "xwayland" }, settings: { on: true }, capture: "no" as const, sharing: "none" as const };
+  it("says nothing when Ghost floated, or nothing is known", () => {
+    expect(answeredHere(ok)).toBeNull();
+    expect(answeredHere(null)).toBeNull();
+  });
+  it("says why a desktop that can't float kept it here, in the shell's own words", () => {
+    expect(answeredHere({ ...ok, support: { kind: "no", why: "The floating room needs XWayland, and this desktop isn't running it." } })).toBe(
+      "Ghost answered here. On this desktop it can’t float over your work: the floating room needs XWayland, and this desktop isn't running it.",
+    );
+    expect(answeredHere({ ...ok, support: { kind: "no" } })).toBe("Ghost answered here. On this desktop it can’t float over your work.");
+  });
+  it("says a share kept it here, and never sends anyone to a room view", () => {
+    const shared = answeredHere({ ...ok, capture: "yes", sharing: "hidden" });
+    expect(shared).toBe("Ghost answered here, not over your work, because your screen is being shared.");
+    expect(answeredHere({ ...ok, capture: "yes", sharing: undefined })).toBe(shared);
+    expect(answeredHere({ ...ok, capture: "yes", sharing: "shown" })).toBeNull();
+    for (const s of [shared, answeredHere({ ...ok, settings: { on: false } })]) expect(s).not.toMatch(/room/i);
+  });
+});
+
+describe("the simplification pass (2026-11-14)", () => {
+  const fresh: Facts = { ...known, modelReady: false, micHealthy: true, micNone: false };
+
+  it("keeps the path to the wake beat as short as it was", () => {
+    // The same numbers as before hiring an agent left and What Ghost keeps was added.
+    expect(pathToMoment(fresh, "claude-code").clicks).toBe(2);
+    expect(pathToMoment(fresh, "found").clicks).toBe(3);
+    expect(pathToMoment(fresh, "key")).toMatchObject({ clicks: 3, fields: 1 });
+    expect(pathToMoment(fresh, "nothing").clicks).toBe(2);
+    expect(pathToMoment(fresh, "nothing").steps).not.toContain("keeps");
+  });
+
+  it("has no step for hiring an agent, and forgets one stored by an earlier first run", () => {
+    expect(STEPS.map((s) => s.id)).not.toContain("agent");
+    expect(TASKS.map((t) => t.id)).toEqual(["model", "hear", "wake", "voice", "app", "ask"]);
+    const old = parseSaved(JSON.stringify({ step: "agent", skipped: ["agent", "app"] }));
+    expect(old.step).toBeNull();
+    expect(old.skipped).toEqual(["app"]);
+  });
+
+  it("puts What Ghost keeps and sends right after the wake beat, as a page, not a task", () => {
+    const keeps = STEPS.find((s) => s.id === "keeps")!;
+    expect(keeps.task).toBe(false);
+    expect(taskNumber("keeps")).toBeNull();
+    expect(MEET.map((s) => s.id)).toEqual(["model", "hear", "wake"]);
+    // Skipped or met, the wake beat goes there; nothing else does.
+    expect(routeAfter("wake", fresh, { met: null, waitingForEars: false })).toBe("keeps");
+    expect(STEPS.filter((s) => routeAfter(s.id, fresh, { met: null, waitingForEars: false }) === "keeps").map((s) => s.id)).toEqual(["wake"]);
+    expect(progressOf(fresh, EMPTY).state.keeps).toBe("open");
+    expect(progressOf(fresh, { ...EMPTY, keepsSeen: true }).state.keeps).toBe("done");
+    expect(parseSaved(JSON.stringify({ keepsSeen: true })).keepsSeen).toBe(true);
+  });
+
+  it("offers the echo canceller on the wake beat only on open speakers with nothing taking Ghost's voice out", () => {
+    const m = (c: string, problem: string | null = null) => ({ case: c, problem });
+    expect(echoOfferNow(m("unprotected"), false)).toBe(true);
+    expect(echoOfferNow(m("unprotected"), true)).toBe(false);
+    expect(echoOfferNow(m("unprotected", "It stopped hearing."), false)).toBe(false);
+    for (const c of ["on-chip", "headset", "host-canceller", "unknown"]) expect(echoOfferNow(m(c), false)).toBe(false);
+    expect(echoOfferNow(null, false)).toBe(false);
+  });
+
+  // The wake beat's count of things under its title. A control or a sentence added fails here.
+  it("shows three things on the wake beat for a fresh install, and at most five anywhere", () => {
+    const base = { floatKnown: true, mic: true, echoNow: false, keepingTakes: false };
+    expect(wakeItems(base)).toEqual(["float", "mic", "other-ways"]);
+    expect(wakeItems({ ...base, echoNow: true })).toEqual(["float", "mic", "echo", "other-ways"]);
+    expect(wakeItems({ ...base, keepingTakes: true })).toEqual(["float", "mic", "takes", "other-ways"]);
+    expect(wakeItems({ floatKnown: true, mic: true, echoNow: true, keepingTakes: true })).toHaveLength(5);
   });
 });

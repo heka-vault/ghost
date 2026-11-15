@@ -15,3 +15,36 @@ The owner, using the desk live: the Agents item opened a settings page and there
 **It scales by order and by scroll, not by grouping.** The agent in the session first, then those waiting on the operator, then those at work, then the rest by when they last worked (`app/railAgents.ts`). The list scrolls inside the rail's nav with a fade at its foot, so the rail's foot never moves; + stays at the head of the list; under 760 px of height the names go and the marks stay, each with its tooltip and accessible name.
 
 **Apps is its own place** (`#/apps`, `#/apps/:name`), not a page of Settings; `#/settings/apps…` redirects.
+
+## Amendment, 2026-11-14
+
+The `hood` shape is retired: the operator did not want it in the family. A look that still
+names it is read as no look, so that agent is drawn as Wisp in the colour its slug picks.
+
+## Amendment, 2026-11-14: fewer places, and the agents capped
+
+The owner asked for a simpler desk after a review of the field ("I want to make sure we are not
+having an overly complex UI"). The measure was a newcomer's: places, clicks, and nouns to learn.
+
+**Four places and the agents.** The rail is Ghost's presence, Today, **On its own**, Apps, the
+agents, then Settings, with the floating switch and the microphone at the foot. *Watching*
+became *On its own* (`#/on-its-own`; `#/watching` and `#/departments/…` redirect): one list of
+everything Ghost does without being asked, each row a sentence, made by asking Ghost in words
+(a typed turn: the agent uses `ghost_schedule_manage` and `ghost_watch_manage` through the gate
+as before), with the forms one disclosure down (Set it up by hand). The Hearing test left the
+rail (ADR 0042 is unchanged): Settings › Sound's "Test what Ghost hears", the microphone's note
+there (ADR 0064), Wake takes and the first run lead to it.
+
+**The agents are capped.** The rail shows every agent that matters now (in the session,
+waiting on the operator, at work), then the most recently used, as many as fit without
+scrolling and six at the most (`railShown`, `RAIL_MAX`; measured: four at the window's default
+1040×720, five at 1440×900). The rest, and hiring (+ moved off the rail into the roster), are
+one entry, **All agents**, which opens Settings › Agents. Nothing is pinned: with the agents
+that matter always shown, the cap was usable without it.
+
+**Order by hire, not by state.** This replaces "the agent in the session first, then those
+waiting…": the agents shown are listed in the order they were hired, so an agent keeps its
+place and its state shows on its mark. While the pointer or focus is on the list, a newcomer
+goes at the end and nothing leaves or moves until it goes (`holdStill`), so a row never jumps
+under the pointer. At the smallest window (480px tall) the places and the foot take the whole
+rail, so the agents that matter are there but the nav scrolls, as it did before the cap.

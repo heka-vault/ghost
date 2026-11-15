@@ -10,7 +10,7 @@ measures what Ghost should not have heard at all. The code is
 ```sh
 make perf-room                                        # every room, both paths, ~1 h
 make perf-room ARGS="--conditions babble --snr 6 --scripts follow --jobs 2 --show-text"
-make perf-room ARGS="--set room_gate=on"              # as a laptop's session has it (ADR 0071)
+make perf-room ARGS="--set room_gate=on"              # as a laptop's session has it (ADR 0072)
 ```
 
 It runs the `ghost-perf` binary directly: no vault, no settings file, nothing of this

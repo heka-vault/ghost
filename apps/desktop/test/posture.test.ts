@@ -1,101 +1,84 @@
 import { describe, expect, it } from "vitest";
 
-import { SESSION_IDLE_MS, isRoomKey, nextChangeIn, postureOf } from "../src/app/posture";
+import { ROOM_KEYS, forgetRoomChoices, postureOf } from "../src/app/posture";
 
-const base = { hold: "auto" as const, deskSession: false, idleMs: 0, awayAfterMs: 180_000 };
+const base = { deskSession: false };
 
-describe("postureOf", () => {
-  it("stays at the desk while the operator is using the window", () => {
-    expect(postureOf(base).posture).toBe("desk");
-    expect(postureOf({ ...base, deskSession: true, idleMs: 5_000 }).posture).toBe("desk");
+describe("postureOf: the desk or floating, nothing else", () => {
+  it("is the desk outside a session, however long nobody touched the window", () => {
+    // Before 2026-11-14 three minutes away brought the room; now the window stays as it is.
+    expect(postureOf(base)).toBe("desk");
+    expect(postureOf({ ...base, floating: true, windowActive: false })).toBe("desk");
   });
 
-  it("goes to the room in a desk session after the conversation screen's own 20 s", () => {
-    expect(postureOf({ ...base, deskSession: true, idleMs: SESSION_IDLE_MS - 1 }).posture).toBe("desk");
-    expect(postureOf({ ...base, deskSession: true, idleMs: SESSION_IDLE_MS })).toEqual({ posture: "room", reason: "session" });
+  it("keeps a session in the window when the floating room is off or can't show", () => {
+    // Before, 20 s of quiet in a session brought the room; now it stays at the desk.
+    const session = { deskSession: true, windowActive: false };
+    expect(postureOf(session)).toBe("desk");
+    expect(postureOf({ ...session, floating: false })).toBe("desk");
   });
 
-  it("goes to the room once the operator has stepped away, outside a session", () => {
-    expect(postureOf({ ...base, idleMs: 179_999 }).posture).toBe("desk");
-    expect(postureOf({ ...base, idleMs: 180_000 })).toEqual({ posture: "room", reason: "away" });
-  });
-
-  it("never goes by itself when the operator said never", () => {
-    expect(postureOf({ ...base, awayAfterMs: null, idleMs: 9e9 }).posture).toBe("desk");
-    expect(postureOf({ ...base, deskSession: true, sessionIdleMs: null, idleMs: 9e9 }).posture).toBe("desk");
-  });
-
-  it("lets the operator's hold win either way", () => {
-    expect(postureOf({ ...base, hold: "room" })).toEqual({ posture: "room", reason: "held" });
-    expect(postureOf({ ...base, hold: "desk", deskSession: true, idleMs: 9e9 }).posture).toBe("desk");
-  });
-
-  it("does not use the stepped-away delay inside a session", () => {
-    // 3 minutes away is long past 20 s: a session uses its own threshold, not the away one.
-    expect(postureOf({ ...base, deskSession: true, awayAfterMs: 1_000, idleMs: 2_000 }).posture).toBe("desk");
-  });
-});
-
-describe("postureOf, the floating room (ADR 0059)", () => {
-  const away = { ...base, deskSession: true, floating: true, windowActive: false };
   it("floats a desk session at once when it is on and the window is not the one in use", () => {
-    expect(postureOf(away)).toEqual({ posture: "float", reason: "session" });
-    expect(postureOf({ ...away, idleMs: 9e9 }).posture).toBe("float");
+    expect(postureOf({ deskSession: true, floating: true, windowActive: false })).toBe("float");
   });
-  it("changes nothing when it is off or cannot show", () => {
-    expect(postureOf({ ...away, floating: false }).posture).toBe("desk");
-    expect(postureOf({ ...away, floating: undefined, idleMs: SESSION_IDLE_MS })).toEqual({ posture: "room", reason: "session" });
-  });
+
   it("leaves a session in the window the operator is using", () => {
-    expect(postureOf({ ...away, windowActive: true }).posture).toBe("desk");
-    expect(postureOf({ ...away, windowActive: true, idleMs: SESSION_IDLE_MS }).posture).toBe("room");
+    expect(postureOf({ deskSession: true, floating: true, windowActive: true })).toBe("desk");
     // A window that doesn't say is its own view: it is in use.
-    expect(postureOf({ ...away, windowActive: undefined }).posture).toBe("desk");
+    expect(postureOf({ deskSession: true, floating: true })).toBe("desk");
   });
-  it("never floats outside a session, or a session on the phone", () => {
-    expect(postureOf({ ...away, deskSession: false, idleMs: 9e9 })).toEqual({ posture: "room", reason: "away" });
-  });
-  it("yields to a room held in the window, but not to the desk", () => {
-    expect(postureOf({ ...away, hold: "room" }).posture).toBe("room");
-    expect(postureOf({ ...away, hold: "desk" }).posture).toBe("float");
-  });
-  it("has nothing to wait for while floating", () => {
-    expect(nextChangeIn({ ...away, idleMs: 1_000 })).toBeNull();
-  });
-});
 
-describe("nextChangeIn", () => {
-  it("says when the room will come with no input", () => {
-    expect(nextChangeIn({ ...base, idleMs: 60_000 })).toBe(120_000);
-    expect(nextChangeIn({ ...base, deskSession: true, idleMs: 15_000 })).toBe(5_000);
+  it("never floats a session on the phone (deskSession is false for it)", () => {
+    expect(postureOf({ deskSession: false, floating: true, windowActive: false, introducing: true })).toBe("desk");
   });
-  it("is null when nothing will change by itself", () => {
-    expect(nextChangeIn({ ...base, idleMs: 200_000 })).toBeNull();
-    expect(nextChangeIn({ ...base, hold: "room" })).toBeNull();
-    expect(nextChangeIn({ ...base, awayAfterMs: null })).toBeNull();
-  });
-});
 
-describe("isRoomKey", () => {
-  const k = (key: string, mods: Partial<{ ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean }> = {}) => ({ key, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, ...mods });
-  it("is Ctrl+. alone", () => {
-    expect(isRoomKey(k(".", { ctrlKey: true }))).toBe(true);
-    expect(isRoomKey(k("."))).toBe(false);
-    expect(isRoomKey(k(".", { ctrlKey: true, shiftKey: true }))).toBe(false);
+  it("only ever answers desk or float", () => {
+    const answers = new Set<string>();
+    for (const deskSession of [true, false])
+      for (const floating of [true, false, undefined])
+        for (const windowActive of [true, false, undefined])
+          for (const introducing of [true, false, undefined]) answers.add(postureOf({ deskSession, floating, windowActive, introducing }));
+    expect([...answers].sort()).toEqual(["desk", "float"]);
   });
 });
 
 describe("the first run's moment (ADR 0059 as amended 2026-11-14)", () => {
-  const floating = { ...base, deskSession: true, floating: true, windowActive: true };
+  const floating = { deskSession: true, floating: true, windowActive: true };
   it("floats over the window the newcomer is using while its wake beat is open", () => {
-    expect(postureOf(floating).posture).toBe("desk");
-    expect(postureOf({ ...floating, introducing: true }).posture).toBe("float");
+    expect(postureOf(floating)).toBe("desk");
+    expect(postureOf({ ...floating, introducing: true })).toBe("float");
   });
   it("still lets the floating rule decide: a share or a desktop that can't float keeps it in the window", () => {
     // `floating` is false while the screen is shared and Ghost is kept out of it.
-    expect(postureOf({ ...floating, floating: false, introducing: true }).posture).toBe("desk");
-    expect(postureOf({ ...floating, deskSession: false, introducing: true }).posture).toBe("desk");
-    // A held room still wins.
-    expect(postureOf({ ...floating, hold: "room", introducing: true }).posture).toBe("room");
+    expect(postureOf({ ...floating, floating: false, introducing: true })).toBe("desk");
+    expect(postureOf({ ...floating, deskSession: false, introducing: true })).toBe("desk");
+  });
+});
+
+describe("an older install's room choices", () => {
+  function store(entries: Record<string, string>) {
+    const m = new Map(Object.entries(entries));
+    return { m, removeItem: (k: string) => void m.delete(k) };
+  }
+  it("are removed quietly, and nothing else is", () => {
+    const s = store({ "ghost.room.away": "10", "ghost.room.session": "off", "ghost.onboarding": "{}" });
+    forgetRoomChoices(s);
+    expect([...s.m.keys()]).toEqual(["ghost.onboarding"]);
+    expect(ROOM_KEYS).toEqual(["ghost.room.away", "ghost.room.session"]);
+  });
+  it("never throws on storage that refuses, or none at all", () => {
+    expect(() =>
+      forgetRoomChoices({
+        removeItem: () => {
+          throw new Error("SecurityError");
+        },
+      }),
+    ).not.toThrow();
+    expect(() => forgetRoomChoices(null)).not.toThrow();
+  });
+  it("leaves an old stored hold of the room with nothing to act on", () => {
+    // The hold was never stored, and the rule takes no hold: a `?posture=room` address or a
+    // stale value has no input left to reach.
+    expect(postureOf({ deskSession: true, ...({ hold: "room" } as object) })).toBe("desk");
   });
 });

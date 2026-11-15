@@ -9,6 +9,8 @@ import { speechEnvelope } from "../../ui/VoiceWave";
 import siteTurnJson from "./fixtures/floating-site-turn.json";
 import type {
   Ack,
+  AlwaysResult,
+  PermissionChoiceView,
   ActivityView,
   CallPreview,
   QuestionView,
@@ -59,10 +61,11 @@ import { DESKTOP_BUILD, DESKTOP_VERSION } from "../../app/version";
 import { HttpError } from "./errors";
 import { type HearDesign, MockHear } from "./hear";
 import { MockReports } from "./reports";
+import { uninstallView } from "./uninstall";
 import { MockWakeTakes } from "./wakeTakes";
 import { isConnectionKey, isModelOnly, MockModel } from "./model";
 import { MockOtherTools } from "./otherTools";
-import { MockSchedules } from "./schedules";
+import { MockSchedules, askedSchedule } from "./schedules";
 import { type AppFixture, type CatalogSeed, DEFAULT_LIMITS, GENERIC_TOOLS, TOOLS_BY_CATALOG } from "./fixtures/apps";
 import type { AgentRecord } from "./fixtures/conversations";
 import { CONFIG_DIR } from "./fixtures/folder";
@@ -71,11 +74,12 @@ import { renderPolicy } from "./fixtures/policy";
 import { PROVIDER_ONLY } from "./fixtures/settings";
 import { LONG_REPLY, type SessionFixture } from "./fixtures/session";
 import { sourceOf } from "./fixtures/sources";
+import { alwaysOffer, choiceSentence, choicesFor, scopeWords } from "./always";
 import { AUTONOMY, LISTS, conditionalFor, levelOf, parseRule, readPolicyText, ruleText, withRule } from "./permissions";
 import { type CatalogSkill, GHOST_SKILLS_DIR, SKILL_CATALOG, type SkillFixture, missingOf } from "./fixtures/skills";
 import { MockReach } from "./reach";
 import { MockRealtime } from "./realtime";
-import { hex, type Scenario, seeded } from "./scenarios";
+import { ago, hex, type Scenario, seeded } from "./scenarios";
 
 export { HttpError };
 
@@ -217,6 +221,8 @@ export class MockDaemon {
   /** Ghost's own sources; each connected app adds one when GET /sources answers. */
   private sources: SourceInfo[];
   private policy: PolicyView;
+  /** The rules set from a decision on the card (ADR 0070). */
+  private choices: PermissionChoiceView[] = [];
   private audit: AuditEntry[];
   private settings: SettingsView;
   /** Ghost's vault (ADR 0036): names and metadata; the mock never keeps a value either. */
@@ -291,6 +297,20 @@ export class MockDaemon {
     if (scenario.pieces) while (this.turns.length && this.turns[this.turns.length - 1].role === "user") this.turns = this.turns.slice(0, -1);
     this.pending = f.session.pending;
     for (const l of f.conversations.agents) this.agents.set(l.detail.slug, l);
+    // `&agents=<n>`: that many hired agents besides Ghost, for the rail's cap (2026-11-14): the
+    // fixture's first n, or more made up after them, a day apart, the later ones used more lately.
+    const many = typeof window !== "undefined" ? Number(new URLSearchParams(window.location.search).get("agents") ?? NaN) : NaN;
+    if (Number.isFinite(many) && many >= 0) {
+      const hired = [...this.agents.values()].filter((l) => !l.detail.is_ghost && !l.detail.retired_at);
+      hired.slice(many).forEach((l) => this.agents.delete(l.detail.slug));
+      const NAMES = ["Brand", "Hiring", "Ops", "Support", "Research", "Billing", "Design", "Docs", "Sales", "Security", "Data", "Mobile", "Growth", "Travel", "Inbox"];
+      for (let i = hired.length; i < many; i++) {
+        const name = NAMES[(i - hired.length) % NAMES.length] + (i - hired.length >= NAMES.length ? ` ${i}` : "");
+        const slug = name.toLowerCase().replace(/\s+/g, "-");
+        const base = hired[0]?.detail ?? [...this.agents.values()][0].detail;
+        this.agents.set(slug, { detail: { ...base, id: newId(), slug, name, aliases: [], is_ghost: false, active: false, look: null, retired_at: null, created_at: ago(60 * 24 * (40 - i)), last_active_at: i % 3 ? ago(60 * (many - i)) : null }, turns: [], compactions: [] });
+      }
+    }
     this.rules = f.rules;
     this.outputs = f.outputs;
     this.watching = f.watching;
@@ -299,6 +319,14 @@ export class MockDaemon {
     this.catalog = f.catalog;
     this.sources = f.sources;
     this.policy = f.policy;
+    // ADR 0070: `always` has rules set from decisions; `always-held` an ask rule that holds an allow back.
+    this.choices = choicesFor(scenario.name);
+    if (this.choices.length || scenario.name === "always-held") {
+      const p = { ...this.policy.permissions };
+      for (const c of this.choices) if (!p[c.choice].includes(c.rule)) p[c.choice] = [...p[c.choice], c.rule];
+      if (scenario.name === "always-held") p.ask = [...p.ask, "github.close"];
+      this.policy = { ...this.policy, permissions: p, text: renderPolicy(p, this.policy.routes) };
+    }
     this.audit = [...f.session.audit, ...f.audit];
     this.activity = f.session.activity;
     for (const [id, p] of Object.entries(f.session.results)) this.callResults.set(id, { ...p, id, session_id: f.session.sessionId ?? "" });
@@ -317,6 +345,15 @@ export class MockDaemon {
     // `&mic=none`: a computer with no microphone at all (the first run's typed moment).
     if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("mic") === "none")
       this.devices = { ...this.devices, microphone: null, devices: this.devices.devices.map((d) => ({ ...d, max_input_channels: 0, is_default_input: false })) };
+    // `&mic=deaf`: the microphone stopped hearing well (ADR 0064): its note, with Repair.
+    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("mic") === "deaf" && this.devices.microphone)
+      this.devices = { ...this.devices, microphone: { ...this.devices.microphone, problem: "Loud speech has read as nothing four times in the last ten minutes: the microphone may have stopped passing sound." } };
+    // `&mic=headset`: a headset, so nothing of Ghost's voice comes back (no echo line on the wake beat).
+    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("mic") === "headset" && this.devices.microphone)
+      this.devices = {
+        ...this.devices,
+        microphone: { ...this.devices.microphone, case: "headset", summary: "Ghost listens to your headset’s microphone; its voice plays in your ears, so it can’t hear itself.", session_input: "alsa_input.usb-Jabra_Evolve2_65-00.mono-fallback", wake_input: "alsa_input.usb-Jabra_Evolve2_65-00.mono-fallback" },
+      };
     this.models = f.settings.models;
     // `floating.html?…&first=1&heyghost=<ms>`: the first run's moment on the floating page alone
     // (no wizard to arm it): armed from the start.
@@ -351,7 +388,8 @@ export class MockDaemon {
       uptime_secs: 0,
       ...mockBuild(options.build ?? null),
       api_version: "1",
-      wake_mode: "transcript",
+      // `&wake=detector`: the trained detector is the wake, so wake takes are kept (ADR 0065).
+      wake_mode: typeof window !== "undefined" && new URLSearchParams(window.location.search).get("wake") === "detector" ? "onnx" : "transcript",
       apps: f.apps.filter((a) => a.view.state === "connected").map((a) => a.view.name),
       pending: this.pending,
       conversation: scenario.session,
@@ -381,8 +419,8 @@ export class MockDaemon {
         conversation: this.status.conversation ?? null,
       });
     }
-    // A configured Ghost has checked its model connection once (ADR 0056): Today and the room
-    // show how fast a reply starts from it. An empty or unconfigured one hasn't yet.
+    // A configured Ghost has checked its model connection once (ADR 0056): Today shows
+    // how fast a reply starts from it. An empty or unconfigured one hasn't yet.
     if (scenario.configured && scenario.data !== "empty") {
       try {
         const c = this.model.check({ values: {} });
@@ -911,7 +949,52 @@ export class MockDaemon {
   /** The waiting change with its seconds left counted now, as the real daemon reports it. */
   private live(): PendingProposal | null {
     const p = this.pending;
-    return p ? { ...p, expires_in_secs: Math.max(0, (new Date(p.expires_at).getTime() - Date.now()) / 1000) } : null;
+    return p ? this.withOffer({ ...p, expires_in_secs: Math.max(0, (new Date(p.expires_at).getTime() - Date.now()) / 1000) }) : null;
+  }
+  /** A waiting change with what its card may offer to make the decision stick, under the permissions now (ADR 0070). */
+  private withOffer(p: PendingProposal): PendingProposal {
+    const always = alwaysOffer(this.policy.permissions, p.source, p.operation);
+    return always ? { ...p, always } : { ...p, always: undefined };
+  }
+  /** POST /proposals/{id}/always: the rule from the change's own tool, then the change run or dropped. */
+  private decideAlways(id: string, choice: unknown): AlwaysResult {
+    if (choice !== "allow" && choice !== "block") throw new HttpError(422, "choice must be allow or block");
+    const item = this.waitingItems.find((i) => i.change?.id === id);
+    const change = item?.change ?? (this.pending?.id === id ? this.pending : null);
+    if (!change) throw new HttpError(409, "that change isn't waiting");
+    const offer = alwaysOffer(this.policy.permissions, change.source, change.operation);
+    if (!offer) throw new HttpError(409, "Ghost can’t name this tool in a rule, so it can’t remember this choice. Decide it with Yes or No.");
+    if (choice === "allow" && !offer.allow) throw new HttpError(409, offer.held ?? "");
+    const p = { ...this.policy.permissions };
+    if (!p[choice].includes(offer.rule)) p[choice] = [...p[choice], offer.rule];
+    this.policy = { ...this.policy, exists: true, permissions: p, text: renderPolicy(p, this.policy.routes) };
+    const row: PermissionChoiceView = {
+      id: Math.max(0, ...this.choices.map((c) => c.id)) + 1,
+      rule: offer.rule,
+      choice,
+      sentence: choiceSentence(choice, scopeWords(change.source, change.operation)),
+      set_at: now(),
+      proposal_id: id,
+      in_file: true,
+    };
+    this.choices = [row, ...this.choices];
+    this.appsChanged(null);
+    let outcome: OutcomeView | undefined;
+    if (item) {
+      this.dropWaiting(item.key);
+      if (choice === "allow") outcome = { proposal_id: id, target: change.target, status: "success", applied: [change.summary], summary: `Applied on ${change.target}.` };
+    } else if (choice === "allow") outcome = this.confirm();
+    else this.settlePending("cancelled", { reason: "ui" });
+    return outcome ? { choice: row, outcome } : { choice: row };
+  }
+  private removeChoice(id: number): Ack {
+    const row = this.choices.find((c) => c.id === id);
+    if (!row) throw new HttpError(404, "no such choice");
+    this.choices = this.choices.filter((c) => c.id !== id);
+    const p = { ...this.policy.permissions, [row.choice]: this.policy.permissions[row.choice].filter((r) => r !== row.rule) };
+    this.policy = { ...this.policy, permissions: p, text: renderPolicy(p, this.policy.routes) };
+    this.appsChanged(null);
+    return { ok: true };
   }
   private snapshot(): Status {
     return { ...this.status, uptime_secs: (Date.now() - this.bootedAt) / 1000 + 2731, pending: this.live() };
@@ -1089,6 +1172,8 @@ export class MockDaemon {
     if (ids.length) this.later(500, () => ids.forEach((c) => this.act("call", c)));
     this.later(ids.length ? 1600 : 900, () => {
       ids.forEach((c) => this.act("result", c));
+      const own = this.onItsOwn(text);
+      if (own) return this.reply(own);
       const patch = /(?:patch me (?:through )?to|transfer me to|switch to|get me|back to)\s+(?:the\s+)?([\w -]+?)(?:\s+(?:line|agent))?[.!?]*$/i.exec(text);
       if (patch) {
         const want = patch[1].trim().toLowerCase();
@@ -1108,6 +1193,34 @@ export class MockDaemon {
       }
       this.reply(rule?.reply ?? this.script.fallbackReply);
     });
+  }
+  /** A watch asked for in words, written once the operator says yes (ADR 0052 asks by default). */
+  private pendingWatch: WatchingView["watches"][number] | null = null;
+  /**
+   * On its own (2026-11-14): a typed sentence asking for something done on its own. The mock's
+   * stand-in for the agent calling `ghost_schedule_manage` (Ghost's own app runs it quietly and
+   * says so) or `ghost_watch_manage` (asks first): the reply, or null when the words ask for neither.
+   */
+  private onItsOwn(text: string): string | null {
+    const agentOf = (n: string) => [...this.agents.values()].find((a) => !a.detail.retired_at && (a.detail.slug === n.toLowerCase() || a.detail.name.toLowerCase() === n.toLowerCase()))?.detail.slug ?? null;
+    const asked = askedSchedule(text, agentOf);
+    if (asked) {
+      const id = newId().slice(0, 8);
+      this.act("call", { name: "ghost_schedule_manage", id });
+      const s = this.schedules.addByAgent(asked.req, this.status.conversation ?? "ghost");
+      this.act("result", { name: "ghost_schedule_manage", id });
+      const who = s.agent === "ghost" ? "I" : (this.agents.get(s.agent)?.detail.name ?? s.agent);
+      // The mock echoes the operator's own “when” (the words before the first comma).
+      const when = text.split(",")[0].trim();
+      return `Done. ${when.charAt(0).toUpperCase()}${when.slice(1)}, ${who === "I" ? "I’ll" : `${who} will`} ${s.instruction.charAt(0).toLowerCase()}${s.instruction.slice(1).replace(/\.$/, "")}. It’s on the list now.`;
+    }
+    const w = /^(?:tell me|let me know) when (.+?)[.!]*$/i.exec(text.trim());
+    if (w && !this.pending) {
+      this.pendingWatch = { name: w[1].toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 32) || "new-watch", app: "github", read: "list_issues", every_secs: 900, steps: ["check"], response: "tell", urgency: "notify", last_run: null, last_ok: null, error: null, open: 0, seen: 0, made_by: `agent:${this.status.conversation ?? "ghost"}`, paused: false };
+      this.propose({ source: "ghost", operation: "watch_manage", target: "watches.json", summary: `Add a watch: tell you when ${w[1]}.`, rationale: "Setting up a watch asks you first." });
+      return "I can watch for that. Say yes, or press Confirm, and I’ll set it up.";
+    }
+    return null;
   }
   /** Ghost says `text`: speaking for about as long as the words take (Kokoro, ~14 characters a second). */
   private reply(text: string, ms = Math.max(1600, (text.length / 14) * 1000)) {
@@ -1227,6 +1340,12 @@ export class MockDaemon {
     this.settlePending("executed");
     const outcome: OutcomeView = { proposal_id: p.id, status: "success", summary: p.summary.replace(/^On [^:]+: /, ""), target: p.target, applied: [p.operation], state_now: "closed", error: null, failed_step: null };
     this.emit({ type: "outcome", outcome, via: "ui" });
+    if (p.operation === "watch_manage" && this.pendingWatch) {
+      this.watching = { ...this.watching, watches: [...this.watching.watches, this.pendingWatch] };
+      this.pendingWatch = null;
+      this.reply("Done. I’m watching for it, and it’s on the list.", replyMs);
+      return outcome;
+    }
     const short = shortName(p.target);
     this.reply(`Done. ${short[0].toUpperCase()}${short.slice(1)} is closed.`, replyMs);
     return outcome;
@@ -1479,7 +1598,7 @@ export class MockDaemon {
   // ------------------------------------------------------------------ waiting (ADR 0029)
   private waitingView() {
     const count = this.waitingItems.filter((i) => i.state === "new" || i.state === "delivered").length;
-    return { items: this.waitingItems, count };
+    return { items: this.waitingItems.map((i) => (i.change ? { ...i, change: this.withOffer(i.change) } : i)), count };
   }
   private markWaiting(key: string, patch: Partial<WaitingItemView>): boolean {
     const i = this.waitingItems.findIndex((x) => x.key === key);
@@ -1828,6 +1947,7 @@ export class MockDaemon {
       const answer = await this.hear.handle(method, path, query, b);
       if (answer !== undefined) return answer;
     }
+    if (method === "GET" && path === "/uninstall") return uninstallView();
     if (path.startsWith("/reports")) {
       const answer = this.reports.handle(method, path, b);
       if (answer !== undefined) return answer;
@@ -1891,6 +2011,9 @@ export class MockDaemon {
       const until = new Date(Date.now() + Number(b.minutes ?? 30) * 60000).toISOString();
       return { ok: this.markWaiting(String(b.key ?? ""), { state: "snoozed", snoozed_until: until }) };
     }
+    if ((r = m(/^\/proposals\/([^/]+)\/always$/)) && method === "POST") return this.decideAlways(r[1], b.choice);
+    if (method === "GET" && path === "/permissions/choices") return this.choices;
+    if ((r = m(/^\/permissions\/choices\/(\d+)$/)) && method === "DELETE") return this.removeChoice(Number(r[1]));
     if ((r = m(/^\/proposals\/([^/]+)\/(confirm|cancel)$/))) {
       const item = this.waitingItems.find((i) => i.change?.id === r![1]);
       if (!item) throw new HttpError(409, "that change isn't waiting");
@@ -1944,6 +2067,8 @@ export class MockDaemon {
       if (u.text != null) {
         // As the daemon does: the file is read before it is written, and refused when it can't be.
         const permissions = readPolicyText(u.text, this.policy.path);
+        // ADR 0070: a save made from an older copy of the file is refused, never written over a rule set meanwhile.
+        if (u.base != null && u.base !== this.policy.text) throw new HttpError(409, "The file changed since you opened it (a rule was set meanwhile). Nothing was saved: reload it and make your edit again.");
         this.policy = { ...this.policy, text: u.text, exists: true, permissions };
         this.appsChanged(null);
       } else if (u.routes) {
@@ -2137,7 +2262,7 @@ export class MockDaemon {
         // A look, as the daemon checks it: a known shape and colour, "" back to the slug's; never Ghost's.
         if (typeof b.look === "string") {
           if (d.is_ghost) throw new HttpError(422, "Ghost is always Wisp");
-          if (b.look && !parseLook(b.look)) throw new HttpError(422, "a shape (wisp, drop, bell, hood, cloud, lantern, star, moth), a colon and a colour 0 to 7");
+          if (b.look && !parseLook(b.look)) throw new HttpError(422, "a shape (wisp, drop, bell, cloud, lantern, star, moth), a colon and a colour 0 to 7");
           d.look = b.look || null;
         }
         for (const k of ["name", "aliases", "job", "speed", "persona", "memory", "notes"] as const) {

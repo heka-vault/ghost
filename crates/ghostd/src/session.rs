@@ -210,7 +210,7 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
         let warmup = voice
             .echo_warmup
             .or_else(|| phone.is_none().then(|| d.mic_plan().echo_warmup()));
-        // The person or the room (ADR 0071): a desk session's, by its microphone; never
+        // The person or the room (ADR 0072): a desk session's, by its microphone; never
         // the phone's, whose own gain control and canceller flatten the levels it rests on.
         let room_gate = voice
             .room_gate
@@ -486,7 +486,7 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
             lock(&health).check(dbfs as f32, words, true, std::time::Instant::now());
         }) as ghost_voice::stt::OnRead
     });
-    // The room too loud to tell the person from it (ADR 0071): the microphone's note.
+    // The room too loud to tell the person from it (ADR 0072): the microphone's note.
     let on_too_loud: Option<ghost_voice::stt::OnTooLoud> = mic.then(|| {
         let d = Arc::downgrade(d);
         Arc::new(move || {

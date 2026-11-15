@@ -1,6 +1,6 @@
 /**
- * The floating room (ADR 0059; docs/design-system.md, The floating room): the room posture
- * without a window. At rest a thin line of light at the bottom edge of a monitor (a struck red
+ * The floating room (ADR 0059; docs/design-system.md, The floating room): Ghost big and
+ * present over the desktop, without a window. At rest a thin line of light at the bottom edge of a monitor (a struck red
  * microphone when Ghost isn't listening, ADR 0057); when a spoken session at this desk floats
  * (`postureOf`), Ghost comes forward from depth over the desktop, beside the work by default.
  *
@@ -130,16 +130,12 @@ export function FloatingRoom({ stage = false }: { stage?: boolean } = {}) {
 
   // The one posture rule (posture.ts): floating, the main window not the one in use.
   const posture = postureOf({
-    hold: "auto",
     deskSession,
-    idleMs: 0,
-    awayAfterMs: null,
-    sessionIdleMs: null,
     floating: shell.sharing === "none" || shell.sharing === "shown",
     windowActive: shell.mainActive,
     // The first run's wake beat (ADR 0059 as amended 2026-11-14): its moment floats over it.
     introducing: shell.firstMeeting,
-  }).posture;
+  });
   const ruled = sceneOf({
     posture,
     capture: shell.capture,

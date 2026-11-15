@@ -200,6 +200,8 @@ fn main() -> anyhow::Result<()> {
                 &mut std::io::stderr(),
             ))
         }
+        // #147: what Ghost left on this computer, listed and removed by the person
+        Some("uninstall") => std::process::exit(ghostd::uninstall::cli(&args[1..])),
         Some("api-schema") => {
             let doc = ghost_api::openapi::document();
             println!("{}", serde_json::to_string_pretty(&doc)?);
@@ -211,7 +213,7 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Some(other) => anyhow::bail!(
-            "unknown command {other:?}; commands: run, status, wake, say, sleep, check, models, echo-cancel, reports, push, latency, llm, perf, restore-volumes, passwords, mcp, setup, api-schema, version"
+            "unknown command {other:?}; commands: run, status, wake, say, sleep, check, models, echo-cancel, reports, push, latency, llm, perf, restore-volumes, passwords, mcp, setup, uninstall, api-schema, version"
         ),
     }
 }
@@ -267,6 +269,18 @@ async fn run(mirror: LogMirror) -> anyhow::Result<()> {
     env.extend(environ.lock().unwrap_or_else(|e| e.into_inner()).clone());
     let (cfg, voice) = settings_from(&env)?;
     ghost_voice::debug::enable(voice.debug_audio);
+    // #147: the echo canceller's unit stops starting once Ghost is gone.
+    {
+        let places = ghostd::uninstall::places(&cfg, &voice, &env);
+        tokio::task::spawn_blocking(move || {
+            for line in ghostd::uninstall::keep_echo_canceller_current(
+                &places,
+                &ghostd::uninstall::RealHands,
+            ) {
+                tracing::info!("echo canceller: {line}");
+            }
+        });
+    }
     let daemon = Arc::new(
         Daemon::new(cfg, voice, Ports::live())
             .with_passwords(vault)

@@ -136,7 +136,11 @@ async fn pending_confirm_executes_and_audits() {
     w.state.set_phase(Phase::Listening, Some("sess1"), None);
     let sub = pend(&w.gate, "sess1").await;
     assert!(!sub.executed());
-    w.state.set_pending(Some(pending_view(&sub.proposal, None)));
+    w.state.set_pending(Some(pending_view(
+        &sub.proposal,
+        None,
+        &w.gate.autonomy().permissions,
+    )));
     let p = c.get("/proposals/pending").await;
     assert_eq!(p["operation"], "nuke");
     assert!(p["summary"].as_str().unwrap().contains("add flagged"));

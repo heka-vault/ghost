@@ -25,7 +25,7 @@
 //! sees them in order with the audio. Transcripts are logged only under
 //! `GHOST_DEBUG_AUDIO` (`debug`).
 //!
-//! In a desk session on a microphone that is not the tested array (ADR 0071,
+//! In a desk session on a microphone that is not the tested array (ADR 0072,
 //! `with_room`), a segment far under the person's own level is held here: no `VadStarted`
 //! goes on for it, no interim, no early read. If it grows to the person's level it opens
 //! late; if it ends held it is read once and goes on whole only when it begins with Ghost's
@@ -48,7 +48,7 @@ use crate::frames::{Direction, Frame, Metric, Out, Stage};
 use crate::room::{Judgement, LevelStop, RoomGate, RoomSettings, segment_level};
 use crate::speaking::Speaking;
 
-/// Told once a session that the room is too loud for this microphone (ADR 0071): Ghost has
+/// Told once a session that the room is too loud for this microphone (ADR 0072): Ghost has
 /// let the room's speech go `ROOM_NOTE_DROPS` times, or the room's steady level has
 /// reached the person's. The microphone's health note says so (ADR 0064).
 pub type OnTooLoud = Arc<dyn Fn() + Send + Sync>;
@@ -74,7 +74,7 @@ const NAME_MIN_SECS: f64 = 0.3;
 
 /// A segment read with words, as one number: its level as the room's gate measures it
 /// (`room::segment_level` of its 20 ms frames). The passive stage reports it so a session
-/// opened by that segment knows how loud the person is (ADR 0071); never the words or the
+/// opened by that segment knows how loud the person is (ADR 0072); never the words or the
 /// audio, kept in memory only.
 pub type OnLevel = Arc<dyn Fn(f64) + Send + Sync>;
 
@@ -138,7 +138,7 @@ impl RoomGuard {
         }
     }
 
-    /// The person's level from the wake (ADR 0071), when the wake heard this input.
+    /// The person's level from the wake (ADR 0072), when the wake heard this input.
     pub fn with_person(mut self, level: Option<f64>) -> Self {
         self.seed = level;
         self
@@ -306,7 +306,7 @@ pub struct ParakeetStt {
     early_after_secs: f64,
     /// Each segment's read as numbers (the microphone's health, ADR 0064).
     on_read: Option<OnRead>,
-    /// The person or the room (ADR 0071); None takes every segment, as before.
+    /// The person or the room (ADR 0072); None takes every segment, as before.
     room: Option<RoomGuard>,
     on_level: Option<OnLevel>,
 }
@@ -398,13 +398,13 @@ impl ParakeetStt {
         }
     }
 
-    /// Report each segment read with words as its level (the passive stage, ADR 0071).
+    /// Report each segment read with words as its level (the passive stage, ADR 0072).
     pub fn with_on_level(mut self, on_level: Option<OnLevel>) -> Self {
         self.on_level = on_level;
         self
     }
 
-    /// Hold the room's speech back from the turn (ADR 0071).
+    /// Hold the room's speech back from the turn (ADR 0072).
     pub fn with_room(mut self, room: Option<RoomGuard>) -> Self {
         self.room = room;
         self
@@ -1367,7 +1367,7 @@ mod tests {
             .collect()
     }
 
-    // --- the person or the room (ADR 0071) -------------------------------------------
+    // --- the person or the room (ADR 0072) -------------------------------------------
 
     /// Speech at a steady `amp` (3000 is about -21 dBFS, 300 about -41).
     fn speech_at(secs: f64, amp: i16) -> Vec<Step> {

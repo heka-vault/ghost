@@ -738,7 +738,7 @@ fn look_of(look: Option<&str>) -> ApiResult<Option<String>> {
             .ok_or_else(|| {
                 ApiError::invalid(
                     &["body", "look"],
-                    "a shape (wisp, drop, bell, hood, cloud, lantern, star, moth), a colon and a colour 0 to 7",
+                    "a shape (wisp, drop, bell, cloud, lantern, star, moth), a colon and a colour 0 to 7",
                     "value_error",
                 )
             }),

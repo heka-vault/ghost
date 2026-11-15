@@ -1,4 +1,4 @@
-# 0071: A desk session tells the person from the room by their level, and the room never keeps it open
+# 0072: A desk session tells the person from the room by their level, and the room never keeps it open
 
 - **Status:** accepted
 - **Date:** 2026-11-14

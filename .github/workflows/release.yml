@@ -110,7 +110,21 @@ jobs:
               grep -q "Parakeet: .* is not there" <<<"$out"
               ! grep -q "scripts/onnxruntime.sh\|scripts/models.sh\|make models" <<<"$out"
               ghostd reports status | tee /dev/stderr | grep -qx "error reports: on"
-              ldd /usr/bin/heka-ghost-desktop /usr/bin/ghostd | { ! grep "not found"; }'
+              ldd /usr/bin/heka-ghost-desktop /usr/bin/ghostd | { ! grep "not found"; }
+              # #147: the package deletes nothing in a home folder. A person with Ghost in
+              # their home; reinstalling (prerm upgrade) says nothing; removing says what stays
+              # and that ghostd uninstall removes it; their home is the same file for file.
+              useradd -m person
+              su person -c "mkdir -p ~/.config/ghost ~/.local/share/ghost ~/.config/autostart ~/.cache/ghost/models && echo x > ~/.local/share/ghost/ghost.db && echo x > ~/.config/autostart/heka-ghost-desktop.desktop && echo x > ~/.cache/ghost/models/m.onnx"
+              before=$(find /home/person -printf "%y %s %p\n" | sort)
+              upgrade=$(dpkg -i /bundle/*.deb 2>&1)
+              if grep -q "ghostd uninstall" <<<"$upgrade"; then echo "the note printed on an upgrade"; exit 1; fi
+              removed=$(DEBIAN_FRONTEND=noninteractive apt-get remove -y heka-ghost-desktop 2>&1)
+              printf "%s\n" "$removed" | grep -i ghost
+              grep -q "nothing there was deleted" <<<"$removed"
+              grep -q "run .ghostd uninstall. before removing the package" <<<"$removed"
+              if [ -e /usr/bin/ghostd ]; then echo "ghostd is still installed"; exit 1; fi
+              [ "$before" = "$(find /home/person -printf "%y %s %p\n" | sort)" ]'
             echo "::endgroup::"
           done
       # The AppImage carries the same daemon and record.

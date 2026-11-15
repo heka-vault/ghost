@@ -213,6 +213,27 @@ const STORIES: Record<NonNullable<Scenario["story"]>, (sid: string) => Story> = 
     },
   }),
   you: (sid) => ({ turns: opening(sid), activity: [a(sid, "you_started", 0.02)], questions: [], audit: [] }),
+  // Two calls held in flight: Ghost reaching GitHub and Mobbin while it thinks.
+  reaching: (sid) => ({
+    turns: [...opening(sid), t(sid, "user", "What\u2019s blocking the billing deploy, and when is the window?", 0.1)],
+    activity: [a(sid, "you_started", 0.15), a(sid, "you_stopped", 0.1), a(sid, "call", 0.05, { name: "github_issue_list", id: "r1" }), a(sid, "call", 0.04, { name: "mobbin_search_screens", id: "r2" })],
+    questions: [],
+    audit: [],
+  }),
+  // An agent's question waiting in the session, with choices and room for the operator's own words.
+  asked: (sid) => ({
+    turns: [...opening(sid), t(sid, "user", "Ask Accounting whether the Q3 numbers are final.", 0.6, "text"), t(sid, "assistant", "Accounting says they\u2019re final except the Stripe fees line, and it has a question for you.", 0.4)],
+    activity: [...call(sid, "ghost_ask_agent", "q1", 0.55, 0.45)],
+    questions: [
+      {
+        key: "question:q3-asked", kind: "question", source: "agent:accounting", asked_by: "Accounting", asked_at: ago(0.42),
+        question: "Send the Q3 summary to Dana now, or wait for the Stripe fees line?", detail: null,
+        choices: ["Send it now", "Wait for Stripe"], choices_only: false, state: "open", urgency: "notify", in_run: false,
+        expires_at: ago(-60), answer: null, answered_at: null, answered_via: null, choice: null, change_id: null,
+      },
+    ],
+    audit: [],
+  }),
   cut: (sid) => ({ turns: opening(sid), activity: [], questions: [], audit: [] }),
   hold: (sid) => ({ turns: opening(sid), activity: [], questions: [], audit: [] }),
   ending: (sid) => ({ turns: [...opening(sid), t(sid, "user", "That\u2019s all, thanks.", 0.3)], activity: [], questions: [], audit: [] }),
