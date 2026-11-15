@@ -61,7 +61,11 @@ highest `vYYYY.M.N` tag of this month, or `.0` when this month has none.
    against the public key the app carries, installs the .deb into clean Ubuntu 24.04 and
    26.04 and runs `ghostd version`, which must name the tagged commit, and `ghostd check`,
    which must find the bundle's runtime and model files on its own and name no script from
-   the checkout, checks the AppImage carries the same daemon, writes `latest.json` (the
+   the checkout, then makes a person with Ghost's folders in their home, installs the same
+   .deb again (an upgrade, which must print nothing about uninstalling) and removes it,
+   which must print the `prerm`'s two lines (what stays, and `ghostd uninstall`) and leave
+   that home exactly as it was (ADR 0071), checks the AppImage carries the same daemon,
+   writes `latest.json` (the
    update manifest, `tools/release_manifest.py`, with GitHub's generated notes), and
    publishes the .deb, the AppImage, their `.sig` files and `latest.json` in one release.
    Installed apps see it within a day (ADR 0066).

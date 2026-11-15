@@ -8,21 +8,26 @@
  * Two parts (2026-11-14, the owner: “reduce the steps it takes to get to the first ‘hey ghost’
  * and them seeing Ghost in the floating room”): **Meet Ghost**, three beats and nothing else
  * before them (a model, its ears, “Hey Ghost” answered over the desktop), then **Make it yours**
- * (its voice, an app, an agent, a first real question), each optional. A beat that can finish
- * by itself is a glance, not a form: a healthy microphone skips its step.
+ * (its voice, an app, a first real question), each optional. A beat that can finish by itself
+ * is a glance, not a form: a healthy microphone skips its step.
+ *
+ * The simplification pass (2026-11-14, the owner: “we need to take a simplification pass on the
+ * UI”): hiring an agent left the first run (agents are found later: ask Ghost for one, the rail's
+ * +, one line on Done), and what Ghost keeps and sends left the wake beat for a short page of its
+ * own right after it, passed before the first run ends (ADR 0065 and ADR 0067 as amended).
  */
 
-export type StepId = "welcome" | "model" | "hear" | "wake" | "voice" | "app" | "agent" | "ask" | "done";
+export type StepId = "welcome" | "model" | "hear" | "wake" | "keeps" | "voice" | "app" | "ask" | "done";
 
 export interface StepDef {
   id: StepId;
   /** The rail's label, and the step's title word for word. */
   label: string;
-  /** Counts toward “N of 7 done” (welcome and done don't). */
+  /** Counts toward “N of 6 done” (welcome, what Ghost keeps and done don't). */
   task: boolean;
   /** What the step needs from outside this computer: said on the rail, so nobody waits on a network they don't have. */
   network: "none" | "maybe" | "needs";
-  /** Meet Ghost (the three beats before the moment) or Make it yours (after it, optional). */
+  /** Meet Ghost (the three beats and what Ghost keeps) or Make it yours (after it, optional). */
   part: "meet" | "yours" | null;
 }
 
@@ -31,14 +36,15 @@ export const STEPS: StepDef[] = [
   { id: "model", label: "Connect a model", task: true, network: "maybe", part: "meet" },
   { id: "hear", label: "Let Ghost hear you", task: true, network: "none", part: "meet" },
   { id: "wake", label: "Say “Hey Ghost”", task: true, network: "none", part: "meet" },
+  // Not a task: a page passed once, right after the moment and before Make it yours.
+  { id: "keeps", label: "What Ghost keeps and sends", task: false, network: "none", part: "meet" },
   { id: "voice", label: "Choose its voice", task: true, network: "none", part: "yours" },
   { id: "app", label: "Connect an app", task: true, network: "needs", part: "yours" },
-  { id: "agent", label: "Hire an agent", task: true, network: "none", part: "yours" },
   { id: "ask", label: "Ask it something", task: true, network: "maybe", part: "yours" },
   { id: "done", label: "Done", task: false, network: "none", part: null },
 ];
-/** The three beats before the moment. */
-export const MEET = STEPS.filter((s) => s.part === "meet");
+/** The three beats to the moment (what Ghost keeps comes after it, and is not a task). */
+export const MEET = STEPS.filter((s) => s.part === "meet" && s.task);
 export const partOf = (id: StepId) => STEPS.find((s) => s.id === id)?.part ?? null;
 
 export const TASKS = STEPS.filter((s) => s.task);
@@ -46,9 +52,9 @@ export const stepLabel = (id: StepId) => STEPS.find((s) => s.id === id)?.label ?
 export const isStep = (v: string | null | undefined): v is StepId => !!v && STEPS.some((s) => s.id === v);
 export const stepIndex = (id: StepId) => STEPS.findIndex((s) => s.id === id);
 /**
- * A task's number on the rail, 1 to 7, the same 7 the count says; null for the welcome and
- * done pages, which are not tasks and carry no number (2026-11-13: "0 of 7 done" sat above
- * nine numbered circles).
+ * A task's number on the rail, 1 to 6, the same 6 the count says; null for the welcome, what
+ * Ghost keeps and done pages, which are not tasks and carry no number (2026-11-13: "0 of 7
+ * done" sat above nine numbered circles).
  */
 export const taskNumber = (id: StepId): number | null => {
   const at = TASKS.findIndex((t) => t.id === id);
@@ -69,8 +75,6 @@ export interface Facts {
   echo: boolean | null;
   /** Apps connected and answering, the stand-in GitHub left out. */
   apps: number | null;
-  /** Agents hired, Ghost and the retired left out. */
-  agents: number | null;
   /** GHOST_VOICE_MODE is written in the settings. */
   voiceSet: boolean | null;
   /**
@@ -102,20 +106,19 @@ export interface Progress {
  * slow box is still a model). Hearing is done when the speech models are here and either echo
  * cancellation runs or Ghost has woken on the operator's voice, which proves the microphone.
  * The wake only by voice, never a click. The voice once a mode is written or chosen here. An
- * app, an agent: any. The question once Ghost answered one asked while this step was open.
+ * app: any. The question once Ghost answered one asked while this step was open.
  */
-export function progressOf(f: Facts, saved: Pick<Saved, "skipped" | "heard" | "answered" | "voiceChosen"> & Partial<Pick<Saved, "met">>): Progress {
+export function progressOf(f: Facts, saved: Pick<Saved, "skipped" | "heard" | "answered" | "voiceChosen"> & Partial<Pick<Saved, "met" | "keepsSeen">>): Progress {
   const yes = (v: boolean | null): boolean | null => v;
-  const tasks: Record<Exclude<StepId, "welcome" | "done">, boolean | null> = {
+  const tasks: Record<Exclude<StepId, "welcome" | "keeps" | "done">, boolean | null> = {
     model: yes(f.modelReady),
     hear: f.speechReady === null ? null : f.speechReady && (!!f.echo || saved.heard === "voice" || f.micHealthy === true),
     wake: saved.heard === "voice" ? true : f.speechReady === null ? null : false,
     voice: saved.voiceChosen || f.voiceSet === true ? true : f.voiceSet === null ? null : false,
     app: f.apps === null ? null : f.apps > 0,
-    agent: f.agents === null ? null : f.agents > 0,
     ask: saved.answered,
   };
-  const state = { welcome: "done", done: "open" } as Record<StepId, TaskState>;
+  const state = { welcome: "done", keeps: saved.keepsSeen ? "done" : "open", done: "open" } as Record<StepId, TaskState>;
   for (const [id, v] of Object.entries(tasks) as [StepId, boolean | null][]) {
     state[id] = v === true ? "done" : v === null ? "unknown" : saved.skipped.includes(id) ? "skipped" : "open";
   }
@@ -135,7 +138,8 @@ const after = (id: StepId): StepId => STEPS[Math.min(STEPS.length - 1, stepIndex
  * where the moment is typed) passes Let Ghost hear you. After a moment with no model the first
  * run goes back to the model step, and once a model is given, on to a first real question. A
  * person who went on to Make it yours while Ghost's ears downloaded comes back to the moment
- * as soon as they are here.
+ * as soon as they are here. What Ghost keeps and sends always follows the wake beat, met or
+ * skipped, so nobody reaches Make it yours or Done without passing it.
  */
 export function routeAfter(from: StepId, f: Facts, s: Pick<Saved, "met" | "waitingForEars">): StepId {
   if (s.waitingForEars && !s.met && f.speechReady === true && partOf(from) === "yours") return "wake";
@@ -146,6 +150,8 @@ export function routeAfter(from: StepId, f: Facts, s: Pick<Saved, "met" | "waiti
       if (s.met) return "ask";
       return f.micHealthy === true || f.micNone === true ? "wake" : "hear";
     case "wake":
+      return "keeps";
+    case "keeps":
       return s.met && f.modelReady === false ? "model" : "voice";
     default:
       return after(from);
@@ -254,12 +260,59 @@ export function timeLeft(samples: readonly { at: number; bytes: number }[], tota
 /**
  * The microphone needs nothing from the person (ADR 0064): a reading with no problem, no
  * fallback and a known case, and listening on. Unprotected (speakers with nothing taking
- * Ghost's voice out) still hears; the echo canceller is offered beside the moment, never
- * before it.
+ * Ghost's voice out) still hears; the echo canceller is offered beside the moment
+ * (`echoOfferNow`), never before it.
  */
 export function micHealthyOf(m: { case: string; problem: string | null; fell_back: string | null } | null | undefined, listeningOff: boolean): boolean | null {
   if (!m) return null;
   return !listeningOff && !m.problem && !m.fell_back && m.case !== "unknown";
+}
+
+/* ------------------------------------------------------------------- the wake beat's things */
+
+/**
+ * The echo canceller is offered on the wake beat only where it applies and matters now (ADR
+ * 0064's own reading): open speakers with nothing taking Ghost's voice out (`unprotected`), no
+ * problem with the input, and the canceller not already running. Everywhere else it waits for
+ * the microphone's health note and Settings › Sound, where it is noticed when it is needed.
+ */
+export function echoOfferNow(m: { case: string; problem: string | null } | null | undefined, cancellerRunning: boolean): boolean {
+  return !!m && m.case === "unprotected" && !m.problem && !cancellerRunning;
+}
+
+/**
+ * The wake beat's one line while takes are kept (ADR 0065 as amended 2026-11-14): the first
+ * take is this beat's own wake, so it is said here, before it, with Change beside it.
+ */
+export const TAKES_ON_WAKE = "Ghost keeps a recording of each time it hears its name, on this computer.";
+
+/** One thing on the wake beat, under its title, while it waits for the name. */
+export type WakeItem = "float" | "mic" | "echo" | "takes" | "other-ways";
+
+/**
+ * Everything the wake beat shows under its title while it waits for “Hey Ghost”, in order:
+ * each is one line or one control (2026-11-14, the simplification pass: the moment that should
+ * be the simplest in the product). The screen renders this list and nothing else in that
+ * state, and test/onboarding.test.ts holds its length, so a control added here fails a test.
+ *
+ * - `float`: the floating switch and its one line, where the desktop can float (else the one
+ *   sentence saying it answers here).
+ * - `mic`: “Listening through …” with Change.
+ * - `echo`: one line, only where `echoOfferNow` says so.
+ * - `takes`: only while wake takes are being kept (the trained detector, ADR 0065): the kept
+ *   recording begins with the first wake, which happens on this beat, so it is said here and
+ *   not only afterwards. Under transcript wake, a fresh install's default, nothing is kept and
+ *   nothing is said here; What Ghost keeps and sends says so.
+ * - `other-ways`: one quiet disclosure: Type instead, Wake it with a click, other phrases.
+ */
+export function wakeItems(f: { floatKnown: boolean; mic: boolean; echoNow: boolean; keepingTakes: boolean }): WakeItem[] {
+  const out: WakeItem[] = [];
+  if (f.floatKnown) out.push("float");
+  if (f.mic) out.push("mic");
+  if (f.echoNow) out.push("echo");
+  if (f.keepingTakes) out.push("takes");
+  out.push("other-ways");
+  return out;
 }
 
 /* ------------------------------------------------------------------ resume (localStorage) */
@@ -289,6 +342,11 @@ export interface Saved {
   floatOffered: boolean;
   /** They went on to Make it yours while Ghost's ears downloaded: come back when they're here. */
   waitingForEars: boolean;
+  /**
+   * They passed What Ghost keeps and sends (its Continue). Until then Done says the same two
+   * things with their switches, so the first run never ends without them (ADR 0065, ADR 0067).
+   */
+  keepsSeen: boolean;
 }
 
 export const EMPTY: Saved = {
@@ -304,6 +362,7 @@ export const EMPTY: Saved = {
   metWhere: null,
   floatOffered: false,
   waitingForEars: false,
+  keepsSeen: false,
 };
 
 export function storageKey(scenario: string | null): string {
@@ -328,6 +387,7 @@ export function parseSaved(raw: string | null): Saved {
       metWhere: v.metWhere === "floating" || v.metWhere === "window" ? v.metWhere : null,
       floatOffered: v.floatOffered === true,
       waitingForEars: v.waitingForEars === true,
+      keepsSeen: v.keepsSeen === true,
     };
   } catch {
     return EMPTY;

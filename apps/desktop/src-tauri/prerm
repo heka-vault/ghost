@@ -1,0 +1,21 @@
+#!/bin/sh
+# heka-ghost-desktop's prerm (#147, ADR 0071). It deletes nothing and stops nothing in anyone's
+# home folder: a package's scripts run as root, and what Ghost keeps there (settings,
+# transcripts, recordings, passwords) is the person's to remove with `ghostd uninstall`. On
+# `remove` it says so; on an upgrade (the app's own Update and restart is one), a failed
+# upgrade or a deconfigure it says nothing. Debian's DEBIAN_FRONTEND governs debconf's
+# questions, not a script's notes, so the note prints under noninteractive too.
+set -e
+
+case "$1" in
+    remove)
+        echo "Ghost leaves its settings, data, speech models and passwords in each person's home folder; nothing there was deleted."
+        echo "To remove them, run 'ghostd uninstall' before removing the package (or follow the list under Uninstall in Ghost's README if it is gone)."
+        ;;
+    upgrade|deconfigure|failed-upgrade)
+        ;;
+    *)
+        ;;
+esac
+
+exit 0

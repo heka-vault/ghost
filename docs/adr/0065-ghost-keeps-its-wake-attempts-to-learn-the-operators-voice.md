@@ -78,6 +78,21 @@ in `settings.env` (the card's threshold and floor come with it), `ghostd wake us
 goes back, and `ghostd check` refuses a detector whose file does not match its card's hash
 or whose card shows more false wakes than the shipped detector on any negative set.
 
+**Amended 2026-11-14 (the simplification pass).** The first run's wake beat was cut to the
+fewest things an honest moment allows, and what Ghost keeps and sends moved to a short page of
+its own right after the beat (*What Ghost keeps and sends*: this line with its switch, and error
+reports with theirs), passed before the first run ends; Done shows the same two with their
+switches to anyone who reached it another way. A take begins with the first wake, which happens
+on the wake beat itself, so the line could not leave the beat without the first takes being kept
+before it was read. The choice was between keeping one short line on the beat and starting to
+keep only once the page is passed; we kept the line, which needs no daemon change and no state
+of the first run's in the daemon: while takes are being kept (the detector is the wake and the
+switch is on) the beat says “Ghost keeps a recording of each time it hears its name, on this
+computer.” with Change (Settings › Sound). Under transcript wake, a fresh install's default,
+nothing is kept, so the beat says nothing about takes and the page says “Ghost keeps nothing it
+hears before its name.” Nothing on by default is said later than before the first take, and a
+person who skips the first run finds both in Settings as before.
+
 ## Consequences
 
 - The idle-audio rule changes for wake attempts only: a decided detector hit's audio, its

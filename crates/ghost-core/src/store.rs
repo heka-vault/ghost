@@ -262,6 +262,22 @@ CREATE TABLE IF NOT EXISTS reach (
 );
 CREATE INDEX IF NOT EXISTS reach_at ON reach(at);
 CREATE INDEX IF NOT EXISTS reach_session ON reach(session_id);
+-- The rules the operator set from a decision (ADR 0070): a yes or a no made to stick on the
+-- desktop's card. The rule itself is in policy.toml; this keeps when, from which change and
+-- from where, and whether the writer added the list's key or the table, so taking it back
+-- out leaves the file as it was. `removed_at` once the operator took it back.
+CREATE TABLE IF NOT EXISTS permission_choices (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    rule          TEXT NOT NULL,
+    list          TEXT NOT NULL,
+    scope         TEXT NOT NULL,
+    set_at        TEXT NOT NULL,
+    proposal_id   TEXT NOT NULL,
+    by            TEXT NOT NULL,
+    created_key   INTEGER NOT NULL,
+    created_table INTEGER NOT NULL,
+    removed_at    TEXT
+);
 -- The audit by date (ADR 0060): a past day is read by its range, not paged back to.
 CREATE INDEX IF NOT EXISTS proposals_created ON proposals(created_at);
 "#;
@@ -896,6 +912,110 @@ impl Store {
         }
         tx.commit()?;
         Ok(())
+    }
+
+    // --- the rules set from a decision (ADR 0070) --------------------------------------
+
+    pub fn add_permission_choice(
+        &self,
+        c: &crate::permission_choices::NewChoice,
+    ) -> Result<crate::permission_choices::ChoiceRow> {
+        let at = utcnow();
+        let conn = self.conn();
+        conn.execute(
+            "INSERT INTO permission_choices (rule, list, scope, set_at, proposal_id, by, \
+             created_key, created_table) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            params![
+                c.rule,
+                c.choice.list(),
+                c.scope,
+                iso(&at),
+                c.proposal_id,
+                c.by,
+                c.created_key,
+                c.created_table
+            ],
+        )?;
+        Ok(crate::permission_choices::ChoiceRow {
+            id: conn.last_insert_rowid(),
+            rule: c.rule.clone(),
+            choice: c.choice,
+            scope: c.scope.clone(),
+            set_at: at,
+            proposal_id: c.proposal_id.clone(),
+            by: c.by.clone(),
+            created_key: c.created_key,
+            created_table: c.created_table,
+        })
+    }
+
+    fn choice_rows(
+        &self,
+        filter: &str,
+        id: Option<i64>,
+    ) -> Result<Vec<crate::permission_choices::ChoiceRow>> {
+        let conn = self.conn();
+        let mut st = conn.prepare(&format!(
+            "SELECT id, rule, list, scope, set_at, proposal_id, by, created_key, created_table \
+             FROM permission_choices WHERE removed_at IS NULL {filter} ORDER BY id DESC"
+        ))?;
+        let map = |r: &rusqlite::Row<'_>| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, String>(4)?,
+                r.get::<_, String>(5)?,
+                r.get::<_, String>(6)?,
+                r.get::<_, bool>(7)?,
+                r.get::<_, bool>(8)?,
+            ))
+        };
+        let rows = match id {
+            Some(id) => st
+                .query_map([id], map)?
+                .collect::<rusqlite::Result<Vec<_>>>()?,
+            None => st
+                .query_map([], map)?
+                .collect::<rusqlite::Result<Vec<_>>>()?,
+        };
+        Ok(rows
+            .into_iter()
+            .filter_map(|(id, rule, list, scope, at, proposal_id, by, ck, ct)| {
+                Some(crate::permission_choices::ChoiceRow {
+                    id,
+                    rule,
+                    choice: crate::permission_choices::Choice::parse(&list)?,
+                    scope,
+                    set_at: parse_iso(&at)?,
+                    proposal_id,
+                    by,
+                    created_key: ck,
+                    created_table: ct,
+                })
+            })
+            .collect())
+    }
+
+    /// The choices still standing, newest first.
+    pub fn permission_choices(&self) -> Result<Vec<crate::permission_choices::ChoiceRow>> {
+        self.choice_rows("", None)
+    }
+
+    pub fn permission_choice(
+        &self,
+        id: i64,
+    ) -> Result<Option<crate::permission_choices::ChoiceRow>> {
+        Ok(self.choice_rows("AND id = ?", Some(id))?.into_iter().next())
+    }
+
+    pub fn remove_permission_choice(&self, id: i64) -> Result<bool> {
+        let n = self.conn().execute(
+            "UPDATE permission_choices SET removed_at = ? WHERE id = ? AND removed_at IS NULL",
+            params![iso(&utcnow()), id],
+        )?;
+        Ok(n == 1)
     }
 
     // --- how much Ghost read and did (ADR 0060) ----------------------------------------

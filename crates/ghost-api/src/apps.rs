@@ -852,46 +852,50 @@ async fn put_permissions(
     State(deps): State<SharedDeps>,
     Body(update): Body<PermissionsUpdate>,
 ) -> ApiResult<Json<PermissionsView>> {
-    let (text, policy) = policy_file(&deps)?;
-    let mut perms = policy.permissions.clone();
-    if let Some(mode) = update.mode {
-        perms.mode = core_mode(mode);
-    }
-    let lists: [(&str, &Option<Vec<String>>); 4] = [
-        ("block", &update.block),
-        ("ask", &update.ask),
-        ("quiet", &update.quiet),
-        ("allow", &update.allow),
-    ];
-    for (key, value) in lists {
-        let Some(value) = value else { continue };
-        let raw = toml::Value::Array(
-            value
-                .iter()
-                .map(|s| toml::Value::String(s.clone()))
-                .collect(),
-        );
-        let rules = parse_rules(&raw, key).map_err(|e| ApiError::unprocessable(e.to_string()))?;
-        match key {
-            "block" => perms.block = rules,
-            "ask" => perms.ask = rules,
-            "quiet" => perms.quiet = rules,
-            _ => perms.allow = rules,
-        }
-    }
-    if let Some(set) = &update.set {
-        check_len(&["body", "set", "rule"], &set.rule, 1, 300)?;
-        let rule = Rule::parse(&set.rule).map_err(|e| ApiError::unprocessable(e.to_string()))?;
-        perms = perms
-            .with_rule(&rule, set.level.map(Level::as_str))
+    // The one lock every writer of policy.toml takes (ADR 0070): the file is read again under
+    // it, so a rule another writer added a moment ago is kept, never written over.
+    ghost_core::policy_file::edit(&deps.policy_path, |text, _| -> ApiResult<Option<String>> {
+        let policy = AutonomyPolicy::parse(text, &deps.policy_path.display().to_string())
             .map_err(|e| ApiError::unprocessable(e.to_string()))?;
-    }
-    let out =
-        write_permissions(&text, &perms).map_err(|e| ApiError::unprocessable(e.to_string()))?;
-    if let Some(parent) = deps.policy_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| ApiError::internal(e.to_string()))?;
-    }
-    std::fs::write(&deps.policy_path, out).map_err(|e| ApiError::internal(e.to_string()))?;
+        let mut perms = policy.permissions.clone();
+        if let Some(mode) = update.mode {
+            perms.mode = core_mode(mode);
+        }
+        let lists: [(&str, &Option<Vec<String>>); 4] = [
+            ("block", &update.block),
+            ("ask", &update.ask),
+            ("quiet", &update.quiet),
+            ("allow", &update.allow),
+        ];
+        for (key, value) in lists {
+            let Some(value) = value else { continue };
+            let raw = toml::Value::Array(
+                value
+                    .iter()
+                    .map(|s| toml::Value::String(s.clone()))
+                    .collect(),
+            );
+            let rules =
+                parse_rules(&raw, key).map_err(|e| ApiError::unprocessable(e.to_string()))?;
+            match key {
+                "block" => perms.block = rules,
+                "ask" => perms.ask = rules,
+                "quiet" => perms.quiet = rules,
+                _ => perms.allow = rules,
+            }
+        }
+        if let Some(set) = &update.set {
+            check_len(&["body", "set", "rule"], &set.rule, 1, 300)?;
+            let rule =
+                Rule::parse(&set.rule).map_err(|e| ApiError::unprocessable(e.to_string()))?;
+            perms = perms
+                .with_rule(&rule, set.level.map(Level::as_str))
+                .map_err(|e| ApiError::unprocessable(e.to_string()))?;
+        }
+        let out =
+            write_permissions(text, &perms).map_err(|e| ApiError::unprocessable(e.to_string()))?;
+        Ok(Some(out))
+    })?;
     let p = deps
         .control
         .reload_policy()

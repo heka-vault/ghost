@@ -29,7 +29,8 @@ export function autonomyLabel(level: Autonomy | string): string {
  * change. Allow runs it and Ghost says so; quiet runs it without a word; ask waits for a yes.
  */
 export function permissionLabel(level: NonNullable<PermissionLevel> | string): string {
-  return ({ allow: "Allow", ask: "Ask first", quiet: "Quiet", block: "Block" } as Record<string, string>)[level] ?? level;
+  // The register a person reads levels in (ADR 0070); the code and the policy file keep block, ask, quiet, allow.
+  return ({ allow: "Runs without asking", ask: "Asks first", quiet: "Runs quietly", block: "Never" } as Record<string, string>)[level] ?? level;
 }
 
 /** The gate's own level names (`GET /sources` still reports them) as the permission they come from. */

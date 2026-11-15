@@ -911,7 +911,7 @@ impl Daemon {
             return;
         };
         let p = gate.pending(&session_id, None).ok().flatten();
-        let view = p.map(|p| ghost_api::pending_view(&p, None));
+        let view = p.map(|p| ghost_api::pending_view(&p, None, &gate.autonomy().permissions));
         let now = view.as_ref().map(|v| v.id.clone());
         let was = self.state.pending().map(|p| p.id);
         if now != was {
@@ -2806,6 +2806,13 @@ impl Daemon {
                 Arc::new(crate::reports::ReportsDesk(r.clone()))
                     as Arc<dyn ghost_api::reports::ReportsPort>
             }),
+            uninstall: Some(Arc::new(crate::uninstall::UninstallDesk {
+                places: crate::uninstall::places(
+                    &self.cfg.lock().unwrap_or_else(|e| e.into_inner()),
+                    &self.voice.lock().unwrap_or_else(|e| e.into_inner()),
+                    &self.started_env,
+                ),
+            })),
             wake_takes: Some(crate::wake_takes::WakeTakesDesk::new(
                 self.wake_takes(),
                 Arc::downgrade(self),

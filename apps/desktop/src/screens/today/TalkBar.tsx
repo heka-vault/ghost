@@ -12,7 +12,7 @@
  * in this session with its choices. All of it from the events the window already has (ADR 0055,
  * ADR 0058); nothing new is asked of Ghost.
  */
-import type { QuestionView } from "@ghost/client-ts";
+import type { AlwaysChoice, QuestionView } from "@ghost/client-ts";
 import { callsOf, useGhost, youSpeaking } from "@ghost/ui";
 import { ArrowRight, ArrowUp, Mic, MicOff } from "lucide-react";
 import { useState } from "react";
@@ -20,7 +20,7 @@ import { useState } from "react";
 import { notListening, notListeningSub, typedSession } from "../../app/listening";
 import { navigate } from "../../app/router";
 import { nameOf, useToday } from "../../app/today";
-import { Button, IconButton, LineGlyph, PendingChange, SpeakingWave, VoicePresence, type GhostPhase, cx, errorText, useLive, useToast } from "../../ui";
+import { Button, IconButton, LineGlyph, PendingChange, SpeakingWave, VoicePresence, type GhostPhase, alwaysDone, cx, errorText, useLive, useToast } from "../../ui";
 import { stageState, stageWords } from "../session/Stage";
 import { useSessionQuestions } from "../session/live";
 import { liveQuestion } from "./live";
@@ -106,6 +106,21 @@ export function TalkBar({ live }: { live: LiveSession }) {
       setBusy(null);
     }
   };
+  // ADR 0070: the same decision made to stick, from the strip's card. The daemon takes the rule
+  // from the waiting change, then confirms or cancels it as the plain buttons do.
+  const settleAlways = async (choice: AlwaysChoice) => {
+    const p = live.pending;
+    if (!p) return;
+    setBusy(choice === "allow" ? "confirm" : "cancel");
+    try {
+      await client.decideAlways(p.id, choice);
+      toast(alwaysDone(choice, p.always?.scope ?? "this tool"));
+    } catch (e) {
+      toast({ tone: "danger", title: "Couldn’t save that choice", description: errorText(e) });
+    } finally {
+      setBusy(null);
+    }
+  };
   const answer = async (q: QuestionView, choice: string) => {
     setBusy("answer");
     try {
@@ -118,7 +133,7 @@ export function TalkBar({ live }: { live: LiveSession }) {
   };
 
   return (
-    <div className={cx("talk-dock", inSession && "is-live")}>
+    <div className={cx("talk-dock", inSession && "is-live", (live.pending || live.question) && "has-card")}>
       {live.pending ? (
         <PendingChange
           className="talk-live__card"
@@ -131,6 +146,8 @@ export function TalkBar({ live }: { live: LiveSession }) {
           disabled={!online}
           onConfirm={() => void settle("confirm")}
           onCancel={() => void settle("cancel")}
+          always={live.pending.always}
+          onAlways={(c) => void settleAlways(c)}
         />
       ) : live.question ? (
         <LiveQuestion q={live.question} busy={busy === "answer"} online={online} onAnswer={(c) => void answer(live.question!, c)} />
