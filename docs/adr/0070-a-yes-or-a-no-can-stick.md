@@ -101,9 +101,14 @@ next call follow the new rule with no restart
   and `DELETE /permissions/choices/{id}` on the control API only. A waiting change's view
   (`PendingProposal.always`) carries the offer: the rule, the words, and whether the allow would
   take effect.
-- The surfaces: Today's Decide card has it. The conversation screen's card, the tray, the
-  floating room's fixed card (deliberately minimal, ADR 0059), a notification's buttons and the
-  phone keep plain Yes and No, working exactly as before.
-- Two writers already rewrote `[permissions]` from the operator's own screens (`PUT /permissions`
-  and an app's page, `write_permissions`, and the whole file from the TOML view); they are
-  unchanged. A choice whose rule was taken out there is shown as no longer in the file.
+- The surfaces: every card the desktop's own window shows has it (Today's Decide, the live
+  strip on Today, the conversation screen), so one decision offers the same choice wherever the
+  operator meets it. The tray, the floating room's fixed card (deliberately minimal, ADR 0059),
+  a notification's buttons and the phone keep plain Yes and No, working exactly as before.
+- Two writers already rewrote `policy.toml` from the operator's own screens (`PUT /permissions`,
+  used by Permissions and an app's page, and `PUT /policy`, the TOML view and the routes). All
+  three now take one lock (`ghost_core::policy_file`): a mutex in the process and an advisory
+  `flock` on `policy.toml.lock` beside the file, so the daemon and a `ghostd` command never
+  interleave either. Each re-reads the file under the lock before it edits, so two writes never
+  lose a rule: both land, or the second is cleanly refused. A choice whose rule was taken out by
+  hand is shown as no longer in the file.
