@@ -129,10 +129,10 @@ export function AgentBrief({ slug, name, detail, voiceTitle, onPersona, onMemory
               ))}
             </ul>
           ) : (
-            <p className="conv-brief__empty">No schedule. Tell it {"“"}check this every morning{"”"} in a session, or add one on Watching.</p>
+            <p className="conv-brief__empty">No schedule. Tell it {"“"}check this every morning{"”"} in a session, or ask on On its own.</p>
           )}
-          <Link to="/watching" className="conv-brief__link">
-            Schedules on Watching
+          <Link to="/on-its-own" className="conv-brief__link">
+            All it does on its own
           </Link>
         </section>
 

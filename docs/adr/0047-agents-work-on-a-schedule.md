@@ -148,3 +148,11 @@ own, and Ghost manages all. The operator's own way in is the control API (`/sche
   not something the operator asked for in so many words. `ask` means a person answers.
 - **Run inside an open session when there is one.** The operator would hear a morning
   check in the middle of a sentence. A run is silent; what it found waits for a route.
+
+## Amendment, 2026-11-14
+
+The desktop's *Watching* screen is now **On its own** (`#/on-its-own`; `#/watching`
+redirects), one list of everything Ghost does without being asked, each row a sentence; the
+way to make one is to ask Ghost in words, and the forms are under Set it up by hand
+(ADR 0061 as amended that day, docs/design-system.md). Nothing here changes otherwise:
+schedules, watches, webhooks and runs work as this record says.

@@ -158,7 +158,7 @@ on an interval itself; nothing about noticing needs a model.
 
 An app whose connection died is started again before the next look, backing off while it
 fails; so does a look that breaks for any other reason, with the error on the watch.
-`ghostd check` lists the watches, `GET /watches` and the desktop's Watching screen show each
+`ghostd check` lists the watches, `GET /watches` and the desktop's On its own screen show each
 one's last look, error and open items, and a watch that doesn't read is a problem and stays
 off. A watch's items are keyed `<watch>:<key>` (`ci:123`), and `[routes.urgency]` names it
 bare (`ci = "call"`). A watch that acts through an agent Ghost doesn't have, or one that is
@@ -170,7 +170,7 @@ A schedule is something an agent does on its own, at a time (ADR 0047): "check t
 every morning at nine and tell me if it is red". Schedules are not a file in this folder.
 They are rows in Ghost's database, because agents make them too: tell an agent and it sets
 one up with `ghost_schedule_manage`, a change through the gate; the operator adds, pauses
-and removes them on the desktop's Watching screen. `ghostd check` lists them.
+and removes them on the desktop's On its own screen. `ghostd check` lists them.
 
 A schedule has a name, the agent that does it, an instruction, and when, which is exactly
 one of:
@@ -267,7 +267,7 @@ addresses, nothing else on them). Every step before an item is deterministic and
 
 What is kept is the parsed fields, the delivery id and the outcome, never a body. The
 listener answers 404 for a hook that isn't declared (or is off) before it reads the body,
-and accepted or refused otherwise, nothing more; `GET /watches` and the Watching screen
+and accepted or refused otherwise, nothing more; `GET /watches` and On its own (a webhook's Details…)
 show each hook's counts. A local sender signs with `ghostd push <hook> <event> '<json>'`.
 
 ## Outputs

@@ -32,6 +32,34 @@ const inMinutes = (minutes: number) => new Date(Date.now() + minutes * 60_000).t
 const now = () => new Date().toISOString();
 const id = () => Math.random().toString(16).slice(2, 14).padEnd(12, "0");
 
+const DOW: Record<string, number> = { sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6 };
+
+/**
+ * On its own (2026-11-14): the mock's stand-in for the model reading “every weekday at 9, check
+ * the build” and calling `ghost_schedule_manage`. The real daemon has no such parser: the agent
+ * reads the words. Only for the mock's script, so the ask flow plays start to finish.
+ */
+export function askedSchedule(text: string, agentOf: (name: string) => string | null): { agent: string; req: ScheduleRequest } | null {
+  const t = text.trim().replace(/[.!]+$/, "");
+  const m = /^(every weekday|weekdays|every day|daily|every morning|every (sunday|monday|tuesday|wednesday|thursday|friday|saturday)|every (\d+) (hours?|minutes?))(?: at (\d{1,2})(?::(\d{2}))?\s*(am|pm)?)?\s*,?\s*(.+)$/i.exec(t);
+  if (!m) return null;
+  let what = m[8].trim();
+  let agent = "ghost";
+  const have = /^have (\S+) (.+)$/i.exec(what);
+  if (have && agentOf(have[1])) {
+    agent = agentOf(have[1])!;
+    what = have[2];
+  }
+  const instruction = what.charAt(0).toUpperCase() + what.slice(1) + ".";
+  if (m[3]) return { agent, req: { instruction, agent, every: `${m[3]}${m[4].toLowerCase().startsWith("h") ? "h" : "m"}` } };
+  let hour = m[5] ? Number(m[5]) : /morning/i.test(m[1]) ? 8 : 9;
+  if (m[7]?.toLowerCase() === "pm" && hour < 12) hour += 12;
+  else if (!m[7] && hour >= 1 && hour <= 6) hour += 12;
+  const min = m[6] ? Number(m[6]) : 0;
+  const days = /weekday/i.test(m[1]) ? "1-5" : m[2] ? String(DOW[m[2].toLowerCase()]) : "*";
+  return { agent, req: { instruction, agent, cron: `${min} ${hour} * * ${days}` } };
+}
+
 export class MockSchedules {
   private view: SchedulesView;
   private runs: Record<string, ScheduleRunInfo[]>;
@@ -103,6 +131,12 @@ export class MockSchedules {
     if (state === "unknown") throw new HttpError(422, `there is no agent ${slug}`);
     if (state === "retired") throw new HttpError(422, `the agent ${slug} is retired; rehire it first`);
     return slug;
+  }
+
+  /** A schedule an agent set up through the gate (`ghost_schedule_manage`): made by it. */
+  addByAgent(req: ScheduleRequest, by: string): ScheduleInfo {
+    const s = this.add(req);
+    return this.put({ ...s, created_by: `agent:${by}` });
   }
 
   private add(req: ScheduleRequest): ScheduleInfo {

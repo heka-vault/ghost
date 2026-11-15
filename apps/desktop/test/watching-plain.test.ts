@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import { watchRequest } from "../src/screens/watching/AddWatch";
-import { ownersOf } from "../src/screens/watching/index";
 import { reachWords } from "../src/screens/watching/Runs";
 import { PLAIN_DEFAULT, plainOf, plainWords, requestOf, tookWords } from "../src/screens/watching/when";
 
@@ -53,10 +52,7 @@ describe("a run read as what it did", () => {
   });
 });
 
-describe("the page's owners and a watch asked for in words", () => {
-  it("lists every agent that owns something here, Ghost first", () => {
-    expect(ownersOf([{ agent: "legal" }, { agent: "ghost" }], [{ made_by: "agent:ledger", acts_through: "accounting" }, { made_by: null }], [{ agent: "infra" }])).toEqual(["ghost", "accounting", "infra", "ledger", "legal"]);
-  });
+describe("a watch asked for in words", () => {
   it("puts the operator's choices into one request Ghost can act on", () => {
     const text = watchRequest({ app: "github", appTitle: "GitHub", what: "New issues labeled bug. ", often: "15m", loud: "notify", agent: "legal", agentTitle: "Legal", act: "label it" });
     expect(text).toBe("Set up a watch on GitHub (github): New issues labeled bug. Look every 15 minutes, and tell me about each new one with a notification. For each new one, have Legal label it.");
