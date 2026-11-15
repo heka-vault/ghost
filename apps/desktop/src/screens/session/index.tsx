@@ -18,7 +18,7 @@
  * isn’t running” is the shell's (src/app/Offline.tsx).
  */
 import { callsOf, useGhost, youSpeaking } from "@ghost/ui";
-import type { QuestionView } from "@ghost/client-ts";
+import type { AlwaysChoice, QuestionView } from "@ghost/client-ts";
 import { ArrowDown, ArrowRight, AudioLines, Brain, Clock, Mic, MicOff, MoreHorizontal, PhoneOff, SlidersHorizontal, TriangleAlert, X } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
@@ -27,7 +27,7 @@ import { useListening } from "../../app/ListeningSwitch";
 import { Link, navigate } from "../../app/router";
 import type { RouteProps } from "../../app/routes";
 import { useDesign } from "../../design/context";
-import { Button, IconButton, LineGlyph, Menu, Notice, Page, SpeakingWave, PendingChange, VoicePresence, cx, errorText, lineName, quoted, relativeTime, scrollIntoPanel, useLive, useSetupPromptHere, type GhostPhase } from "../../ui";
+import { Button, IconButton, LineGlyph, Menu, Notice, Page, SpeakingWave, PendingChange, VoicePresence, alwaysDone, cx, errorText, lineName, quoted, relativeTime, scrollIntoPanel, useLive, useSetupPromptHere, useToast, type GhostPhase } from "../../ui";
 import { Composer, type VoiceControl } from "./Composer";
 import { writeParam } from "../conversations/url";
 import { type OwnSettle, useDecisions, useGhostHistory, useLastSession, useLines, useObservedSwitches } from "./hooks";
@@ -58,6 +58,7 @@ const FAILED: Record<Action, string> = {
 
 export default function SessionScreen(_: RouteProps) {
   const { client, status, turns, heldTurns, pending, activity } = useGhost();
+  const toast = useToast();
   // The shell's state: the same words as the sidebar card, and `online` gates every write.
   const { phase, online, loadingModels: loading, setupNeeded, setupLocked = false, setupHref } = useLive();
   const design = useDesign();
@@ -276,6 +277,20 @@ export default function SessionScreen(_: RouteProps) {
     if (r.ok) refocus();
     else own.current = null;
   };
+  // ADR 0070: the same decision made to stick, from the same card. The click is the operator's own;
+  // the daemon takes the rule from the waiting change and then confirms or cancels it as above.
+  const settleAlways = async (choice: AlwaysChoice) => {
+    if (!pending) return;
+    const { id } = pending;
+    const scope = pending.always?.scope ?? "this tool";
+    const refocus = keepFocus();
+    own.current = { id, action: choice === "allow" ? "confirm" : "cancel" };
+    const r = await run(choice === "allow" ? "confirm" : "cancel", () => client.decideAlways(id, choice));
+    if (r.ok) {
+      toast(alwaysDone(choice, scope));
+      refocus();
+    } else own.current = null;
+  };
 
   // Wake and sleep: the voice control may remount with the composer (start state <-> dock);
   // focus comes back to the composer either way.
@@ -413,6 +428,8 @@ export default function SessionScreen(_: RouteProps) {
                 disabled={!online}
                 onConfirm={() => settle("confirm")}
                 onCancel={() => settle("cancel")}
+                always={pending.always}
+                onAlways={(c) => void settleAlways(c)}
               />
             )}
             {!pending && errorEl}

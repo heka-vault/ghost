@@ -9,6 +9,8 @@ import { speechEnvelope } from "../../ui/VoiceWave";
 import siteTurnJson from "./fixtures/floating-site-turn.json";
 import type {
   Ack,
+  AlwaysResult,
+  PermissionChoiceView,
   ActivityView,
   CallPreview,
   QuestionView,
@@ -59,6 +61,7 @@ import { DESKTOP_BUILD, DESKTOP_VERSION } from "../../app/version";
 import { HttpError } from "./errors";
 import { type HearDesign, MockHear } from "./hear";
 import { MockReports } from "./reports";
+import { uninstallView } from "./uninstall";
 import { MockWakeTakes } from "./wakeTakes";
 import { isConnectionKey, isModelOnly, MockModel } from "./model";
 import { MockOtherTools } from "./otherTools";
@@ -71,6 +74,7 @@ import { renderPolicy } from "./fixtures/policy";
 import { PROVIDER_ONLY } from "./fixtures/settings";
 import { LONG_REPLY, type SessionFixture } from "./fixtures/session";
 import { sourceOf } from "./fixtures/sources";
+import { alwaysOffer, choiceSentence, choicesFor, scopeWords } from "./always";
 import { AUTONOMY, LISTS, conditionalFor, levelOf, parseRule, readPolicyText, ruleText, withRule } from "./permissions";
 import { type CatalogSkill, GHOST_SKILLS_DIR, SKILL_CATALOG, type SkillFixture, missingOf } from "./fixtures/skills";
 import { MockReach } from "./reach";
@@ -217,6 +221,8 @@ export class MockDaemon {
   /** Ghost's own sources; each connected app adds one when GET /sources answers. */
   private sources: SourceInfo[];
   private policy: PolicyView;
+  /** The rules set from a decision on the card (ADR 0070). */
+  private choices: PermissionChoiceView[] = [];
   private audit: AuditEntry[];
   private settings: SettingsView;
   /** Ghost's vault (ADR 0036): names and metadata; the mock never keeps a value either. */
@@ -299,6 +305,14 @@ export class MockDaemon {
     this.catalog = f.catalog;
     this.sources = f.sources;
     this.policy = f.policy;
+    // ADR 0070: `always` has rules set from decisions; `always-held` an ask rule that holds an allow back.
+    this.choices = choicesFor(scenario.name);
+    if (this.choices.length || scenario.name === "always-held") {
+      const p = { ...this.policy.permissions };
+      for (const c of this.choices) if (!p[c.choice].includes(c.rule)) p[c.choice] = [...p[c.choice], c.rule];
+      if (scenario.name === "always-held") p.ask = [...p.ask, "github.close"];
+      this.policy = { ...this.policy, permissions: p, text: renderPolicy(p, this.policy.routes) };
+    }
     this.audit = [...f.session.audit, ...f.audit];
     this.activity = f.session.activity;
     for (const [id, p] of Object.entries(f.session.results)) this.callResults.set(id, { ...p, id, session_id: f.session.sessionId ?? "" });
@@ -918,7 +932,52 @@ export class MockDaemon {
   /** The waiting change with its seconds left counted now, as the real daemon reports it. */
   private live(): PendingProposal | null {
     const p = this.pending;
-    return p ? { ...p, expires_in_secs: Math.max(0, (new Date(p.expires_at).getTime() - Date.now()) / 1000) } : null;
+    return p ? this.withOffer({ ...p, expires_in_secs: Math.max(0, (new Date(p.expires_at).getTime() - Date.now()) / 1000) }) : null;
+  }
+  /** A waiting change with what its card may offer to make the decision stick, under the permissions now (ADR 0070). */
+  private withOffer(p: PendingProposal): PendingProposal {
+    const always = alwaysOffer(this.policy.permissions, p.source, p.operation);
+    return always ? { ...p, always } : { ...p, always: undefined };
+  }
+  /** POST /proposals/{id}/always: the rule from the change's own tool, then the change run or dropped. */
+  private decideAlways(id: string, choice: unknown): AlwaysResult {
+    if (choice !== "allow" && choice !== "block") throw new HttpError(422, "choice must be allow or block");
+    const item = this.waitingItems.find((i) => i.change?.id === id);
+    const change = item?.change ?? (this.pending?.id === id ? this.pending : null);
+    if (!change) throw new HttpError(409, "that change isn't waiting");
+    const offer = alwaysOffer(this.policy.permissions, change.source, change.operation);
+    if (!offer) throw new HttpError(409, "Ghost can’t name this tool in a rule, so it can’t remember this choice. Decide it with Yes or No.");
+    if (choice === "allow" && !offer.allow) throw new HttpError(409, offer.held ?? "");
+    const p = { ...this.policy.permissions };
+    if (!p[choice].includes(offer.rule)) p[choice] = [...p[choice], offer.rule];
+    this.policy = { ...this.policy, exists: true, permissions: p, text: renderPolicy(p, this.policy.routes) };
+    const row: PermissionChoiceView = {
+      id: Math.max(0, ...this.choices.map((c) => c.id)) + 1,
+      rule: offer.rule,
+      choice,
+      sentence: choiceSentence(choice, scopeWords(change.source, change.operation)),
+      set_at: now(),
+      proposal_id: id,
+      in_file: true,
+    };
+    this.choices = [row, ...this.choices];
+    this.appsChanged(null);
+    let outcome: OutcomeView | undefined;
+    if (item) {
+      this.dropWaiting(item.key);
+      if (choice === "allow") outcome = { proposal_id: id, target: change.target, status: "success", applied: [change.summary], summary: `Applied on ${change.target}.` };
+    } else if (choice === "allow") outcome = this.confirm();
+    else this.settlePending("cancelled", { reason: "ui" });
+    return outcome ? { choice: row, outcome } : { choice: row };
+  }
+  private removeChoice(id: number): Ack {
+    const row = this.choices.find((c) => c.id === id);
+    if (!row) throw new HttpError(404, "no such choice");
+    this.choices = this.choices.filter((c) => c.id !== id);
+    const p = { ...this.policy.permissions, [row.choice]: this.policy.permissions[row.choice].filter((r) => r !== row.rule) };
+    this.policy = { ...this.policy, permissions: p, text: renderPolicy(p, this.policy.routes) };
+    this.appsChanged(null);
+    return { ok: true };
   }
   private snapshot(): Status {
     return { ...this.status, uptime_secs: (Date.now() - this.bootedAt) / 1000 + 2731, pending: this.live() };
@@ -1486,7 +1545,7 @@ export class MockDaemon {
   // ------------------------------------------------------------------ waiting (ADR 0029)
   private waitingView() {
     const count = this.waitingItems.filter((i) => i.state === "new" || i.state === "delivered").length;
-    return { items: this.waitingItems, count };
+    return { items: this.waitingItems.map((i) => (i.change ? { ...i, change: this.withOffer(i.change) } : i)), count };
   }
   private markWaiting(key: string, patch: Partial<WaitingItemView>): boolean {
     const i = this.waitingItems.findIndex((x) => x.key === key);
@@ -1835,6 +1894,7 @@ export class MockDaemon {
       const answer = await this.hear.handle(method, path, query, b);
       if (answer !== undefined) return answer;
     }
+    if (method === "GET" && path === "/uninstall") return uninstallView();
     if (path.startsWith("/reports")) {
       const answer = this.reports.handle(method, path, b);
       if (answer !== undefined) return answer;
@@ -1898,6 +1958,9 @@ export class MockDaemon {
       const until = new Date(Date.now() + Number(b.minutes ?? 30) * 60000).toISOString();
       return { ok: this.markWaiting(String(b.key ?? ""), { state: "snoozed", snoozed_until: until }) };
     }
+    if ((r = m(/^\/proposals\/([^/]+)\/always$/)) && method === "POST") return this.decideAlways(r[1], b.choice);
+    if (method === "GET" && path === "/permissions/choices") return this.choices;
+    if ((r = m(/^\/permissions\/choices\/(\d+)$/)) && method === "DELETE") return this.removeChoice(Number(r[1]));
     if ((r = m(/^\/proposals\/([^/]+)\/(confirm|cancel)$/))) {
       const item = this.waitingItems.find((i) => i.change?.id === r![1]);
       if (!item) throw new HttpError(409, "that change isn't waiting");
@@ -1951,6 +2014,8 @@ export class MockDaemon {
       if (u.text != null) {
         // As the daemon does: the file is read before it is written, and refused when it can't be.
         const permissions = readPolicyText(u.text, this.policy.path);
+        // ADR 0070: a save made from an older copy of the file is refused, never written over a rule set meanwhile.
+        if (u.base != null && u.base !== this.policy.text) throw new HttpError(409, "The file changed since you opened it (a rule was set meanwhile). Nothing was saved: reload it and make your edit again.");
         this.policy = { ...this.policy, text: u.text, exists: true, permissions };
         this.appsChanged(null);
       } else if (u.routes) {

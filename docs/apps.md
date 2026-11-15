@@ -206,8 +206,25 @@ Ghost's model to write for it (sampling), and an app's own screens are not shown
 
 ## Permissions
 
-Permissions are rules in `~/.config/ghost/policy.toml`. Edit them on the desktop's
-Settings › Permissions page, or on an app's page, where each tool has Allow, Ask first and Block:
+Most of the time you set a permission at the moment Ghost asks. On the card that waits for
+your yes, **More choices** opens two more answers for that change's own tool:
+
+- **Yes, and don't ask again for “issue write” in github**: the change runs now, and from
+  then on that tool runs without asking (an `allow` rule, `github.issue_write`).
+- **No, and never allow “issue write” in github**: the change is dropped, and that tool is
+  blocked (a `block` rule).
+
+Only that one tool of that one app, never a whole app or a pattern. If one of your own rules
+would still ask for it, the card says so instead of offering "don't ask again": change that
+rule in Settings › Permissions. What you decide this way is listed at the top of Settings ›
+Permissions, in a sentence with the day you set it, and **Remove** takes it back out of the
+file (there is no undo; removing is how you change your mind). Ghost follows a new rule from
+the very next call. Only a click on the desktop sets one: not the phone, not your voice, and
+never Ghost itself (ADR 0070).
+
+Under **Advanced** on that page are the mode, Try it, every rule and the file itself.
+Permissions are rules in `~/.config/ghost/policy.toml`. Edit them there, or on an app's page,
+where each tool has Allow, Ask first and Block:
 
 ```toml
 [permissions]

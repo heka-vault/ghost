@@ -9,11 +9,24 @@ export type Mode = PermissionsView["mode"];
 
 /** The lists, most careful first: the order the gate reads them in. */
 export const LISTS: { list: Level; title: string; help: string; empty: string }[] = [
-  { list: "block", title: "Blocked", help: "Not offered to Ghost, and refused if it asks. Reads too.", empty: "Nothing blocked." },
-  { list: "ask", title: "Ask first", help: "Ghost asks before it makes one of these changes. Your plain request is the yes.", empty: "Nothing asks first beyond the mode." },
-  { list: "quiet", title: "Quiet", help: "Runs without a word; Ghost mentions it only if you ask, or if it failed.", empty: "Nothing runs quietly." },
-  { list: "allow", title: "Allowed", help: "Runs and Ghost says so, even when the mode would ask or block.", empty: "No exceptions to the mode." },
+  { list: "block", title: "Never", help: "Not offered to Ghost, and refused if it asks. Reads too. (block in the file)", empty: "Nothing blocked." },
+  { list: "ask", title: "Asks first", help: "Ghost asks before it makes one of these changes. Your plain request is the yes. (ask)", empty: "Nothing asks first beyond the mode." },
+  { list: "quiet", title: "Runs quietly", help: "Runs without a word; Ghost mentions it only if you ask, or if it failed. (quiet)", empty: "Nothing runs quietly." },
+  { list: "allow", title: "Runs without asking", help: "Runs and Ghost says so, even when the mode would ask or block. (allow)", empty: "No exceptions to the mode." },
 ];
+
+/** A rule set from a decision (ADR 0070), its sentence as a line: “Close” in github runs without asking. */
+export function decidedLine(sentence: string): string {
+  const i = sentence.search(/[a-z]/i);
+  return i < 0 ? sentence : sentence.slice(0, i) + sentence[i].toUpperCase() + sentence.slice(i + 1);
+}
+
+/** When and how it was set: “set 14 Nov from your yes”, and whether it is still in the file. */
+export function decidedMeta(c: { choice: "allow" | "block"; set_at: string; in_file: boolean }, locale?: string): string {
+  const day = new Date(c.set_at).toLocaleDateString(locale, { day: "numeric", month: "short" });
+  const from = `set ${day} from your ${c.choice === "allow" ? "yes" : "no"}`;
+  return c.in_file ? from : `${from} · no longer in your policy file`;
+}
 
 export const MODES: { value: Mode; label: string; help: string }[] = [
   { value: "open", label: "Open", help: "Ghost uses its apps and tells you what it changed." },

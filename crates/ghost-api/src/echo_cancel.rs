@@ -102,6 +102,95 @@ pub fn status_lines(running: bool, installer: &Path, server: &SoundServer) -> Ve
     lines
 }
 
+/// The unit as this version writes it (`infra/pipewire/ghost-echo-cancel.service`).
+pub const UNIT_TEXT: &str = include_str!("../../../infra/pipewire/ghost-echo-cancel.service");
+/// The first line of a unit Ghost wrote, from form 2 on.
+pub const UNIT_MARKER: &str = "# Written by Ghost (ghost-echo-cancel";
+/// The unit 2026.11.0 and 2026.11.1 installed, byte for byte: Ghost's, though it carries no
+/// marker, and without the condition that stops it once Ghost is gone (#147).
+pub const UNIT_FORM_1: &str = "[Unit]
+Description=Ghost echo-cancelled microphone (ghost.mic)
+After=pipewire.service wireplumber.service
+Requires=pipewire.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/pipewire -c %h/.config/ghost/echo-cancel.conf
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target
+";
+
+/// What `refresh_unit` found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnitRefresh {
+    /// No unit: the canceller is not installed.
+    Absent,
+    /// The unit is this version's.
+    Current,
+    /// Ghost's own unit of an earlier form, rewritten to this one.
+    Rewritten,
+    /// A unit Ghost did not write, or one the person edited and took the marker out of:
+    /// left as it is.
+    NotGhosts,
+}
+
+/// Keep the canceller's unit at this version's form: a unit Ghost wrote (its marker line,
+/// or the exact text of form 1) is rewritten when it differs; any other is left as it is.
+/// The caller reloads systemd when it was rewritten.
+pub fn refresh_unit(unit: &Path) -> std::io::Result<UnitRefresh> {
+    let text = match std::fs::read_to_string(unit) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(UnitRefresh::Absent),
+        Err(e) => return Err(e),
+    };
+    if text == UNIT_TEXT {
+        return Ok(UnitRefresh::Current);
+    }
+    if !(text.starts_with(UNIT_MARKER) || text == UNIT_FORM_1) {
+        return Ok(UnitRefresh::NotGhosts);
+    }
+    // One rename, so systemd never reads half a unit.
+    let tmp = unit.with_extension("service.ghost-new");
+    std::fs::write(&tmp, UNIT_TEXT)?;
+    std::fs::rename(&tmp, unit)?;
+    Ok(UnitRefresh::Rewritten)
+}
+
+/// What the canceller's `installed` link points at for this install: the AppImage itself
+/// when Ghost runs from one (its mount moves at every start; the file does not), else the
+/// running `ghostd` (`/usr/bin/ghostd` from the .deb). Removing the package or deleting the
+/// AppImage leaves the link dangling, and the unit's `ConditionPathExists` then fails.
+pub fn installed_target(appimage: Option<&Path>, exe: Option<&Path>) -> Option<PathBuf> {
+    if let Some(a) = appimage.filter(|a| a.is_absolute() && a.is_file()) {
+        return Some(a.to_path_buf());
+    }
+    exe.map(|e| std::fs::canonicalize(e).unwrap_or_else(|_| e.to_path_buf()))
+}
+
+/// This process's `installed_target`.
+pub fn installed_target_now() -> Option<PathBuf> {
+    let appimage = std::env::var_os("APPIMAGE").map(PathBuf::from);
+    installed_target(appimage.as_deref(), std::env::current_exe().ok().as_deref())
+}
+
+/// Point `link` at `target`, by one rename. True when it changed.
+pub fn keep_installed_link(link: &Path, target: &Path) -> std::io::Result<bool> {
+    if std::fs::read_link(link).is_ok_and(|t| t == target) {
+        return Ok(false);
+    }
+    if let Some(dir) = link.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let tmp = link.with_extension("ghost-new");
+    let _ = std::fs::remove_file(&tmp);
+    std::os::unix::fs::symlink(target, &tmp)?;
+    std::fs::rename(&tmp, link)?;
+    Ok(true)
+}
+
 /// The installer under `infra_dir`.
 pub fn installer(infra_dir: &Path) -> PathBuf {
     infra_dir.join("pipewire").join("install.sh")
@@ -145,8 +234,12 @@ pub async fn run(infra_dir: &Path, uninstall: bool, server: SoundServer) -> (boo
         cmd.arg("--uninstall");
     }
     cmd.env_clear()
-        .envs(ghost_core::redact::child_env(std::env::vars())) // never a password (ADR 0036)
-        .stdin(std::process::Stdio::null())
+        .envs(ghost_core::redact::child_env(std::env::vars())); // never a password (ADR 0036)
+    // What the unit's condition follows (#147): this install's ghostd, or its AppImage.
+    if let Some(target) = installed_target_now() {
+        cmd.env("GHOST_INSTALLED", target);
+    }
+    cmd.stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
@@ -177,6 +270,83 @@ pub async fn run(infra_dir: &Path, uninstall: bool, server: SoundServer) -> (boo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_unit_does_not_start_once_ghost_is_gone() {
+        // #147: the unit is conditioned on a link Ghost keeps pointing at itself.
+        assert!(UNIT_TEXT.starts_with(UNIT_MARKER));
+        assert!(UNIT_TEXT.contains("\nConditionPathExists=%S/ghost/installed\n"));
+        assert!(
+            UNIT_TEXT.contains("ExecStart=/usr/bin/pipewire -c %h/.config/ghost/echo-cancel.conf")
+        );
+        assert!(!UNIT_FORM_1.contains("Condition"));
+    }
+
+    #[test]
+    fn ghosts_own_unit_is_rewritten_and_no_one_elses() {
+        let tmp = tempfile::tempdir().unwrap();
+        let unit = tmp.path().join("ghost-echo-cancel.service");
+        assert_eq!(refresh_unit(&unit).unwrap(), UnitRefresh::Absent);
+        // 2026.11.1's unit, which has no marker: Ghost's, rewritten.
+        std::fs::write(&unit, UNIT_FORM_1).unwrap();
+        assert_eq!(refresh_unit(&unit).unwrap(), UnitRefresh::Rewritten);
+        assert_eq!(std::fs::read_to_string(&unit).unwrap(), UNIT_TEXT);
+        assert_eq!(refresh_unit(&unit).unwrap(), UnitRefresh::Current);
+        // A later form with the marker: rewritten.
+        std::fs::write(&unit, format!("{UNIT_MARKER}, form 9)\n[Unit]\n")).unwrap();
+        assert_eq!(refresh_unit(&unit).unwrap(), UnitRefresh::Rewritten);
+        // The person edited it and took the marker out: theirs, left.
+        let theirs = UNIT_FORM_1.replace("RestartSec=2", "RestartSec=5");
+        std::fs::write(&unit, &theirs).unwrap();
+        assert_eq!(refresh_unit(&unit).unwrap(), UnitRefresh::NotGhosts);
+        assert_eq!(std::fs::read_to_string(&unit).unwrap(), theirs);
+    }
+
+    #[test]
+    fn the_link_follows_the_appimage_or_the_binary() {
+        let tmp = tempfile::tempdir().unwrap();
+        let image = tmp.path().join("Ghost.AppImage");
+        std::fs::write(&image, b"").unwrap();
+        let exe = tmp.path().join("ghostd");
+        std::fs::write(&exe, b"").unwrap();
+        assert_eq!(
+            installed_target(Some(&image), Some(&exe)),
+            Some(image.clone())
+        );
+        // An AppImage that is not there (moved) is not followed; the binary is.
+        let gone = tmp.path().join("gone.AppImage");
+        assert_eq!(
+            installed_target(Some(&gone), Some(&exe)),
+            Some(std::fs::canonicalize(&exe).unwrap())
+        );
+        let link = tmp.path().join("state/ghost/installed");
+        assert!(keep_installed_link(&link, &image).unwrap());
+        assert!(!keep_installed_link(&link, &image).unwrap());
+        assert!(link.exists());
+        // Removed (the package gone, the AppImage deleted): the link dangles.
+        std::fs::remove_file(&image).unwrap();
+        assert!(std::fs::symlink_metadata(&link).is_ok() && !link.exists());
+        assert!(keep_installed_link(&link, &exe).unwrap());
+        assert_eq!(std::fs::read_link(&link).unwrap(), exe);
+    }
+
+    #[test]
+    fn the_shipped_unit_is_the_one_in_infra() {
+        let file = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../infra/pipewire/ghost-echo-cancel.service"),
+        )
+        .unwrap();
+        assert_eq!(file, UNIT_TEXT);
+        let installer = include_str!("../../../infra/pipewire/install.sh");
+        assert!(
+            installer.contains(r#"ln -sfn "${GHOST_INSTALLED:-$HERE/install.sh}" "$INSTALLED""#)
+        );
+        assert!(
+            installer
+                .contains(r#"INSTALLED="${XDG_STATE_HOME:-$HOME/.local/state}/ghost/installed""#)
+        );
+    }
 
     #[test]
     fn the_sound_server_is_read_from_pactl() {

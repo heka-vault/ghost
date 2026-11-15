@@ -34,7 +34,7 @@ Say this in your own words, then ask whether to go ahead. Do nothing else until 
   `~/.local/share/ghost`; none of it is uploaded by Ghost.
 - When something in Ghost breaks, it sends an error report: what failed and where in its
   code, never what they said or typed. On by default; Settings › General turns it off.
-- It is early software, Linux only, built at one desk.
+- Early software, Linux only, tested with one microphone only (a reSpeaker XVF3800 USB array).
 - The download is about 180 MB (the .deb; 240 MB for the AppImage), and its ears and voice are
   2.9 GB more, downloaded once. Installed it takes about 4 GB of disk.
 - Installing the .deb needs their password once, typed by them in their own terminal.
@@ -249,16 +249,13 @@ log, under your name.
 
 ## Undo
 
-```bash
-ghostd echo-cancel off   # only if step 6 turned it on
-ghostd mcp remove claude-code
-sudo apt remove heka-ghost-desktop
-```
-
-Then, only if the person asks to delete everything Ghost kept (their transcripts, agents and
-settings), with Ghost quit: `rm -rf ~/.config/ghost ~/.local/share/ghost ~/.cache/ghost` (the
-last is the speech models). Remove `ghost` from your own configuration (`claude mcp remove
---scope user ghost`, `codex mcp remove ghost`, or the entry in `mcp.json`).
+Run `ghostd uninstall --dry-run` and show the person its list: every kind of thing Ghost left,
+with sizes, including `~/.config/autostart/heka-ghost-desktop.desktop` and the window's own
+storage, `~/.local/share/dev.heka.ghost`. Remove only what they choose. `ghostd uninstall
+--keep-data --yes` stops Ghost and takes all but their data and passwords; those go only on
+their explicit yes, each warned about (`ghostd uninstall --all`, or answering per kind). It
+ends with the one line the person runs (`sudo apt remove heka-ghost-desktop`). If it says
+Claude Code is left, run the command it shows (`claude mcp remove --scope user ghost`).
 
 ## Never do these (again)
 

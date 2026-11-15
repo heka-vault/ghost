@@ -139,7 +139,13 @@ pub fn permissions_view(p: &AutonomyPolicy, path: &Path) -> PermissionsView {
     }
 }
 
-pub fn pending_view(p: &Proposal, at: Option<DateTime<Utc>>) -> PendingProposal {
+/// A waiting change as the desktop and the phone show it. `permissions` are the gate's
+/// now, so the card offers only a choice that would take effect (ADR 0070).
+pub fn pending_view(
+    p: &Proposal,
+    at: Option<DateTime<Utc>>,
+    permissions: &ghost_core::permissions::Permissions,
+) -> PendingProposal {
     let at = at.unwrap_or_else(now);
     let left = (p.expires_at - at).num_microseconds().unwrap_or(0) as f64 / 1_000_000.0;
     PendingProposal {
@@ -151,6 +157,18 @@ pub fn pending_view(p: &Proposal, at: Option<DateTime<Utc>>) -> PendingProposal 
         rationale: p.rationale.clone(),
         expires_at: p.expires_at,
         expires_in_secs: left.max(0.0),
+        always: ghost_core::permission_choices::offer(
+            permissions,
+            &p.ability,
+            &p.operation,
+            &ghost_core::gate::WriteGate::args_of(p),
+        )
+        .map(|o| crate::models::AlwaysOffer {
+            rule: o.rule,
+            scope: o.scope,
+            allow: o.allow,
+            held: o.held,
+        }),
     }
 }
 
@@ -178,7 +196,7 @@ pub fn status_snapshot(deps: &Deps) -> Status {
     let pending = st
         .session_id()
         .and_then(|id| deps.gate.pending(&id, None).ok().flatten())
-        .map(|p| pending_view(&p, None));
+        .map(|p| pending_view(&p, None, &deps.gate.autonomy().permissions));
     let mut apps: Vec<String> = match &deps.apps {
         Some(apps) => apps.names().into_iter().filter(|n| apps.is_up(n)).collect(),
         None => Vec::new(),
@@ -224,6 +242,7 @@ pub fn waiting_view(deps: &Deps) -> ApiResult<WaitingView> {
         .into_iter()
         .map(|p| (p.id.clone(), p))
         .collect();
+    let permissions = deps.gate.autonomy().permissions;
     let mut out = Vec::new();
     for i in &items {
         let change = if i.source == ghost_core::waiting::GATE {
@@ -252,7 +271,7 @@ pub fn waiting_view(deps: &Deps) -> ApiResult<WaitingView> {
             delivered_via: i.delivered_via.clone(),
             acknowledged_at: i.acknowledged_at,
             snoozed_until: i.snoozed_until,
-            change: change.map(|c| pending_view(c, Some(at))),
+            change: change.map(|c| pending_view(c, Some(at), &permissions)),
             place: crate::models::waiting_place(&i.source, &i.key),
             question: match change {
                 Some(c) => Some(crate::questions::question_view(
@@ -1292,16 +1311,12 @@ fn routes_table(v: &RoutesView) -> toml::Table {
     t
 }
 
-fn write_policy(deps: &Deps, text: &str) -> ApiResult<()> {
-    if let Some(parent) = deps.policy_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| ApiError::internal(e.to_string()))?;
-    }
-    let text = if text.ends_with('\n') {
+fn with_newline(text: &str) -> String {
+    if text.ends_with('\n') {
         text.to_string()
     } else {
         format!("{text}\n")
-    };
-    std::fs::write(&deps.policy_path, text).map_err(|e| ApiError::internal(e.to_string()))
+    }
 }
 
 #[utoipa::path(get, path = "/policy", operation_id = "get_policy_policy_get", tag = "policy", summary = "Get Policy",
@@ -1318,31 +1333,46 @@ async fn put_policy(
     State(deps): State<SharedDeps>,
     Body(update): Body<PolicyUpdate>,
 ) -> ApiResult<Json<PolicyResult>> {
-    let text = match update.text {
-        Some(text) => {
-            // never a file that won't read
-            AutonomyPolicy::parse(&text, "request")
-                .map_err(|e| ApiError::unprocessable(e.to_string()))?;
-            text
-        }
-        None => {
-            let current = policy_view(&deps)?;
-            let Some(routes) = update.routes else {
-                return Ok(Json(PolicyResult {
-                    policy: current,
-                    applied: false,
-                }));
-            };
-            let table = routes_table(&routes);
-            let parsed = RoutePolicy::parse(Some(&table), "routes")
-                .map_err(|e| ApiError::unprocessable(e.to_string()))?;
-            // The routes editor doesn't know the rest of the file: only [routes] changes,
-            // and everything else stays as written, comments included.
-            write_routes(&current.text, &parsed.to_toml())
-                .map_err(|e| ApiError::unprocessable(e.to_string()))?
-        }
-    };
-    write_policy(&deps, &text)?;
+    // The one lock every writer of policy.toml takes (ADR 0070), with the file read again
+    // under it: a whole-file save made from an older copy is refused, and the routes editor
+    // rewrites [routes] in the file as it is now.
+    let wrote = ghost_core::policy_file::edit(
+        &deps.policy_path,
+        |current, _| -> ApiResult<Option<String>> {
+            match &update.text {
+                Some(text) => {
+                    // never a file that won't read
+                    AutonomyPolicy::parse(text, "request")
+                        .map_err(|e| ApiError::unprocessable(e.to_string()))?;
+                    if update.base.as_ref().is_some_and(|base| base != current) {
+                        return Err(ApiError::conflict(
+                            "The file changed since you opened it (a rule was set meanwhile). Nothing was saved: reload it and make your edit again.",
+                        ));
+                    }
+                    Ok(Some(with_newline(text)))
+                }
+                None => {
+                    let Some(routes) = &update.routes else {
+                        return Ok(None);
+                    };
+                    let table = routes_table(routes);
+                    let parsed = RoutePolicy::parse(Some(&table), "routes")
+                        .map_err(|e| ApiError::unprocessable(e.to_string()))?;
+                    // The routes editor doesn't know the rest of the file: only [routes] changes,
+                    // and everything else stays as written, comments included.
+                    write_routes(current, &parsed.to_toml())
+                        .map(|t| Some(with_newline(&t)))
+                        .map_err(|e| ApiError::unprocessable(e.to_string()))
+                }
+            }
+        },
+    )?;
+    if wrote.is_none() {
+        return Ok(Json(PolicyResult {
+            policy: policy_view(&deps)?,
+            applied: false,
+        }));
+    }
     deps.control
         .reload_policy()
         .map_err(|e| ApiError::internal(e.to_string()))?;
@@ -1626,6 +1656,7 @@ pub fn create_app(deps: SharedDeps) -> (axum::Router, utoipa::openapi::OpenApi) 
         .merge(crate::hear::router())
         .merge(crate::wake_takes::router())
         .merge(crate::reports::router())
+        .merge(crate::uninstall::router())
         .merge(crate::speech_models::router())
         .merge(crate::schedules::router())
         .merge(crate::clients::router())
@@ -1633,6 +1664,7 @@ pub fn create_app(deps: SharedDeps) -> (axum::Router, utoipa::openapi::OpenApi) 
         .merge(crate::questions::router())
         .merge(crate::calls::router())
         .merge(crate::reach::router())
+        .merge(crate::permission_choices::router())
         .routes(routes!(get_status))
         .routes(routes!(wake))
         .routes(routes!(sleep))

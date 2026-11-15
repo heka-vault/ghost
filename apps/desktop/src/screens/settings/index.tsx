@@ -55,6 +55,7 @@ import { FloatingRoomSettings } from "../../app/FloatingSettings";
 import { listeningSentence, notListening } from "../../app/listening";
 import { VersionNotice, VersionRows } from "./About";
 import { ErrorReportsSection } from "./ErrorReports";
+import { RemoveGhostSection } from "./RemoveGhost";
 import { UpdatesSection } from "./Updates";
 import { SpeechModelsRow } from "../onboarding/speech";
 import { type RouteProps, SETTINGS_PAGES, SETTINGS_SCREEN_PAGES } from "../../app/routes";
@@ -950,6 +951,7 @@ export default function SettingsScreen({ params: route }: RouteProps) {
                 <Prototype only="privacy" />
               </Suspense>
             )}
+            <RemoveGhostSection confirmOpen={mock && new URLSearchParams(window.location.search).get("remove") === "confirm"} />
           </>
         )}
 
