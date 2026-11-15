@@ -166,7 +166,8 @@ clean clone (the Rust build about 4.5, the downloads the rest) and `make dev` ab
 first time, to build the desktop window. Expect two to three times that on a laptop.
 
 Until a model is connected, the window offers **Finish setup**, the first-run steps: connect a model, let
-Ghost hear you, say "Hey Ghost", pick a voice, connect an app, hire an agent, ask something.
+Ghost hear you, say "Hey Ghost", see what Ghost keeps and sends, pick a voice, connect an app,
+ask something. Agents come later: ask Ghost to hire one, or press + on the rail.
 Each step can be skipped, and the steps below do the same from a terminal.
 
 ## Connect a model
