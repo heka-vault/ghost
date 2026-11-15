@@ -195,7 +195,7 @@ anything of Ghost's still running, then delete what you want gone:
   `~/.cache/heka-ghost-desktop`, `~/.local/state/ghost`, `$XDG_RUNTIME_DIR/ghost`.
 - Your data: `~/.config/ghost`, `~/.local/share/ghost/ghost.db`,
   `~/.local/share/ghost/ghost.db-wal`, `~/.local/share/ghost/ghost.db-shm`,
-  `~/.local/share/ghost/wake/takes`, `~/.local/share/ghost/hear`,
+  `~/.local/share/ghost/wake/takes`, `~/.local/share/ghost/debug-audio.log`, `~/.local/share/ghost/hear`,
   `~/.local/share/ghost/reports`, and the rest of `~/.local/share/ghost`.
 - Your passwords: `~/.local/share/ghost/passwords.vault`,
   `~/.local/share/ghost/passwords.vault.lock`, and the key in your login keyring
