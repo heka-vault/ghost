@@ -65,7 +65,7 @@ import { uninstallView } from "./uninstall";
 import { MockWakeTakes } from "./wakeTakes";
 import { isConnectionKey, isModelOnly, MockModel } from "./model";
 import { MockOtherTools } from "./otherTools";
-import { MockSchedules } from "./schedules";
+import { MockSchedules, askedSchedule } from "./schedules";
 import { type AppFixture, type CatalogSeed, DEFAULT_LIMITS, GENERIC_TOOLS, TOOLS_BY_CATALOG } from "./fixtures/apps";
 import type { AgentRecord } from "./fixtures/conversations";
 import { CONFIG_DIR } from "./fixtures/folder";
@@ -79,7 +79,7 @@ import { AUTONOMY, LISTS, conditionalFor, levelOf, parseRule, readPolicyText, ru
 import { type CatalogSkill, GHOST_SKILLS_DIR, SKILL_CATALOG, type SkillFixture, missingOf } from "./fixtures/skills";
 import { MockReach } from "./reach";
 import { MockRealtime } from "./realtime";
-import { hex, type Scenario, seeded } from "./scenarios";
+import { ago, hex, type Scenario, seeded } from "./scenarios";
 
 export { HttpError };
 
@@ -297,6 +297,20 @@ export class MockDaemon {
     if (scenario.pieces) while (this.turns.length && this.turns[this.turns.length - 1].role === "user") this.turns = this.turns.slice(0, -1);
     this.pending = f.session.pending;
     for (const l of f.conversations.agents) this.agents.set(l.detail.slug, l);
+    // `&agents=<n>`: that many hired agents besides Ghost, for the rail's cap (2026-11-14): the
+    // fixture's first n, or more made up after them, a day apart, the later ones used more lately.
+    const many = typeof window !== "undefined" ? Number(new URLSearchParams(window.location.search).get("agents") ?? NaN) : NaN;
+    if (Number.isFinite(many) && many >= 0) {
+      const hired = [...this.agents.values()].filter((l) => !l.detail.is_ghost && !l.detail.retired_at);
+      hired.slice(many).forEach((l) => this.agents.delete(l.detail.slug));
+      const NAMES = ["Brand", "Hiring", "Ops", "Support", "Research", "Billing", "Design", "Docs", "Sales", "Security", "Data", "Mobile", "Growth", "Travel", "Inbox"];
+      for (let i = hired.length; i < many; i++) {
+        const name = NAMES[(i - hired.length) % NAMES.length] + (i - hired.length >= NAMES.length ? ` ${i}` : "");
+        const slug = name.toLowerCase().replace(/\s+/g, "-");
+        const base = hired[0]?.detail ?? [...this.agents.values()][0].detail;
+        this.agents.set(slug, { detail: { ...base, id: newId(), slug, name, aliases: [], is_ghost: false, active: false, look: null, retired_at: null, created_at: ago(60 * 24 * (40 - i)), last_active_at: i % 3 ? ago(60 * (many - i)) : null }, turns: [], compactions: [] });
+      }
+    }
     this.rules = f.rules;
     this.outputs = f.outputs;
     this.watching = f.watching;
@@ -331,6 +345,9 @@ export class MockDaemon {
     // `&mic=none`: a computer with no microphone at all (the first run's typed moment).
     if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("mic") === "none")
       this.devices = { ...this.devices, microphone: null, devices: this.devices.devices.map((d) => ({ ...d, max_input_channels: 0, is_default_input: false })) };
+    // `&mic=deaf`: the microphone stopped hearing well (ADR 0064): its note, with Repair.
+    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("mic") === "deaf" && this.devices.microphone)
+      this.devices = { ...this.devices, microphone: { ...this.devices.microphone, problem: "Loud speech has read as nothing four times in the last ten minutes: the microphone may have stopped passing sound." } };
     // `&mic=headset`: a headset, so nothing of Ghost's voice comes back (no echo line on the wake beat).
     if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("mic") === "headset" && this.devices.microphone)
       this.devices = {
@@ -1155,6 +1172,8 @@ export class MockDaemon {
     if (ids.length) this.later(500, () => ids.forEach((c) => this.act("call", c)));
     this.later(ids.length ? 1600 : 900, () => {
       ids.forEach((c) => this.act("result", c));
+      const own = this.onItsOwn(text);
+      if (own) return this.reply(own);
       const patch = /(?:patch me (?:through )?to|transfer me to|switch to|get me|back to)\s+(?:the\s+)?([\w -]+?)(?:\s+(?:line|agent))?[.!?]*$/i.exec(text);
       if (patch) {
         const want = patch[1].trim().toLowerCase();
@@ -1174,6 +1193,34 @@ export class MockDaemon {
       }
       this.reply(rule?.reply ?? this.script.fallbackReply);
     });
+  }
+  /** A watch asked for in words, written once the operator says yes (ADR 0052 asks by default). */
+  private pendingWatch: WatchingView["watches"][number] | null = null;
+  /**
+   * On its own (2026-11-14): a typed sentence asking for something done on its own. The mock's
+   * stand-in for the agent calling `ghost_schedule_manage` (Ghost's own app runs it quietly and
+   * says so) or `ghost_watch_manage` (asks first): the reply, or null when the words ask for neither.
+   */
+  private onItsOwn(text: string): string | null {
+    const agentOf = (n: string) => [...this.agents.values()].find((a) => !a.detail.retired_at && (a.detail.slug === n.toLowerCase() || a.detail.name.toLowerCase() === n.toLowerCase()))?.detail.slug ?? null;
+    const asked = askedSchedule(text, agentOf);
+    if (asked) {
+      const id = newId().slice(0, 8);
+      this.act("call", { name: "ghost_schedule_manage", id });
+      const s = this.schedules.addByAgent(asked.req, this.status.conversation ?? "ghost");
+      this.act("result", { name: "ghost_schedule_manage", id });
+      const who = s.agent === "ghost" ? "I" : (this.agents.get(s.agent)?.detail.name ?? s.agent);
+      // The mock echoes the operator's own “when” (the words before the first comma).
+      const when = text.split(",")[0].trim();
+      return `Done. ${when.charAt(0).toUpperCase()}${when.slice(1)}, ${who === "I" ? "I’ll" : `${who} will`} ${s.instruction.charAt(0).toLowerCase()}${s.instruction.slice(1).replace(/\.$/, "")}. It’s on the list now.`;
+    }
+    const w = /^(?:tell me|let me know) when (.+?)[.!]*$/i.exec(text.trim());
+    if (w && !this.pending) {
+      this.pendingWatch = { name: w[1].toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 32) || "new-watch", app: "github", read: "list_issues", every_secs: 900, steps: ["check"], response: "tell", urgency: "notify", last_run: null, last_ok: null, error: null, open: 0, seen: 0, made_by: `agent:${this.status.conversation ?? "ghost"}`, paused: false };
+      this.propose({ source: "ghost", operation: "watch_manage", target: "watches.json", summary: `Add a watch: tell you when ${w[1]}.`, rationale: "Setting up a watch asks you first." });
+      return "I can watch for that. Say yes, or press Confirm, and I’ll set it up.";
+    }
+    return null;
   }
   /** Ghost says `text`: speaking for about as long as the words take (Kokoro, ~14 characters a second). */
   private reply(text: string, ms = Math.max(1600, (text.length / 14) * 1000)) {
@@ -1293,6 +1340,12 @@ export class MockDaemon {
     this.settlePending("executed");
     const outcome: OutcomeView = { proposal_id: p.id, status: "success", summary: p.summary.replace(/^On [^:]+: /, ""), target: p.target, applied: [p.operation], state_now: "closed", error: null, failed_step: null };
     this.emit({ type: "outcome", outcome, via: "ui" });
+    if (p.operation === "watch_manage" && this.pendingWatch) {
+      this.watching = { ...this.watching, watches: [...this.watching.watches, this.pendingWatch] };
+      this.pendingWatch = null;
+      this.reply("Done. I’m watching for it, and it’s on the list.", replyMs);
+      return outcome;
+    }
     const short = shortName(p.target);
     this.reply(`Done. ${short[0].toUpperCase()}${short.slice(1)} is closed.`, replyMs);
     return outcome;

@@ -1341,7 +1341,7 @@ export function DoneStep({ w }: { w: Wizard }) {
       </Card>
       {/* Hiring an agent left the first run (2026-11-14): one line says they exist and how to get one. */}
       <p className="onb-try__meta onb-agents-line">
-        Agents take on work of their own, each with a name and a job. Ask Ghost to hire one, or press + under Agents on the rail.
+        Agents take on work of their own, each with a name and a job. Ask Ghost to hire one, or choose All agents on the rail, then New agent.
       </p>
     </StepFrame>
   );

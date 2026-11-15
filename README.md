@@ -241,7 +241,7 @@ first time, to build the desktop window. Expect two to three times that on a lap
 
 Until a model is connected, the window offers **Finish setup**, the first-run steps: connect a model, let
 Ghost hear you, say "Hey Ghost", see what Ghost keeps and sends, pick a voice, connect an app,
-ask something. Agents come later: ask Ghost to hire one, or press + on the rail.
+ask something. Agents come later: ask Ghost to hire one, or choose **All agents** on the rail, then **New agent**.
 Each step can be skipped, and the steps below do the same from a terminal.
 
 ## Connect a model
@@ -370,7 +370,7 @@ right there. Its voice, an app, an agent and a first question follow, each optio
    **Settings › Agents › New agent**, where you also pick its shape, colour and voice. It
    appears on the left rail; "transfer me to Ledger" hands the conversation over.
 5. **Make a schedule.** "Every weekday at nine, check what's open in the app repo and tell me",
-   or **Watching › Add schedule**. The run happens with nobody there; its answer lands on
+   or type it on **On its own** (**Set it up by hand** has the form). The run happens with nobody there; its answer lands on
    **Today**. A change it would make that needs your yes waits there instead.
 6. **The floating room.** The first run turns it on when you first say "Hey Ghost";
    **Settings › General › The floating room › Float over the desktop** (or the rail, or the tray) turns it off and on.
