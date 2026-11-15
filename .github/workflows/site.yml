@@ -56,6 +56,11 @@ jobs:
           node-version: 22
           build-cmd: pnpm --filter @ghost/site site:check && pnpm --filter @ghost/site site:build && pnpm --filter @ghost/site site:verify
           out-dir: site/dist
+      # The hero's budget (docs/site.md, What the hero costs): bytes and behaviour fail, timings
+      # under a slowed CPU only warn. Against `astro preview` of what was just built, in the
+      # runner's own Chrome through playwright-core (nothing downloaded).
+      - name: Budget
+        run: pnpm --filter @ghost/site site:budget
 
   deploy:
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'

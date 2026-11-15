@@ -9,16 +9,26 @@ page links to them.
 - **The hero is the app's own floating view over the README's desktop.** The first screen is
   that desktop edge to edge, with the words over its quiet left side; on a phone (or any screen
   taller than wide) the float takes the top of the screen, centred, with the words under it.
-  `site/src/pages/float.astro` mounts `FloatingRoom` from `apps/desktop/src/floating` with the
-  desktop's in-memory mock daemon on the `floating-site` scenario (one turn on the clock of the
-  hero's sound, below, repeating every 24.6 s: the wake at 1.2 s, six places while Ghost thinks,
+  `site/src/pages/float.astro` mounts `FloatingRoom` from `apps/desktop/src/floating` on the
+  site's own small mock of the `floating-site` scenario (`apps/desktop/src/design/mock/site.ts`:
+  the one turn and the few routes the floating view reads, a few kilobytes where the desktop's
+  whole mock daemon and its fixtures are about 250 KB; `apps/desktop/test/floating-site-mock.test.ts`
+  holds it to the desktop's `?mock=floating-site` event for event on the same clock), one turn on
+  the clock of the hero's sound, below, repeating every 24.6 s: the wake at 1.2 s, six places while Ghost thinks,
   the reply from 6.1 s, a yes waiting from 11.7 s, the goodbye at 21 s) over
   `apps/desktop/shots/world.{ts,css}`, the same made-up desktop
   `shots/desktop.html` puts under the README's pictures, its windows moved right of the middle
   (`?arrange=site`). The front page shows a still first, loads that page behind it once the
   page has loaded and the hero is on screen, and shows it the moment Ghost first comes forward
-  (the page posts `ghost:forward`). It empties the frame after two seconds off screen, and stays
-  a still under reduced motion (with a Play button) or with JavaScript off. When the floating
+  (the page posts `ghost:forward`). After two turns (about 50 s) with nobody touching the hero
+  the front page counts the float's `ghost:loop` and asks it to rest (`ghost:rest`): the scene
+  and every timer stop, and Wisp waits where it comes forward, lit and drawn once, with Play
+  beside it; pointing at the hero, a tap, Play, Hear it or scrolling back starts the turn again
+  from the wake. The frame stays at rest rather than going: it costs what an emptied one does
+  (below) and starts again at once. It empties the frame after two seconds off screen, and stays
+  a still with JavaScript off, under reduced motion, or with Save-Data (or `prefers-reduced-data`)
+  on, with a Play button. The site's build carries no commit (`__GHOST_WINDOW_BUILD__` is null),
+  so the float's files keep their names from one deploy to the next unless their code changed. When the floating
   room, the mock or the world changes, the site changes with it: a pull request touching
   `apps/desktop/src/**` or `apps/desktop/shots/**` builds the site too.
 - **The hero's sound, on request.** The page loads silent and stays so until the visitor presses
@@ -100,7 +110,7 @@ page links to them.
 `site` is a member of the pnpm workspace so it can import the desktop's sources with one
 install. It has no `build`, `test` or `typecheck` script, so the root `pnpm build`, `pnpm test`
 and `pnpm typecheck` (and the `ci` workflow) don't run it; its own scripts are `site:build`,
-`site:check`, `site:verify`, `site:stills`, `site:audio`, `site:sound-check` and `dev`. It adds about 250
+`site:check`, `site:verify`, `site:budget`, `site:stills`, `site:audio`, `site:sound-check` and `dev`. It adds about 250
 packages to the lock and about a second to a cold `pnpm install` (measured 2026-11-13: 3.4 s to
 4.4 s with an empty store, 690 to 844 MB of store).
 
@@ -110,7 +120,44 @@ pnpm --dir site site:check   # tsc over the site's TypeScript and what it import
 pnpm --dir site site:build   # site/dist, about 1.5 s
 pnpm --dir site site:audio --check   # render the hero's sound, read it back, measure it
 pnpm --dir site site:sound-check     # the sound in Chrome and Firefox, headless (after site:build)
+pnpm --dir site site:budget          # the hero's bytes and behaviour (after site:build; --bytes-only)
 ```
+
+### What the hero costs
+
+`site:budget`, run by the site workflow after the build, holds the hero to a budget. Failing:
+the front page's first paint at most 200 KB (gzip; the HTML, its CSS and scripts, the preloaded
+font and the larger still as served; 160.8 KB on 2026-11-15), the float frame's module graph at
+most 115 KB (gzip, every module it reaches; 112.2 KB, of it 102.2 KB of script), and in Chrome
+against `astro preview`: the field drawn at most 31 times a second, Wisp's SVG under 400
+attribute writes a second, no audio before the press, the scene stopped by itself after two
+turns with nothing drawn after, the frame gone three seconds after the hero scrolls away, and
+no frame under reduced motion or Save-Data. Warned about only, since a shared runner is noisy
+and draws WebGL in software: with the CPU 4x slower on slow 4G, when Ghost comes to life
+(ceiling 4.5 s) and the main thread's share while it plays (25%). A Lighthouse score is not
+used: it came out bimodal on this page. When a ceiling is passed, say what bought the bytes and
+raise it in the same pull request.
+
+Measured 2026-11-15 with the performance review's scripts against a local production build
+served as GitHub Pages serves it (gzip, `max-age=600`), Chrome with the GPU, medians of three:
+
+| | desktop | mid phone (4x CPU, slow 4G) | low phone (6x) |
+|---|---|---|---|
+| Ghost comes to life | 1.57 s (was 1.57) | 3.89 s (was 4.41) | 3.83 s (was 4.43) |
+| The float frame on the wire | 125 KB (was 187–202) | 125 KB (was 202) | 125 KB (was 202) |
+| Main thread while it plays | 3.1% (was 3.3) | 12.7% (was 13.1) | 17.9% (was 18.1) |
+| Main thread after two turns | 0.6% (was 3.4, it never stopped) | 1.4% (was 12.8) | 2.0% (was 17.6) |
+| Frame emptied, off screen | 0.5% | 1.1% | 1.6% |
+
+What is left, for a later pull request: the frame's longest task (about 260 ms at 4x, a second
+after the frame is asked for) is mostly the field's shader link read back at once
+(`getProgramParameter(LINK_STATUS)` straight after `linkProgram` in `floating/field.ts`, 205 ms
+waiting on the GPU process); `KHR_parallel_shader_compile` and a check a frame later would take
+it off the main thread. While Ghost plays, the frame still recalculates style about 35 times
+and lays out about 32 times a second: Wisp's per-frame SVG attribute writes (about 345 a
+second) are geometry, so each frame is a layout; moving Wisp's motion to transforms on groups
+would end it. The arrival's blur (`filter: blur()` in the zoom from depth) repaints Wisp for
+950 ms each time Ghost comes forward.
 
 ### What the sound measured (2026-11-13)
 
