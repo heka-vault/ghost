@@ -141,7 +141,9 @@ What `tauri build` does, in order (`apps/desktop/src-tauri/tauri.conf.json`):
    Ubuntu lacks; the .deb's `ghostd` loads the system's copy, whose package brings the data
    made for it) and `pulseaudio-utils` (`pactl`, which the echo canceller's installer and
    Ghost's sound checks use; the tools only, not the PulseAudio server), recommends
-   `pipewire-bin`, on top of the GTK and WebKit packages Tauri adds.
+   `pipewire-bin` and `pkexec` (Update and restart installs the .deb through it; Debian 13's
+   minimal systems lack it, and the updater falls back to zenity or kdialog), on top of the
+   GTK and WebKit packages Tauri adds.
 
 The shell's build script hides `externalBin` and `resources` from `tauri-build` (the
 sidecars are the workspace's own binaries, which `tauri-build` would otherwise copy over

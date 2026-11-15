@@ -41,7 +41,7 @@
     "linux": {
       "deb": {
         "depends": ["libespeak-ng1", "pulseaudio-utils"],
-        "recommends": ["pipewire-bin"],
+        "recommends": ["pipewire-bin", "pkexec"],
         "section": "utils",
         "desktopTemplate": "./ghost.desktop",
         "preRemoveScript": "./prerm"
