@@ -914,7 +914,12 @@ pub fn build_session(p: SessionParams) -> GhostSession {
     }
 
     // The stages, in the Python's order.
-    let Media { input, output, .. } = p.media;
+    let Media {
+        input,
+        output,
+        origin: media_origin,
+        ..
+    } = p.media;
     stages.push((
         Some(Slot::AudioIn),
         Box::new(AudioInput::new(input, session_token.clone())),
@@ -962,7 +967,8 @@ pub fn build_session(p: SessionParams) -> GhostSession {
             .with_early_read(settings.stt_early_read)
             .with_early_read_after(settings.stt_early_read_after_secs)
             .with_on_read(on_read)
-            .with_room(room),
+            .with_room(room)
+            .with_meter_if(media_origin == "desk", crate::meter::Source::Session),
         ),
     ));
     let hold_gate =

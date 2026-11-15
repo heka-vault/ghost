@@ -422,6 +422,9 @@ impl EchoFilter {
             Frame::Transcript(text) | Frame::Interim(text)
                 if self.in_warmup() && !Self::clearly_the_operator(text) =>
             {
+                if matches!(frame, Frame::Transcript(_)) {
+                    crate::meter::decided(crate::meter::Decision::Echo);
+                }
                 debug::audio(|| {
                     format!(
                         "echo: dropped {text:?} (inside the canceller's warm-up after Ghost's voice resumed)"
@@ -430,6 +433,7 @@ impl EchoFilter {
                 return true;
             }
             Frame::Transcript(text) if self.is_echo(text, None) => {
+                crate::meter::decided(crate::meter::Decision::Echo);
                 debug::audio(|| format!("echo: dropped {text:?}"));
                 return true;
             }

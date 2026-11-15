@@ -498,6 +498,24 @@ impl DaemonState {
         self.bus.publish(&Event::Activity { activity });
     }
 
+    /// A turn of the live session, timed (`Event::Timing`); dropped outside a session, and
+    /// built only while the desktop listens.
+    pub fn publish_timing(&self, mut timing: crate::live::TimingView) {
+        if self.bus.subscribers() == 0 {
+            return;
+        }
+        let Some(id) = self.session_id() else {
+            return;
+        };
+        timing.session_id = id;
+        self.bus.publish(&Event::Timing { timing });
+    }
+
+    /// A reading of Developer's microphone meter (`Event::Meter`), only while it is open.
+    pub fn publish_meter(&self, meter: crate::live::MeterView) {
+        self.bus.publish(&Event::Meter { meter });
+    }
+
     /// A run started or has ended (`Event::Run`, ADR 0060).
     pub fn publish_run(
         &self,

@@ -347,6 +347,14 @@ impl Stage for VadStage {
             && let Some(vad) = &mut self.vad
         {
             let after = vad.analyze(&audio.samples, epoch()).unwrap_or(vad.state());
+            if ghost_voice::meter::is_open() {
+                ghost_voice::meter::frame(
+                    ghost_voice::meter::Source::Passive,
+                    &audio.samples,
+                    after == VadState::Speaking || (self.speaking && after != VadState::Quiet),
+                    None,
+                );
+            }
             if !self.speaking && after == VadState::Speaking {
                 self.speaking = true;
                 debug::audio(|| "passive: speech started".to_string());

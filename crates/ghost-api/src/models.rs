@@ -557,6 +557,20 @@ pub enum Event {
     ShowApp {
         session_id: String,
     },
+    /// One turn of the live session, timed, at its end (ADR 0073, amended 2026-11-14): stage
+    /// times, the model's name and provider. Numbers only, never words. Built only while the
+    /// desktop is open; not sent to the phone or an outside tool.
+    Timing {
+        timing: crate::live::TimingView,
+    },
+    /// Developer's microphone meter (ADR 0073, amended 2026-11-14), about fifteen a second
+    /// while the operator has it open, then one with `open` false: levels, the speech
+    /// detector's state, the room gate's levels and decisions by kind. Never words, a
+    /// transcript or audio, in a session or out of one. Not sent to the phone or an outside
+    /// tool.
+    Meter {
+        meter: crate::live::MeterView,
+    },
 }
 
 /// Where a run is (ADR 0060).

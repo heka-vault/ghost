@@ -29,6 +29,15 @@ export type SwitchView = Schemas["SwitchView"];
 export type SwitchesView = Schemas["SwitchesView"];
 export type SwitchesResult = Schemas["SwitchesResult"];
 export type DiagnoseRequest = Schemas["DiagnoseRequest"];
+/** One turn of a live session, timed (Developer's timing overlay). Numbers only. */
+export type TimingView = Schemas["TimingView"];
+/** One reading of Developer's microphone meter: levels and decisions by kind, never words. */
+export type MeterView = Schemas["MeterView"];
+export type MeterDecisionView = Schemas["MeterDecisionView"];
+export type MeterLeaseView = Schemas["MeterLeaseView"];
+export type ChecksView = Schemas["ChecksView"];
+export type CheckLine = Schemas["CheckLine"];
+export type ReportTestView = Schemas["ReportTestView"];
 export type DiagnosePreview = Schemas["DiagnosePreview"];
 export type DiagnosePart = Schemas["DiagnosePart"];
 export type DiagnoseSaved = Schemas["DiagnoseSaved"];
@@ -229,7 +238,11 @@ export type GhostEvent =
   /** One tool call an agent made came back, as counts and sizes, never contents (ADR 0060). Desktop only. */
   | Schemas["ReachEvent"]
   /** "Ghost, open the app" in a session (ADR 0059): the desktop brings its window to the operator. */
-  | Schemas["ShowAppEvent"];
+  | Schemas["ShowAppEvent"]
+  /** One turn of the live session, timed, at its end: Developer's timing overlay. Numbers only. Desktop only. */
+  | Schemas["TimingEvent"]
+  /** Developer's microphone meter, ~15/s while it is open, then one with `open` false. Levels and kinds only. Desktop only. */
+  | Schemas["MeterEvent"];
 
 export type Unsubscribe = () => void;
 
@@ -848,6 +861,10 @@ export class GhostClient {
   setReportsChoice(send: boolean) {
     return unwrap(this.api.PUT("/reports/choice", { body: { send } }));
   }
+  /** Send a test report now, as `ghostd reports test` does: what was sent exactly, or why nothing was. */
+  sendTestReport() {
+    return unwrap(this.api.POST("/reports/test"));
+  }
   // ------------------------------------------------------------------ Settings › Developer (ADR 0073, ADR 0074)
   /** The experimental switches: each one's real name, value now and where it comes from. */
   developerSwitches() {
@@ -864,6 +881,14 @@ export class GhostClient {
   /** On for an hour, or off now. Held in the daemon's memory only. */
   setDebugAudio(on: boolean) {
     return unwrap(this.api.PUT("/debug-audio", { body: { on } }));
+  }
+  /** Open the microphone meter for a few seconds (ask again while it is open), or close it now. */
+  setMeter(open: boolean) {
+    return unwrap(this.api.PUT("/developer/meter", { body: { open } }));
+  }
+  /** Run `ghostd check` as the terminal would: its lines, problems first. */
+  runChecks() {
+    return unwrap(this.api.POST("/developer/checks"));
   }
   /** What a diagnostic report would hold, part by part, and its size. Nothing is written. */
   diagnosePreview(body: DiagnoseRequest) {

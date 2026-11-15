@@ -1002,6 +1002,64 @@
         ],
         "type": "object"
       },
+      "CheckLine": {
+        "description": "One line `ghostd check` printed.",
+        "properties": {
+          "problem": {
+            "description": "A problem: `ghostd check` fails on it.",
+            "type": "boolean"
+          },
+          "text": {
+            "type": "string"
+          },
+          "warning": {
+            "description": "A warning it prints and passes.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "problem",
+          "warning",
+          "text"
+        ],
+        "type": "object"
+      },
+      "ChecksView": {
+        "description": "What `ghostd check` found, problems first.",
+        "properties": {
+          "code": {
+            "description": "Its exit code.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/CheckLine"
+            },
+            "type": "array"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "problems": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "secs": {
+            "description": "How long it took, seconds.",
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "ok",
+          "code",
+          "problems",
+          "lines",
+          "secs"
+        ],
+        "type": "object"
+      },
       "ClaudeCodeState": {
         "description": "Where the operator's Claude Code stands as Ghost's model (ADR 0069).",
         "enum": [
@@ -3260,6 +3318,199 @@
           "level",
           "message",
           "at"
+        ],
+        "type": "object"
+      },
+      "MeterDecisionView": {
+        "description": "One decision. Numbers only.",
+        "properties": {
+          "ago_ms": {
+            "description": "How long ago, in milliseconds, at the time of the event.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "dbfs": {
+            "description": "The segment's level, dBFS.",
+            "format": "float",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "kind": {
+            "description": "What Ghost decided about a stretch of sound, by kind only.",
+            "enum": [
+              "taken",
+              "no_words",
+              "held_room",
+              "let_go",
+              "taken_by_name",
+              "echo",
+              "too_short",
+              "barge_in",
+              "wake",
+              "near_miss"
+            ],
+            "type": "string"
+          },
+          "person": {
+            "description": "The person's level when it was held, dBFS.",
+            "format": "float",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "score": {
+            "description": "The wake detector's score, 0 to 1.",
+            "format": "float",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "secs": {
+            "description": "The segment's length, seconds.",
+            "format": "float",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "woke": {
+            "description": "A wake hit: woke Ghost, or Parakeet's check refused it; None while undecided.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "words": {
+            "description": "How many words were read (a count, never the words).",
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "ago_ms"
+        ],
+        "type": "object"
+      },
+      "MeterEvent": {
+        "description": "Developer's microphone meter while it is open (ADR 0073, amended 2026-11-14): levels and\ndecisions by kind, never words or audio.",
+        "properties": {
+          "meter": {
+            "$ref": "#/components/schemas/MeterView"
+          },
+          "type": {
+            "default": "meter",
+            "type": "string"
+          }
+        },
+        "required": [
+          "meter"
+        ],
+        "type": "object"
+      },
+      "MeterLeaseView": {
+        "properties": {
+          "open": {
+            "type": "boolean"
+          },
+          "per_second": {
+            "description": "Readings a second while open.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "until": {
+            "description": "When it closes unless asked again (RFC 3339).",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "open",
+          "until",
+          "per_second"
+        ],
+        "type": "object"
+      },
+      "MeterRequest": {
+        "properties": {
+          "open": {
+            "description": "Open (or keep open) the meter for `METER_LEASE_SECS`; false closes it now.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "open"
+        ],
+        "type": "object"
+      },
+      "MeterView": {
+        "description": "One reading of the meter (`Event::Meter`).",
+        "properties": {
+          "decisions": {
+            "description": "What was decided since the last reading, oldest first.",
+            "items": {
+              "$ref": "#/components/schemas/MeterDecisionView"
+            },
+            "type": "array"
+          },
+          "level": {
+            "description": "The mean level since the last reading, dBFS.",
+            "format": "float",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "open": {
+            "description": "False on the last one: the meter closed.",
+            "type": "boolean"
+          },
+          "peak": {
+            "description": "The loudest 20 ms since the last reading, dBFS.",
+            "format": "float",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "room_gate": {
+            "$ref": "#/components/schemas/RoomGateView"
+          },
+          "speaking": {
+            "description": "The speech detector hears speech.",
+            "type": "boolean"
+          },
+          "state": {
+            "description": "What the microphone is doing for Ghost now.",
+            "enum": [
+              "listening_off",
+              "passive",
+              "session",
+              "quiet"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "open",
+          "state",
+          "level",
+          "peak",
+          "speaking",
+          "room_gate",
+          "decisions"
         ],
         "type": "object"
       },
@@ -5544,6 +5795,33 @@
         ],
         "type": "object"
       },
+      "ReportTestView": {
+        "description": "A test report: what was sent, exactly, or why nothing was.",
+        "properties": {
+          "available": {
+            "description": "This build can send reports at all (a released build; a checkout's has no key).",
+            "type": "boolean"
+          },
+          "body": {
+            "description": "The request's body exactly as sent, the project's key shown as a placeholder."
+          },
+          "message": {
+            "description": "One sentence: what happened.",
+            "type": "string"
+          },
+          "sent": {
+            "description": "A report went.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "sent",
+          "available",
+          "message",
+          "body"
+        ],
+        "type": "object"
+      },
       "ReportsChoice": {
         "properties": {
           "send": {
@@ -5592,6 +5870,56 @@
           "install_id",
           "pending",
           "kept"
+        ],
+        "type": "object"
+      },
+      "RoomGateView": {
+        "description": "The room gate as the meter sees it.",
+        "properties": {
+          "line": {
+            "description": "The line under which a segment is held as the room.",
+            "format": "float",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "on": {
+            "type": "boolean"
+          },
+          "person": {
+            "description": "The person's level, dBFS, once heard.",
+            "format": "float",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "room": {
+            "description": "The room's loud level, dBFS, once five seconds were heard.",
+            "format": "float",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "why": {
+            "description": "Why the room gate (ADR 0072) runs here or not.",
+            "enum": [
+              "this_microphone",
+              "on_chip_array",
+              "setting",
+              "no_session"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "on",
+          "why",
+          "room",
+          "person",
+          "line"
         ],
         "type": "object"
       },
@@ -7407,6 +7735,174 @@
           "timed"
         ],
         "type": "string"
+      },
+      "TimingEvent": {
+        "description": "One turn of the live session, timed (ADR 0073, amended 2026-11-14). Numbers only.",
+        "properties": {
+          "timing": {
+            "$ref": "#/components/schemas/TimingView"
+          },
+          "type": {
+            "default": "timing",
+            "type": "string"
+          }
+        },
+        "required": [
+          "timing"
+        ],
+        "type": "object"
+      },
+      "TimingView": {
+        "description": "One turn of a live session, timed (`Event::Timing`): seconds from when the person stopped\ntalking (a typed turn: from when it was sent), each None where the turn had no such\nstage. Numbers and names from Ghost's own code and the model's settings, never words.",
+        "properties": {
+          "ack": {
+            "description": "\"One sec.\" or another acknowledgment, at the speaker.",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "at": {
+            "description": "When the record was made, at the turn's end.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "barge_in": {
+            "description": "The person talked over the reply: from when they began to when Ghost stopped.",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "calls": {
+            "description": "Model calls in the turn.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "closed": {
+            "description": "The person's turn closed: hearing, speech to text, the turn's own wait.",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "fast": {
+            "description": "The fast model answered first (ADR 0050); false: the main model.",
+            "type": "boolean"
+          },
+          "first_sound": {
+            "description": "Ghost's first sound of the reply, at the speaker.",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "first_tool": {
+            "description": "The first tool call, as the model asked for it.",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "first_word": {
+            "description": "The model's first word (its first text, else its first byte).",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "handover": {
+            "description": "The fast model handed the turn to the main one.",
+            "type": "boolean"
+          },
+          "kind": {
+            "description": "`voice`, `text`, `opening` or `system`.",
+            "type": "string"
+          },
+          "model": {
+            "description": "The model that answered first, as the provider names it.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provider": {
+            "description": "The provider of Ghost's model connection (`anthropic`, `openrouter`, …).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reply_end": {
+            "description": "The reply ended.",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "session_id": {
+            "description": "The session it happened in.",
+            "type": "string"
+          },
+          "stt": {
+            "description": "Speech to text: the VAD's stop to the transcript.",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "tool_result": {
+            "description": "The first tool call's result came back.",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "tools": {
+            "description": "Tool calls in the turn.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "turn": {
+            "description": "The turn's number in the session.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "session_id",
+          "at",
+          "turn",
+          "kind",
+          "model",
+          "provider",
+          "fast",
+          "handover",
+          "closed",
+          "stt",
+          "first_word",
+          "first_tool",
+          "tool_result",
+          "ack",
+          "first_sound",
+          "reply_end",
+          "barge_in",
+          "calls",
+          "tools"
+        ],
+        "type": "object"
       },
       "Turn": {
         "properties": {
@@ -9467,6 +9963,68 @@
         ]
       }
     },
+    "/developer/checks": {
+      "post": {
+        "operationId": "developer_checks_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChecksView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Run Ghost's checks",
+        "tags": [
+          "developer"
+        ]
+      }
+    },
+    "/developer/meter": {
+      "put": {
+        "operationId": "developer_meter_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MeterRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeterLeaseView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Open or close the microphone meter",
+        "tags": [
+          "developer"
+        ]
+      }
+    },
     "/developer/switches": {
       "get": {
         "operationId": "developer_switches_get",
@@ -9648,6 +10206,7 @@
                       "hear": "#/components/schemas/HearEvent",
                       "heard": "#/components/schemas/HeardEvent",
                       "log": "#/components/schemas/LogEvent",
+                      "meter": "#/components/schemas/MeterEvent",
                       "outcome": "#/components/schemas/OutcomeEvent",
                       "pending": "#/components/schemas/PendingEvent",
                       "question": "#/components/schemas/QuestionEvent",
@@ -9656,6 +10215,7 @@
                       "saying": "#/components/schemas/SayingEvent",
                       "show_app": "#/components/schemas/ShowAppEvent",
                       "status": "#/components/schemas/StatusEvent",
+                      "timing": "#/components/schemas/TimingEvent",
                       "turn": "#/components/schemas/TurnEvent",
                       "voice": "#/components/schemas/VoiceEvent",
                       "waiting": "#/components/schemas/WaitingEvent"
@@ -9713,6 +10273,12 @@
                     },
                     {
                       "$ref": "#/components/schemas/ShowAppEvent"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TimingEvent"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MeterEvent"
                     }
                   ]
                 }
@@ -11750,6 +12316,27 @@
           }
         },
         "summary": "Send error reports",
+        "tags": [
+          "reports"
+        ]
+      }
+    },
+    "/reports/test": {
+      "post": {
+        "operationId": "reports_test_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportTestView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Send a test error report",
         "tags": [
           "reports"
         ]

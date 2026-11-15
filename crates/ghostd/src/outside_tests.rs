@@ -2216,3 +2216,40 @@ async fn a_client_recalls_only_its_own_runs() {
             .is_err()
     );
 }
+
+#[test]
+fn the_live_meter_and_the_timing_overlay_never_reach_an_outside_tool() {
+    // ADR 0073 as amended 2026-11-14: Developer's views are the operator's. Their events are
+    // on the desktop's bus, which the outside feed taps; it reads only its closed list.
+    use ghost_api::live::*;
+    use ghost_api::models::Event;
+    let meter = Event::Meter {
+        meter: MeterView {
+            open: true,
+            state: MeterState::Passive,
+            level: Some(-50.0),
+            peak: Some(-40.0),
+            speaking: false,
+            room_gate: RoomGateView {
+                on: false,
+                why: RoomGateWhy::NoSession,
+                room: None,
+                person: None,
+                line: None,
+            },
+            decisions: vec![],
+        },
+    };
+    let timing = Event::Timing {
+        timing: timing_of(
+            &json!({"turn": 1, "kind": "voice", "reply": 1.0}),
+            None,
+            None,
+        )
+        .unwrap(),
+    };
+    for e in [meter, timing] {
+        let text = serde_json::to_string(&e).unwrap();
+        assert!(!super::FED.iter().any(|k| text.starts_with(k)), "{text}");
+    }
+}

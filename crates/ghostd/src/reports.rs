@@ -64,6 +64,26 @@ fn kept_view(k: ghost_reports::Kept) -> KeptReportView {
 /// The control API's side.
 pub struct ReportsDesk(pub Arc<Reporter>);
 
+/// What `ghostd reports test` does, as the desktop shows it.
+pub async fn send_test(r: &Reporter) -> ghost_api::reports::ReportTestView {
+    let available = r.available();
+    match r.send_test().await {
+        Ok(body) => ghost_api::reports::ReportTestView {
+            sent: true,
+            available,
+            message: "Sent. This is exactly what went.".into(),
+            body: Some(body),
+        },
+        Err(e) => ghost_api::reports::ReportTestView {
+            sent: false,
+            available,
+            message: e,
+            body: None,
+        },
+    }
+}
+
+#[async_trait::async_trait]
 impl ReportsPort for ReportsDesk {
     fn view(&self) -> ReportsView {
         view(&self.0)
@@ -75,6 +95,10 @@ impl ReportsPort for ReportsDesk {
             .map_err(|e| format!("the switch was not saved: {e}"))?;
         tracing::info!("error reports: {}", if send { "on" } else { "off" });
         Ok(view(&self.0))
+    }
+
+    async fn send_test(&self) -> ghost_api::reports::ReportTestView {
+        send_test(&self.0).await
     }
 }
 
@@ -246,6 +270,32 @@ mod tests {
                 .unwrap()
                 .contains("error reports: on")
         );
+    }
+
+    #[tokio::test]
+    async fn developers_test_button_shows_exactly_what_was_sent_or_why_nothing_was() {
+        // Settings › Developer's Send a test error report (`POST /reports/test`).
+        let tmp = tempfile::tempdir().unwrap();
+        let none = send_test(&reporter(tmp.path(), |_| None)).await;
+        assert!(!none.sent && !none.available && none.body.is_none());
+        assert!(
+            none.message.contains("no error report key"),
+            "{}",
+            none.message
+        );
+        let s = stub().await;
+        let url = s.uri();
+        let r = reporter(tmp.path(), |k| match k {
+            "GHOST_POSTHOG_KEY" => Some("phc_secret_key".into()),
+            "GHOST_REPORTS_URL" => Some(url.clone()),
+            _ => None,
+        });
+        let v = send_test(&r).await;
+        assert!(v.sent && v.available, "{}", v.message);
+        let body = v.body.unwrap().to_string();
+        assert!(body.contains("\"ghost_kind\":\"test\""), "{body}");
+        assert!(!body.contains("phc_secret_key"), "the key is never shown");
+        assert_eq!(s.received_requests().await.unwrap().len(), 1);
     }
 
     #[tokio::test]

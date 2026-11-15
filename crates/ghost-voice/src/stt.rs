@@ -309,6 +309,9 @@ pub struct ParakeetStt {
     /// The person or the room (ADR 0072); None takes every segment, as before.
     room: Option<RoomGuard>,
     on_level: Option<OnLevel>,
+    /// Report to Developer's live meter as this source (`crate::meter`), when it is open.
+    /// None for the passive listener's reader, whose VAD stage reports for it.
+    meter: Option<crate::meter::Source>,
 }
 
 /// A segment's read as numbers: its level in dBFS and how many words were read. Never the
@@ -395,6 +398,47 @@ impl ParakeetStt {
             on_read: None,
             room: None,
             on_level: None,
+            meter: None,
+        }
+    }
+
+    /// Report levels and decisions to Developer's live meter while it is open.
+    pub fn with_meter(mut self, source: crate::meter::Source) -> Self {
+        self.meter = Some(source);
+        self
+    }
+
+    /// [`Self::with_meter`] for a desk session only: the phone's call is never metered.
+    pub fn with_meter_if(self, desk: bool, source: crate::meter::Source) -> Self {
+        if desk { self.with_meter(source) } else { self }
+    }
+
+    fn meter_decided(&self, d: crate::meter::Decision) {
+        if self.meter.is_some() {
+            crate::meter::decided(d);
+        }
+    }
+
+    /// A frame's level, the VAD's state and the room gate's levels, for the live meter.
+    fn meter_frame(&self, samples: &[i16]) {
+        let Some(source) = self.meter else { return };
+        let speaking = self.user_speaking;
+        match &self.room {
+            Some(r) => {
+                let gate = r.gate.as_ref();
+                let read = || {
+                    let now = Instant::now();
+                    gate.map_or_else(crate::meter::RoomLevels::default, |g| {
+                        crate::meter::RoomLevels {
+                            room: g.room_level(),
+                            person: g.person(),
+                            line: g.line(now),
+                        }
+                    })
+                };
+                crate::meter::frame(source, samples, speaking, Some(&read));
+            }
+            None => crate::meter::frame(source, samples, speaking, None),
         }
     }
 
@@ -420,6 +464,7 @@ impl ParakeetStt {
         let speaking = self.user_speaking;
         let own_vad = self.vad.is_some();
         let mode = self.mode;
+        let meter = self.meter.is_some();
         let Some(r) = self.room.as_mut() else {
             return false;
         };
@@ -451,6 +496,12 @@ impl ParakeetStt {
                 out.push(Frame::VadStarted { start_secs }).await;
             } else {
                 let person = r.gate().person();
+                if meter {
+                    crate::meter::decided(crate::meter::Decision::HeldRoom {
+                        dbfs: judged,
+                        person,
+                    });
+                }
                 debug::audio(|| {
                     format!(
                         "room: held a segment at {judged:.0} dBFS (the person {})",
@@ -496,6 +547,7 @@ impl ParakeetStt {
 
     /// A segment starts: the person's, or held.
     fn room_onset(&mut self, start_secs: f32) -> bool {
+        let meter = self.meter.is_some();
         let Some(r) = self.room.as_mut() else {
             return false;
         };
@@ -511,6 +563,10 @@ impl ParakeetStt {
             r.held = r.gate().judge(0.0, now) == Judgement::Doubt;
             r.judged = true;
             if r.held {
+                if meter {
+                    let dbfs = segment_level(&r.frames).unwrap_or(-120.0);
+                    crate::meter::decided(crate::meter::Decision::HeldRoom { dbfs, person: None });
+                }
                 debug::audio(|| {
                     "room: held a segment late in the session, the person's level not yet heard"
                         .into()
@@ -579,6 +635,7 @@ impl ParakeetStt {
             return false;
         };
         if !text.is_empty() && crate::hold::addressed(&text, &r.phrases, r.fuzzy).is_some() {
+            self.meter_decided(crate::meter::Decision::TakenByName);
             debug::audio(|| format!("room: a quiet segment calls Ghost by name: {text:?}"));
             out.push(Frame::VadStarted {
                 start_secs: secs as f32,
@@ -593,6 +650,10 @@ impl ParakeetStt {
         }
         r.gate().dropped += 1;
         let dropped = r.gate().dropped;
+        self.meter_decided(crate::meter::Decision::LetGo { secs, dbfs: level });
+        let Some(r) = self.room.as_mut() else {
+            return false;
+        };
         debug::audio(|| {
             format!("room: let go a {secs:.1}s segment at {level:.0} dBFS ({dropped} this session)")
         });
@@ -931,6 +992,17 @@ impl ParakeetStt {
             let secs_audio = segment.len() as f64 / f64::from(SAMPLE_RATE);
             let dbfs = level_dbfs(&segment);
             self.report_read(dbfs, text.split_whitespace().count());
+            self.meter_decided(if text.is_empty() {
+                crate::meter::Decision::NoWords {
+                    secs: secs_audio,
+                    dbfs,
+                }
+            } else {
+                crate::meter::Decision::Taken {
+                    words: text.split_whitespace().count(),
+                    dbfs,
+                }
+            });
             if text.is_empty() {
                 debug::audio(|| {
                     format!(
@@ -985,6 +1057,11 @@ impl ParakeetStt {
         }
         let words = text.split_whitespace().count();
         self.report_read(level, words);
+        self.meter_decided(if words == 0 {
+            crate::meter::Decision::NoWords { secs, dbfs: level }
+        } else {
+            crate::meter::Decision::Taken { words, dbfs: level }
+        });
         if let (Some(f), Some(db)) = (&self.on_level, gate_db)
             && words > 0
         {
@@ -1109,6 +1186,9 @@ impl Stage for ParakeetStt {
                     }
                 }
                 self.sync_speaking();
+                if crate::meter::is_open() {
+                    self.meter_frame(&audio.samples);
+                }
                 self.maybe_interim(out);
             }
             // VAD frames from upstream (a transport with its own VAD, or a test).
@@ -1498,6 +1578,55 @@ mod tests {
         let down = run(stt, seq(vec![segment_at(1.0, 300), segment_at(1.0, 3000)])).await;
         assert_eq!(opened(&down), 1, "the room first, then the person");
         assert_eq!(finals(&down).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_the_live_meter_sees_the_room_held_and_the_person_taken_and_no_words() {
+        // Developer's meter (ADR 0073, amended 2026-11-14): levels and decisions by kind,
+        // never the words. The transcript here is a hostile fixture: it must reach nothing
+        // the meter holds.
+        let _g = crate::meter::TEST_LOCK.lock().await;
+        crate::meter::set_open(true);
+        let stt = gated("SECRET-WORDS the operator said", None, None)
+            .with_meter(crate::meter::Source::Session);
+        let down = run(stt, seq(vec![segment_at(1.0, 3000), segment_at(1.0, 300)])).await;
+        assert_eq!(opened(&down), 1);
+        let r = crate::meter::take();
+        crate::meter::set_open(false);
+        assert_eq!(r.source, Some(crate::meter::Source::Session));
+        assert!(r.room_gate, "a gated stage says so");
+        let kinds: Vec<_> = r.decisions.iter().map(|(_, d)| *d).collect();
+        assert!(
+            matches!(kinds[0], crate::meter::Decision::Taken { words: 4, .. }),
+            "{kinds:?}"
+        );
+        assert!(
+            kinds.iter().any(|d| matches!(
+                d,
+                crate::meter::Decision::HeldRoom {
+                    person: Some(_),
+                    ..
+                }
+            )),
+            "{kinds:?}"
+        );
+        assert!(
+            kinds
+                .iter()
+                .any(|d| matches!(d, crate::meter::Decision::LetGo { .. })),
+            "{kinds:?}"
+        );
+        assert!(!format!("{r:?}").contains("SECRET"), "{r:?}");
+    }
+
+    #[tokio::test]
+    async fn test_the_live_meter_stays_empty_unless_it_is_open() {
+        let _g = crate::meter::TEST_LOCK.lock().await;
+        crate::meter::set_open(false);
+        let stt = gated("hello", None, None).with_meter(crate::meter::Source::Session);
+        run(stt, segment_at(1.0, 3000)).await;
+        let r = crate::meter::take();
+        assert!(r.source.is_none() && r.decisions.is_empty());
     }
 
     #[tokio::test]

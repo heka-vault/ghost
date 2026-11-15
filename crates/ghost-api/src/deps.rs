@@ -458,6 +458,10 @@ pub struct Deps {
     pub debug_audio: Option<Arc<dyn crate::developer::DebugAudioPort>>,
     /// The diagnostic report (ADR 0073): one file the person saves.
     pub diagnose: Option<Arc<dyn crate::developer::DiagnosePort>>,
+    /// Developer's microphone meter (ADR 0073, amended 2026-11-14).
+    pub meter: Option<Arc<dyn crate::live::MeterPort>>,
+    /// `ghostd check`, run for Developer's Run Ghost's checks.
+    pub checks: Option<Arc<dyn crate::developer::ChecksPort>>,
 }
 
 impl Deps {
@@ -516,6 +520,8 @@ impl Deps {
             other_tools: None,
             debug_audio: None,
             diagnose: None,
+            meter: None,
+            checks: None,
         }
     }
 

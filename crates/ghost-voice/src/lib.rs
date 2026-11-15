@@ -32,6 +32,7 @@ pub mod intercept;
 pub mod latency;
 pub mod level;
 pub mod llm;
+pub mod meter;
 pub mod narration;
 pub mod perf;
 pub mod pipeline;

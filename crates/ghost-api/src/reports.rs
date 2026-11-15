@@ -59,6 +59,22 @@ pub struct ReportsChoice {
 pub trait ReportsPort: Send + Sync {
     fn view(&self) -> ReportsView;
     fn set(&self, send: bool) -> Result<ReportsView, String>;
+    /// What `ghostd reports test` does: make a test report and send it now.
+    async fn send_test(&self) -> ReportTestView;
+}
+
+/// A test report: what was sent, exactly, or why nothing was.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct ReportTestView {
+    /// A report went.
+    pub sent: bool,
+    /// This build can send reports at all (a released build; a checkout's has no key).
+    pub available: bool,
+    /// One sentence: what happened.
+    pub message: String,
+    /// The request's body exactly as sent, the project's key shown as a placeholder.
+    #[schema(required)]
+    pub body: Option<serde_json::Value>,
 }
 
 fn port(deps: &SharedDeps) -> ApiResult<&dyn ReportsPort> {
@@ -90,8 +106,18 @@ async fn reports_choice(
         .map_err(ApiError::internal)
 }
 
+/// Send a test error report now, as `ghostd reports test` does, and show exactly what was
+/// sent. A build with no key sends nothing and says so.
+#[utoipa::path(post, path = "/reports/test", operation_id = "reports_test_post",
+    tag = "reports", summary = "Send a test error report",
+    responses((status = 200, description = "Successful Response", body = ReportTestView)))]
+async fn reports_test(State(deps): State<SharedDeps>) -> ApiResult<Json<ReportTestView>> {
+    Ok(Json(port(&deps)?.send_test().await))
+}
+
 pub fn router() -> OpenApiRouter<SharedDeps> {
     OpenApiRouter::new()
         .routes(routes!(reports_view))
         .routes(routes!(reports_choice))
+        .routes(routes!(reports_test))
 }

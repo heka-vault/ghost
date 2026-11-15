@@ -189,6 +189,25 @@ pub struct ShowAppEvent {
     pub session_id: String,
 }
 
+/// One turn of the live session, timed (ADR 0073, amended 2026-11-14). Numbers only.
+#[derive(ToSchema)]
+pub struct TimingEvent {
+    #[serde(default)]
+    #[schema(value_type = String, default = "timing")]
+    pub r#type: String,
+    pub timing: crate::live::TimingView,
+}
+
+/// Developer's microphone meter while it is open (ADR 0073, amended 2026-11-14): levels and
+/// decisions by kind, never words or audio.
+#[derive(ToSchema)]
+pub struct MeterEvent {
+    #[serde(default)]
+    #[schema(value_type = String, default = "meter")]
+    pub r#type: String,
+    pub meter: crate::live::MeterView,
+}
+
 /// What the event stream carries, discriminated by `type`.
 #[derive(ToSchema)]
 #[serde(untagged)]
@@ -210,6 +229,8 @@ pub struct ShowAppEvent {
     ("run" = "#/components/schemas/RunEvent"),
     ("reach" = "#/components/schemas/ReachEvent"),
     ("show_app" = "#/components/schemas/ShowAppEvent"),
+    ("timing" = "#/components/schemas/TimingEvent"),
+    ("meter" = "#/components/schemas/MeterEvent"),
 )))]
 pub enum Event {
     Status(StatusEvent),
@@ -229,6 +250,8 @@ pub enum Event {
     Run(RunEvent),
     Reach(ReachEvent),
     ShowApp(ShowAppEvent),
+    Timing(TimingEvent),
+    Meter(MeterEvent),
 }
 
 /// `POST /conversations/{slug}/notes` takes a free object with `text` in it.
@@ -272,6 +295,15 @@ pub fn finish(mut api: OpenApi) -> OpenApi {
         ("HearEvent", HearEvent::schema()),
         ("HearView", crate::hear::HearView::schema()),
         ("ShowAppEvent", ShowAppEvent::schema()),
+        ("TimingEvent", TimingEvent::schema()),
+        ("MeterEvent", MeterEvent::schema()),
+        ("TimingView", crate::live::TimingView::schema()),
+        ("MeterView", crate::live::MeterView::schema()),
+        ("RoomGateView", crate::live::RoomGateView::schema()),
+        (
+            "MeterDecisionView",
+            crate::live::MeterDecisionView::schema(),
+        ),
         ("ActivityView", crate::models::ActivityView::schema()),
         ("RunEvent", RunEvent::schema()),
         ("ReachEvent", ReachEvent::schema()),

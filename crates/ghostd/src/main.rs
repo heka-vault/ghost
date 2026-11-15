@@ -111,7 +111,7 @@ fn main() -> anyhow::Result<()> {
         }
         Some("check") => {
             let cfg = GhostdSettings::load()?;
-            std::process::exit(check(&cfg))
+            std::process::exit(check(&cfg, args.get(1).is_some_and(|a| a == "--json")))
         }
         Some("push") => {
             let cfg = GhostdSettings::load()?;
@@ -484,7 +484,10 @@ async fn mcp_serve(args: &[String], cfg: &GhostdSettings) -> i32 {
 
 /// `ghostd check`, on its own runtime: the apps connect to be described.
 #[tokio::main]
-async fn check(cfg: &GhostdSettings) -> i32 {
+async fn check(cfg: &GhostdSettings, json: bool) -> i32 {
+    if json {
+        return ghostd::check::check_json(cfg, operator_keyring(), &mut std::io::stdout()).await;
+    }
     check_command(cfg, operator_keyring(), &mut std::io::stdout()).await
 }
 

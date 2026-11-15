@@ -21,6 +21,7 @@ pub mod latency;
 pub mod listening;
 pub mod llm_cli;
 pub mod mcp;
+pub mod meter;
 pub mod microphone;
 pub mod model_check;
 pub mod outside;

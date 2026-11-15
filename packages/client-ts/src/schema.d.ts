@@ -436,6 +436,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/developer/checks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run Ghost's checks */
+        post: operations["developer_checks_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/developer/meter": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Open or close the microphone meter */
+        put: operations["developer_meter_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/developer/switches": {
         parameters: {
             query?: never;
@@ -1456,6 +1490,23 @@ export interface paths {
         /** Send error reports */
         put: operations["reports_choice_reports_choice_put"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/reports/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Send a test error report */
+        post: operations["reports_test_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2639,6 +2690,30 @@ export interface components {
             required: boolean;
             secret: boolean;
         };
+        /** @description One line `ghostd check` printed. */
+        CheckLine: {
+            /** @description A problem: `ghostd check` fails on it. */
+            problem: boolean;
+            text: string;
+            /** @description A warning it prints and passes. */
+            warning: boolean;
+        };
+        /** @description What `ghostd check` found, problems first. */
+        ChecksView: {
+            /**
+             * Format: int32
+             * @description Its exit code.
+             */
+            code: number;
+            lines: components["schemas"]["CheckLine"][];
+            ok: boolean;
+            problems: number;
+            /**
+             * Format: double
+             * @description How long it took, seconds.
+             */
+            secs: number;
+        };
         /**
          * @description Where the operator's Claude Code stands as Ghost's model (ADR 0069).
          * @enum {string}
@@ -3379,6 +3454,97 @@ export interface components {
              * @enum {string}
              */
             type: "log";
+        };
+        /** @description One decision. Numbers only. */
+        MeterDecisionView: {
+            /**
+             * Format: int32
+             * @description How long ago, in milliseconds, at the time of the event.
+             */
+            ago_ms: number;
+            /**
+             * Format: float
+             * @description The segment's level, dBFS.
+             */
+            dbfs?: number | null;
+            /**
+             * @description What Ghost decided about a stretch of sound, by kind only.
+             * @enum {string}
+             */
+            kind: "taken" | "no_words" | "held_room" | "let_go" | "taken_by_name" | "echo" | "too_short" | "barge_in" | "wake" | "near_miss";
+            /**
+             * Format: float
+             * @description The person's level when it was held, dBFS.
+             */
+            person?: number | null;
+            /**
+             * Format: float
+             * @description The wake detector's score, 0 to 1.
+             */
+            score?: number | null;
+            /**
+             * Format: float
+             * @description The segment's length, seconds.
+             */
+            secs?: number | null;
+            /** @description A wake hit: woke Ghost, or Parakeet's check refused it; None while undecided. */
+            woke?: boolean | null;
+            /**
+             * Format: int32
+             * @description How many words were read (a count, never the words).
+             */
+            words?: number | null;
+        };
+        /**
+         * @description Developer's microphone meter while it is open (ADR 0073, amended 2026-11-14): levels and
+         *     decisions by kind, never words or audio.
+         */
+        MeterEvent: {
+            meter: components["schemas"]["MeterView"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "meter";
+        };
+        MeterLeaseView: {
+            open: boolean;
+            /**
+             * Format: int32
+             * @description Readings a second while open.
+             */
+            per_second: number;
+            /** @description When it closes unless asked again (RFC 3339). */
+            until: string | null;
+        };
+        MeterRequest: {
+            /** @description Open (or keep open) the meter for `METER_LEASE_SECS`; false closes it now. */
+            open: boolean;
+        };
+        /** @description One reading of the meter (`Event::Meter`). */
+        MeterView: {
+            /** @description What was decided since the last reading, oldest first. */
+            decisions: components["schemas"]["MeterDecisionView"][];
+            /**
+             * Format: float
+             * @description The mean level since the last reading, dBFS.
+             */
+            level: number | null;
+            /** @description False on the last one: the meter closed. */
+            open: boolean;
+            /**
+             * Format: float
+             * @description The loudest 20 ms since the last reading, dBFS.
+             */
+            peak: number | null;
+            room_gate: components["schemas"]["RoomGateView"];
+            /** @description The speech detector hears speech. */
+            speaking: boolean;
+            /**
+             * @description What the microphone is doing for Ghost now.
+             * @enum {string}
+             */
+            state: "listening_off" | "passive" | "session" | "quiet";
         };
         /** @description What Repair did. */
         MicrophoneRepairView: {
@@ -4128,6 +4294,41 @@ export interface components {
             /** @description The operator's switch: on unless they turned it off. */
             send: boolean;
         };
+        /** @description A test report: what was sent, exactly, or why nothing was. */
+        ReportTestView: {
+            /** @description This build can send reports at all (a released build; a checkout's has no key). */
+            available: boolean;
+            /** @description The request's body exactly as sent, the project's key shown as a placeholder. */
+            body: unknown;
+            /** @description One sentence: what happened. */
+            message: string;
+            /** @description A report went. */
+            sent: boolean;
+        };
+        /** @description The room gate as the meter sees it. */
+        RoomGateView: {
+            /**
+             * Format: float
+             * @description The line under which a segment is held as the room.
+             */
+            line: number | null;
+            on: boolean;
+            /**
+             * Format: float
+             * @description The person's level, dBFS, once heard.
+             */
+            person: number | null;
+            /**
+             * Format: float
+             * @description The room's loud level, dBFS, once five seconds were heard.
+             */
+            room: number | null;
+            /**
+             * @description Why the room gate (ADR 0072) runs here or not.
+             * @enum {string}
+             */
+            why: "this_microphone" | "on_chip_array" | "setting" | "no_session";
+        };
         /** @description `[routes]` in the policy file (ADR 0031): how Ghost reaches the operator. */
         RoutesView: {
             /**
@@ -4697,6 +4898,99 @@ export interface components {
          * @enum {string}
          */
         TakeEnding: "hold" | "quiet" | "timed";
+        /** @description One turn of the live session, timed (ADR 0073, amended 2026-11-14). Numbers only. */
+        TimingEvent: {
+            timing: components["schemas"]["TimingView"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "timing";
+        };
+        /**
+         * @description One turn of a live session, timed (`Event::Timing`): seconds from when the person stopped
+         *     talking (a typed turn: from when it was sent), each None where the turn had no such
+         *     stage. Numbers and names from Ghost's own code and the model's settings, never words.
+         */
+        TimingView: {
+            /**
+             * Format: double
+             * @description "One sec." or another acknowledgment, at the speaker.
+             */
+            ack: number | null;
+            /**
+             * Format: date-time
+             * @description When the record was made, at the turn's end.
+             */
+            at: string;
+            /**
+             * Format: double
+             * @description The person talked over the reply: from when they began to when Ghost stopped.
+             */
+            barge_in: number | null;
+            /**
+             * Format: int32
+             * @description Model calls in the turn.
+             */
+            calls: number;
+            /**
+             * Format: double
+             * @description The person's turn closed: hearing, speech to text, the turn's own wait.
+             */
+            closed: number | null;
+            /** @description The fast model answered first (ADR 0050); false: the main model. */
+            fast: boolean;
+            /**
+             * Format: double
+             * @description Ghost's first sound of the reply, at the speaker.
+             */
+            first_sound: number | null;
+            /**
+             * Format: double
+             * @description The first tool call, as the model asked for it.
+             */
+            first_tool: number | null;
+            /**
+             * Format: double
+             * @description The model's first word (its first text, else its first byte).
+             */
+            first_word: number | null;
+            /** @description The fast model handed the turn to the main one. */
+            handover: boolean;
+            /** @description `voice`, `text`, `opening` or `system`. */
+            kind: string;
+            /** @description The model that answered first, as the provider names it. */
+            model: string | null;
+            /** @description The provider of Ghost's model connection (`anthropic`, `openrouter`, …). */
+            provider: string | null;
+            /**
+             * Format: double
+             * @description The reply ended.
+             */
+            reply_end: number | null;
+            /** @description The session it happened in. */
+            session_id: string;
+            /**
+             * Format: double
+             * @description Speech to text: the VAD's stop to the transcript.
+             */
+            stt: number | null;
+            /**
+             * Format: double
+             * @description The first tool call's result came back.
+             */
+            tool_result: number | null;
+            /**
+             * Format: int32
+             * @description Tool calls in the turn.
+             */
+            tools: number;
+            /**
+             * Format: int64
+             * @description The turn's number in the session.
+             */
+            turn: number;
+        };
         Turn: {
             /** Format: date-time */
             at: string;
@@ -4996,6 +5290,8 @@ export type SchemaCatalogOption = components['schemas']['CatalogOption'];
 export type SchemaCatalogPage = components['schemas']['CatalogPage'];
 export type SchemaCatalogPublisher = components['schemas']['CatalogPublisher'];
 export type SchemaCatalogSetting = components['schemas']['CatalogSetting'];
+export type SchemaCheckLine = components['schemas']['CheckLine'];
+export type SchemaChecksView = components['schemas']['ChecksView'];
 export type SchemaClaudeCodeState = components['schemas']['ClaudeCodeState'];
 export type SchemaClaudeCodeView = components['schemas']['ClaudeCodeView'];
 export type SchemaClientCreate = components['schemas']['ClientCreate'];
@@ -5067,6 +5363,11 @@ export type SchemaLinkView = components['schemas']['LinkView'];
 export type SchemaListeningRequest = components['schemas']['ListeningRequest'];
 export type SchemaListeningView = components['schemas']['ListeningView'];
 export type SchemaLogEvent = components['schemas']['LogEvent'];
+export type SchemaMeterDecisionView = components['schemas']['MeterDecisionView'];
+export type SchemaMeterEvent = components['schemas']['MeterEvent'];
+export type SchemaMeterLeaseView = components['schemas']['MeterLeaseView'];
+export type SchemaMeterRequest = components['schemas']['MeterRequest'];
+export type SchemaMeterView = components['schemas']['MeterView'];
 export type SchemaMicrophoneRepairView = components['schemas']['MicrophoneRepairView'];
 export type SchemaMicrophoneView = components['schemas']['MicrophoneView'];
 export type SchemaModelCheckLatest = components['schemas']['ModelCheckLatest'];
@@ -5127,6 +5428,8 @@ export type SchemaRealtimeSpendView = components['schemas']['RealtimeSpendView']
 export type SchemaRealtimeView = components['schemas']['RealtimeView'];
 export type SchemaReportsChoice = components['schemas']['ReportsChoice'];
 export type SchemaReportsView = components['schemas']['ReportsView'];
+export type SchemaReportTestView = components['schemas']['ReportTestView'];
+export type SchemaRoomGateView = components['schemas']['RoomGateView'];
 export type SchemaRoutesView = components['schemas']['RoutesView'];
 export type SchemaRuleAdd = components['schemas']['RuleAdd'];
 export type SchemaRuleSet = components['schemas']['RuleSet'];
@@ -5174,6 +5477,8 @@ export type SchemaSwitchesUpdate = components['schemas']['SwitchesUpdate'];
 export type SchemaSwitchesView = components['schemas']['SwitchesView'];
 export type SchemaSwitchView = components['schemas']['SwitchView'];
 export type SchemaTakeEnding = components['schemas']['TakeEnding'];
+export type SchemaTimingEvent = components['schemas']['TimingEvent'];
+export type SchemaTimingView = components['schemas']['TimingView'];
 export type SchemaTurn = components['schemas']['Turn'];
 export type SchemaTurnEvent = components['schemas']['TurnEvent'];
 export type SchemaTurnView = components['schemas']['TurnView'];
@@ -6100,6 +6405,59 @@ export interface operations {
             };
         };
     };
+    developer_checks_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChecksView"];
+                };
+            };
+        };
+    };
+    developer_meter_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MeterRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeterLeaseView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     developer_switches_get: {
         parameters: {
             query?: never;
@@ -6254,7 +6612,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StatusEvent"] | components["schemas"]["TurnEvent"] | components["schemas"]["PendingEvent"] | components["schemas"]["OutcomeEvent"] | components["schemas"]["LogEvent"] | components["schemas"]["ConversationEvent"] | components["schemas"]["WaitingEvent"] | components["schemas"]["QuestionEvent"] | components["schemas"]["AppsEvent"] | components["schemas"]["VoiceEvent"] | components["schemas"]["ActivityEvent"] | components["schemas"]["HeardEvent"] | components["schemas"]["SayingEvent"] | components["schemas"]["HearEvent"] | components["schemas"]["RunEvent"] | components["schemas"]["ReachEvent"] | components["schemas"]["ShowAppEvent"];
+                    "application/json": components["schemas"]["StatusEvent"] | components["schemas"]["TurnEvent"] | components["schemas"]["PendingEvent"] | components["schemas"]["OutcomeEvent"] | components["schemas"]["LogEvent"] | components["schemas"]["ConversationEvent"] | components["schemas"]["WaitingEvent"] | components["schemas"]["QuestionEvent"] | components["schemas"]["AppsEvent"] | components["schemas"]["VoiceEvent"] | components["schemas"]["ActivityEvent"] | components["schemas"]["HeardEvent"] | components["schemas"]["SayingEvent"] | components["schemas"]["HearEvent"] | components["schemas"]["RunEvent"] | components["schemas"]["ReachEvent"] | components["schemas"]["ShowAppEvent"] | components["schemas"]["TimingEvent"] | components["schemas"]["MeterEvent"];
                 };
             };
         };
@@ -8011,6 +8369,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reports_test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportTestView"];
                 };
             };
         };

@@ -417,6 +417,53 @@ pub async fn check_command(
     keyring: Arc<dyn Keyring>,
     out: &mut dyn Write,
 ) -> i32 {
+    match check_run(cfg, keyring, out).await {
+        Err(code) => code,
+        Ok(problems) if problems.is_empty() => {
+            let _ = writeln!(out, "config ok");
+            0
+        }
+        Ok(problems) => {
+            let _ = writeln!(out, "{}", problems.join("\n"));
+            1
+        }
+    }
+}
+
+/// `ghostd check --json`: the same checks, as `{"lines": [...], "problems": [...]}` on one
+/// line, for Settings › Developer's Run Ghost's checks. The exit code as the text form's.
+pub async fn check_json(
+    cfg: &GhostdSettings,
+    keyring: Arc<dyn Keyring>,
+    out: &mut dyn Write,
+) -> i32 {
+    let mut buf = Vec::new();
+    let (problems, code) = match check_run(cfg, keyring, &mut buf).await {
+        Err(code) => (Vec::new(), code),
+        Ok(p) => {
+            let code = i32::from(!p.is_empty());
+            (p, code)
+        }
+    };
+    let lines: Vec<String> = String::from_utf8_lossy(&buf)
+        .lines()
+        .map(str::to_string)
+        .collect();
+    let _ = writeln!(
+        out,
+        "{}",
+        serde_json::json!({"lines": lines, "problems": problems, "code": code})
+    );
+    code
+}
+
+/// Every check, its lines written to `out`; the problems found, or the exit code when the
+/// vault could not be opened at all.
+async fn check_run(
+    cfg: &GhostdSettings,
+    keyring: Arc<dyn Keyring>,
+    out: &mut dyn Write,
+) -> Result<Vec<String>, i32> {
     // The vault first (ADR 0036): Ghost's settings read its passwords from this
     // environment, so they are read after it.
     let environ: SharedEnviron = Arc::new(Mutex::new(HashMap::new()));
@@ -429,7 +476,7 @@ pub async fn check_command(
             Ok(vault) => vault,
             Err(_) => {
                 let _ = writeln!(out, "passwords: the vault could not be opened");
-                return 1;
+                return Err(1);
             }
         }
     };
@@ -563,17 +610,144 @@ pub async fn check_command(
             w.trim()
         );
     }
-    if problems.is_empty() {
-        let _ = writeln!(out, "config ok");
-        0
-    } else {
-        let _ = writeln!(out, "{}", problems.join("\n"));
-        1
+    Ok(problems)
+}
+
+// --- Settings › Developer's Run Ghost's checks -------------------------------------------------
+
+/// How long `ghostd check` may take before the desktop is told it did not finish: it connects
+/// every app, each within its own `connect_timeout`.
+pub const CHECKS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// Runs `ghostd check --json` as its own process, exactly as the terminal would (the vault,
+/// the settings, the folder, the models, the apps), with Ghost's environment less every
+/// password (`child_env`). The operator's control API only (`POST /developer/checks`).
+pub struct ChecksDesk {
+    /// The `ghostd` to run: this one.
+    pub exe: std::path::PathBuf,
+    /// Its environment.
+    pub env: Arc<dyn Fn() -> Vec<(String, String)> + Send + Sync>,
+}
+
+impl ChecksDesk {
+    pub fn this_process() -> Self {
+        Self {
+            exe: std::env::current_exe().unwrap_or_else(|_| "ghostd".into()),
+            env: Arc::new(|| ghost_core::redact::child_env(std::env::vars())),
+        }
+    }
+}
+
+/// `ghostd check --json`'s output as the desktop shows it: problems first, then warnings,
+/// then the rest; every line redacted against the vault.
+pub fn checks_view(
+    out: &str,
+    code: i32,
+    secs: f64,
+) -> Result<ghost_api::developer::ChecksView, String> {
+    use ghost_api::developer::{CheckLine, ChecksView};
+    let v: serde_json::Value = out
+        .lines()
+        .rev()
+        .find_map(|l| serde_json::from_str(l).ok())
+        .ok_or_else(|| "ghostd check said nothing Ghost could read".to_string())?;
+    let strings = |key: &str| -> Vec<String> {
+        v[key]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str())
+                    .map(ghost_core::redact::redact_text)
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let problems = strings("problems");
+    let mut lines: Vec<CheckLine> = problems
+        .iter()
+        .map(|p| CheckLine {
+            problem: true,
+            warning: false,
+            text: p.clone(),
+        })
+        .collect();
+    let rest: Vec<String> = strings("lines")
+        .into_iter()
+        .filter(|l| {
+            let t = l.trim();
+            !t.is_empty() && !t.starts_with("problem:") && !problems.iter().any(|p| p.trim() == t)
+        })
+        .collect();
+    let (warnings, plain): (Vec<String>, Vec<String>) =
+        rest.into_iter().partition(|l| l.contains("warning"));
+    lines.extend(warnings.into_iter().map(|text| CheckLine {
+        problem: false,
+        warning: true,
+        text,
+    }));
+    lines.extend(plain.into_iter().map(|text| CheckLine {
+        problem: false,
+        warning: false,
+        text,
+    }));
+    Ok(ChecksView {
+        ok: code == 0 && problems.is_empty(),
+        code,
+        problems: problems.len(),
+        lines,
+        secs: (secs * 10.0).round() / 10.0,
+    })
+}
+
+#[async_trait::async_trait]
+impl ghost_api::developer::ChecksPort for ChecksDesk {
+    async fn run(&self) -> Result<ghost_api::developer::ChecksView, String> {
+        let began = std::time::Instant::now();
+        let mut cmd = tokio::process::Command::new(&self.exe);
+        cmd.arg("check")
+            .arg("--json")
+            .env_clear()
+            .envs((self.env)())
+            .stdin(std::process::Stdio::null())
+            .kill_on_drop(true);
+        let out = tokio::time::timeout(CHECKS_TIMEOUT, cmd.output())
+            .await
+            .map_err(|_| {
+                format!(
+                    "ghostd check did not finish in {} s",
+                    CHECKS_TIMEOUT.as_secs()
+                )
+            })?
+            .map_err(|e| format!("ghostd check could not start: {e}"))?;
+        checks_view(
+            &String::from_utf8_lossy(&out.stdout),
+            out.status.code().unwrap_or(1),
+            began.elapsed().as_secs_f64(),
+        )
     }
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_checks_read_problems_first_then_warnings() {
+        let out = serde_json::json!({
+            "lines": ["version: 0.1.0", "passwords: warning: waits for the keyring: GITHUB_TOKEN",
+                      "apps:", "  github: not connected", "  problem: apps.json: bad entry", "wake: transcript"],
+            "problems": ["apps.json: bad entry", "github: not connected"],
+            "code": 1,
+        });
+        let v = super::checks_view(&format!("noise\n{out}\n"), 1, 3.04).unwrap();
+        assert!(!v.ok);
+        assert_eq!(v.problems, 2);
+        assert!(v.lines[0].problem && v.lines[1].problem);
+        assert!(v.lines[2].warning, "{:?}", v.lines);
+        assert_eq!(v.lines.last().unwrap().text, "wake: transcript");
+        assert!(!v.lines.iter().any(|l| l.text.contains("problem:")));
+        assert_eq!(v.secs, 3.0);
+        assert!(super::checks_view("not json", 1, 0.0).is_err());
+    }
+
     use serde_json::json;
 
     use super::*;

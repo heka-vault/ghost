@@ -2898,6 +2898,8 @@ impl Daemon {
             diagnose: Some(Arc::new(crate::diagnose::DiagnoseDesk {
                 daemon: Arc::downgrade(self),
             })),
+            meter: Some(Arc::new(crate::meter::MeterDesk::new(self))),
+            checks: Some(Arc::new(crate::check::ChecksDesk::this_process())),
         });
         self.late.deps.set(deps.clone()).ok();
         let listener = match ghost_api::server::bind(&socket).await {

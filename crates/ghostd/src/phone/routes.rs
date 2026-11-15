@@ -1062,6 +1062,11 @@ mod tests {
             ("PUT", "/developer/switches", Some(json!({"values": {}}))),
             ("POST", "/diagnose", Some(json!({}))),
             ("POST", "/diagnose/preview", Some(json!({}))),
+            // Developer's live meter, Ghost's checks and the test report (ADR 0073 as
+            // amended 2026-11-14).
+            ("PUT", "/developer/meter", Some(json!({"open": true}))),
+            ("POST", "/developer/checks", None),
+            ("POST", "/reports/test", None),
         ] {
             let (r, _) = signed(&p.app, &creds, method, path, body).await;
             assert_eq!(r.status, StatusCode::NOT_FOUND, "{method} {path}");

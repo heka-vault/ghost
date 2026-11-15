@@ -187,6 +187,7 @@ impl BargeInUserTurnStartStrategy {
                     )
                 });
                 self.bursts.clear();
+                crate::meter::decided(crate::meter::Decision::BargeIn);
                 self.events.push(StartEvent::Started);
                 return ProcessFrameResult::Stop;
             }
@@ -197,6 +198,7 @@ impl BargeInUserTurnStartStrategy {
         // Too short to be a deliberate interruption on its own: most likely the bot's own
         // voice. Drop it rather than queue it, but count it for `BURST_WINDOW` in case it
         // is the operator coming through in pieces.
+        crate::meter::decided(crate::meter::Decision::TooShort);
         debug::audio(|| format!("turn: dropped {text:?} while Ghost speaks"));
         self.bursts.push((Instant::now(), words));
         self.events.push(StartEvent::Reset);
