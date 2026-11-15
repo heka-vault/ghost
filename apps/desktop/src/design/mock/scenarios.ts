@@ -59,9 +59,11 @@ export interface Scenario {
    * A conversation-screen story (fixtures/session.ts): `thread` a session with tool calls, a
    * handover, a change Ghost made, a pause and an agent's question; `you` the operator speaking;
    * `cut` Ghost cut off mid-reply; `hold` the session going on hold; `ending` Ghost saying
-   * goodbye; `error` a turn that failed. They play out over the first few seconds after load.
+   * goodbye; `error` a turn that failed; `reaching` Ghost thinking with two apps' calls held in
+   * flight; `asked` an agent's question waiting in the session. They play out over the first
+   * few seconds after load.
    */
-  story?: "thread" | "you" | "cut" | "hold" | "ending" | "error";
+  story?: "thread" | "you" | "cut" | "hold" | "ending" | "error" | "reaching" | "asked";
   /**
    * The floating room's sequence (ADR 0059, `floating.html?mock=floating`), over and over: at
    * rest, the wake, the operator's turn, calls, a reply said clause by clause, a change waiting
@@ -116,6 +118,8 @@ export const SCENARIOS: Scenario[] = [
   { name: "reconnecting", label: "Reconnecting", description: "A live session; the daemon drops 1.5 seconds after load and stays away.", daemon: true, phase: "listening", modelsReady: true, session: "accounting", pending: false, configured: true, data: "normal", dropAfterMs: 1500 },
   { name: "phone", label: "On the phone", description: "A live session the paired phone started; the desk can end it.", daemon: true, phase: "listening", modelsReady: true, session: "ghost", pending: false, configured: true, data: "normal", origin: "phone", phone: "paired" },
   { name: "thread", label: "A full session", description: "Ghost used apps, handed a turn over, made a change, paused, and an agent asked a question.", daemon: true, phase: "listening", modelsReady: true, session: "ghost", pending: false, configured: true, data: "normal", story: "thread" },
+  { name: "reaching", label: "Reaching apps", description: "Mid-session, Ghost is working with two apps' calls in flight (held, for pictures).", daemon: true, phase: "thinking", modelsReady: true, session: "ghost", pending: false, configured: true, data: "normal", story: "reaching" },
+  { name: "asked", label: "A question waiting", description: "Mid-session, Accounting asks the operator something with two choices.", daemon: true, phase: "listening", modelsReady: true, session: "ghost", pending: false, configured: true, data: "normal", story: "asked" },
   { name: "you", label: "You're speaking", description: "Mid-session, the operator is talking; Ghost hears them.", daemon: true, phase: "listening", modelsReady: true, session: "ghost", pending: false, configured: true, data: "normal", story: "you" },
   { name: "cut", label: "Cut off", description: "Ghost starts a long answer; the operator cuts in after two seconds.", daemon: true, phase: "listening", modelsReady: true, session: "ghost", pending: false, configured: true, data: "normal", story: "cut" },
   { name: "hold", label: "On hold", description: "The session goes on hold a moment after load (“hang on, Ghost”).", daemon: true, phase: "listening", modelsReady: true, session: "ghost", pending: false, configured: true, data: "normal", story: "hold" },

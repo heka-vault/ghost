@@ -51,7 +51,7 @@ import {
 
 import { hrefFor, navigate } from "../../app/router";
 import { ListeningButton } from "../../app/ListeningSwitch";
-import { RoomSettings } from "../../app/RoomSettings";
+import { FloatingRoomSettings } from "../../app/FloatingSettings";
 import { listeningSentence, notListening } from "../../app/listening";
 import { VersionNotice, VersionRows } from "./About";
 import { ErrorReportsSection } from "./ErrorReports";
@@ -920,8 +920,8 @@ export default function SettingsScreen({ params: route }: RouteProps) {
         {s && page === "general" && (
           <>
             {showSetup && <SetupSection steps={steps} onGo={(id) => go(id)} />}
-            <Section id="room" title="The room" description="The desk is this screen as you work at it; the room is Ghost read from across the room." className="set-section">
-              <RoomSettings />
+            <Section id="floating" title="The floating room" description="To have Ghost big and present, let it float: when you call it, it comes forward over your desktop instead of staying in this window." className="set-section">
+              <FloatingRoomSettings />
             </Section>
             <Section id={sectionDomId("about")} title={SECTION_TITLE.about} className="set-section">
               <VersionNotice status={status} />

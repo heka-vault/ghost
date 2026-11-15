@@ -394,8 +394,8 @@ export class MockDaemon {
         conversation: this.status.conversation ?? null,
       });
     }
-    // A configured Ghost has checked its model connection once (ADR 0056): Today and the room
-    // show how fast a reply starts from it. An empty or unconfigured one hasn't yet.
+    // A configured Ghost has checked its model connection once (ADR 0056): Today shows
+    // how fast a reply starts from it. An empty or unconfigured one hasn't yet.
     if (scenario.configured && scenario.data !== "empty") {
       try {
         const c = this.model.check({ values: {} });
