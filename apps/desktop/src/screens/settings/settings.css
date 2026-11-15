@@ -302,6 +302,42 @@
 
 /* A password where it is used (ADR 0073). */
 .set-inplace__where { margin: 0; padding: 0 var(--space-4) var(--space-3); color: var(--text-3); font-size: var(--text-sm); }
+
+/* Developer's microphone meter (ADR 0073 as amended 2026-11-14): levels and kinds, never words. */
+.meter { display: grid; gap: var(--space-2); padding: var(--space-3) var(--space-4); }
+.meter-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+.meter-num { font-family: var(--font-mono); font-size: var(--text-sm); color: var(--text-2); font-variant-numeric: tabular-nums; }
+.meter-trace { width: 100%; height: 120px; display: block; border-radius: var(--radius-sm); background: var(--bg-sunken); }
+.meter-trace__speech { fill: var(--accent-soft); }
+.meter-trace__level { fill: var(--accent-soft-hover); stroke: var(--accent-text); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.meter-trace__peak { fill: none; stroke: var(--text-3); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.meter-trace line { stroke-width: 1; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; }
+line.meter-trace__room { stroke: var(--warn); }
+line.meter-trace__person { stroke: var(--ok); }
+line.meter-trace__line { stroke: var(--text-3); }
+.meter-legend { margin: 0; display: flex; flex-wrap: wrap; gap: var(--space-4); font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-2); }
+.meter-legend__swatch { display: inline-block; width: 14px; height: 0; border-top: 2px dashed currentColor; vertical-align: middle; }
+.meter-legend .meter-trace__room { color: var(--warn); }
+.meter-legend .meter-trace__person { color: var(--ok); }
+.meter-legend .meter-trace__line { color: var(--text-3); }
+.meter-scale, .meter-empty { margin: 0; font-size: var(--text-sm); color: var(--text-3); }
+.meter-empty { padding: var(--space-3) var(--space-4); }
+.meter-decisions { list-style: none; margin: 0; padding: var(--space-1) 0; max-height: 360px; overflow-y: auto; }
+.meter-decision { display: flex; gap: var(--space-3); padding: var(--space-1) var(--space-4); font-size: var(--text-sm); color: var(--text-1); }
+.meter-decision__at { font-family: var(--font-mono); color: var(--text-3); font-variant-numeric: tabular-nums; flex: none; }
+.meter-decision.is-held { color: var(--warn); }
+.meter-decision.is-drop { color: var(--text-2); }
+.meter-decision.is-wake { color: var(--accent-text); }
+
+/* Run Ghost's checks / Send a test error report: results in place. */
+.dev-result { margin: 0; padding: var(--space-2) var(--space-4) var(--space-3); display: grid; gap: var(--space-1); }
+.dev-result ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; max-height: 320px; overflow-y: auto; }
+.dev-result li { font-family: var(--font-mono); font-size: var(--text-xs); line-height: var(--leading-xs); color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.dev-result li.is-problem { color: var(--danger); }
+.dev-result li.is-warning { color: var(--warn); }
+.dev-result pre { margin: 0; max-height: 320px; overflow: auto; padding: var(--space-2); border-radius: var(--radius-sm); background: var(--bg-sunken); font-family: var(--font-mono); font-size: var(--text-xs); line-height: var(--leading-xs); color: var(--text-2); }
+.dev-result__head { margin: 0; font-size: var(--text-sm); color: var(--text-2); }
+.set-row-actions { display: inline-flex; align-items: center; gap: var(--space-1); flex-wrap: wrap; justify-content: flex-end; }
 /* A row's Details: the ids under what the row says in words (the flow review, 2026-11-14). */
 .set-details-line { margin: 0 0 var(--space-2); font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--text-2); }
 /* General's “Floating options…”: a row of the card, its choices inside, divided like the card's rows. */

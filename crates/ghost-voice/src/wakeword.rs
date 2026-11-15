@@ -376,6 +376,7 @@ impl DetectorWakeProcessor {
                 && end.saturating_sub(self.last_best_log) >= SAMPLE_RATE / 2
             {
                 self.last_best_log = end;
+                crate::meter::decided(crate::meter::Decision::NearMiss { score: *best });
                 debug::audio(|| format!("wake: best {name} {best:.2}, under its threshold"));
             }
             return;
@@ -388,6 +389,7 @@ impl DetectorWakeProcessor {
         self.last_hit = end as i64;
         self.model = model;
         let m = &self.d.models[model];
+        crate::meter::decided(crate::meter::Decision::Wake { score, woke: None });
         if score < m.threshold {
             info!(
                 "wake: detector heard {} ({score:.2}), under {:.2}: Parakeet checks it",
@@ -452,6 +454,10 @@ impl DetectorWakeProcessor {
             return;
         }
         info!("wake: not confirmed");
+        crate::meter::decided(crate::meter::Decision::Wake {
+            score: self.scores.back().map_or(0.0, |(_, s)| *s),
+            woke: Some(false),
+        });
         self.keep_take(false);
         self.reading = None;
         self.hit = None;
@@ -460,6 +466,10 @@ impl DetectorWakeProcessor {
 
     async fn wake(&mut self) {
         self.woken = true;
+        crate::meter::decided(crate::meter::Decision::Wake {
+            score: self.scores.back().map_or(0.0, |(_, s)| *s),
+            woke: Some(true),
+        });
         if let Some(on_heard) = &self.on_heard {
             on_heard().await;
         }

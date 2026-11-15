@@ -589,8 +589,54 @@ async fn diagnose_save(
         .map_err(ApiError::unprocessable)
 }
 
+// --- Ghost's checks -------------------------------------------------------------------------
+
+/// One line `ghostd check` printed.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct CheckLine {
+    /// A problem: `ghostd check` fails on it.
+    pub problem: bool,
+    /// A warning it prints and passes.
+    pub warning: bool,
+    pub text: String,
+}
+
+/// What `ghostd check` found, problems first.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct ChecksView {
+    pub ok: bool,
+    /// Its exit code.
+    pub code: i32,
+    pub problems: usize,
+    pub lines: Vec<CheckLine>,
+    /// How long it took, seconds.
+    pub secs: f64,
+}
+
+/// The daemon's runner of `ghostd check` (`ghostd::check`).
+#[async_trait]
+pub trait ChecksPort: Send + Sync {
+    async fn run(&self) -> Result<ChecksView, String>;
+}
+
+/// Run `ghostd check` as the terminal would (the settings, the vault, the folder, the
+/// models, the apps), and give its lines, problems first.
+#[utoipa::path(post, path = "/developer/checks", operation_id = "developer_checks_post",
+    tag = "developer", summary = "Run Ghost's checks",
+    responses((status = 200, description = "Successful Response", body = ChecksView)))]
+async fn run_checks(State(deps): State<SharedDeps>) -> ApiResult<Json<ChecksView>> {
+    deps.checks
+        .clone()
+        .ok_or_else(|| ApiError::unavailable("this daemon cannot run its checks"))?
+        .run()
+        .await
+        .map(Json)
+        .map_err(ApiError::internal)
+}
+
 pub fn router() -> OpenApiRouter<SharedDeps> {
     OpenApiRouter::new()
+        .routes(routes!(run_checks))
         .routes(routes!(get_switches, put_switches))
         .routes(routes!(get_debug_audio, put_debug_audio))
         .routes(routes!(diagnose_preview))

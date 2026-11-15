@@ -22,6 +22,7 @@ pub mod developer;
 pub mod echo_cancel;
 pub mod error;
 pub mod hear;
+pub mod live;
 pub mod model;
 pub mod models;
 pub mod openapi;

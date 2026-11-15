@@ -63,6 +63,7 @@ import { type HearDesign, MockHear } from "./hear";
 import { MockReports } from "./reports";
 import { uninstallView } from "./uninstall";
 import { MockDeveloper } from "./developer";
+import { MockLive, type MeterRoom } from "./live";
 import { MockWakeTakes } from "./wakeTakes";
 import { isConnectionKey, isModelOnly, MockModel } from "./model";
 import { MockOtherTools } from "./otherTools";
@@ -202,6 +203,8 @@ export interface MockOptions {
    * waiting, `problem` a take that couldn't be checked, `scoring` a run being scored.
    */
   hear?: HearDesign;
+  /** Developer's microphone meter (?meter=…, ADR 0073 as amended): the synthetic room it plays. */
+  meterRoom?: MeterRoom | null;
 }
 
 export class MockDaemon {
@@ -276,6 +279,8 @@ export class MockDaemon {
   private reports = new MockReports();
   /** Settings › Developer (ADR 0073, ADR 0074): the switches, debug mode, the report. */
   private developer: MockDeveloper;
+  /** Developer's live views: the meter and the turns' timings, synthetic. */
+  private devLive: MockLive;
   /** What the agents do on their own (ADR 0047): the schedules and their runs. */
   private schedules: MockSchedules;
   /** The AI tools already on this computer (ADR 0068), from the scenario. */
@@ -290,6 +295,7 @@ export class MockDaemon {
       !!scenario.debugAudio || (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("debug") === "on"),
       () => this.pushStatus({ debug_audio: this.developer.mark() }),
     );
+    this.devLive = new MockLive(options.meterRoom ?? "quiet", (e) => this.emit(e), () => this.status);
     this.phone = f.settings.phone;
     const hoursAgo = (h: number) => new Date(Date.now() - h * 3600_000).toISOString();
     const cursor: ClientView = { name: "cursor", title: "Cursor", created_at: hoursAgo(24 * 3), last_used_at: null };
@@ -508,6 +514,7 @@ export class MockDaemon {
       l(this.snapshot());
       for (const activity of this.activity) l({ type: "activity", activity });
     });
+    queueMicrotask(() => this.devLive.seed());
     this.startVoice();
     this.startReach();
     if (!this.storyPlayed) {
@@ -1975,6 +1982,10 @@ export class MockDaemon {
       if (answer !== undefined) return answer;
     }
     if (method === "GET" && path === "/uninstall") return uninstallView();
+    if (path === "/developer/meter" || path === "/developer/checks") {
+      const answer = this.devLive.handle(method, path, b);
+      if (answer !== undefined) return answer;
+    }
     if (path.startsWith("/debug-audio") || path.startsWith("/developer") || path.startsWith("/diagnose")) {
       const answer = this.developer.handle(method, path, b);
       if (answer !== undefined) return answer;

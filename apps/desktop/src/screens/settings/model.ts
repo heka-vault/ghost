@@ -39,7 +39,8 @@ export type SectionId =
   | "advanced"
   | "experimental"
   | "debug"
-  | "tests";
+  | "tests"
+  | "live";
 
 export const SECTION_TITLE: Record<SectionId, string> = {
   setup: "Finish setup",
@@ -70,6 +71,7 @@ export const SECTION_TITLE: Record<SectionId, string> = {
   experimental: "Experimental switches",
   debug: "Debug mode",
   tests: "Tests",
+  live: "Live views",
 };
 
 /**
@@ -97,6 +99,7 @@ export const SECTION_PAGE: Record<SectionId, string> = {
   experimental: "developer",
   debug: "developer",
   tests: "developer",
+  live: "developer",
   model: "model",
   secrets: "passwords",
   apps: "apps",

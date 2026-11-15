@@ -1,0 +1,60 @@
+/* Developer's live timing overlay (ADR 0073 as amended 2026-11-14): small, monospace, quiet. */
+.timing-overlay {
+  margin: var(--space-1) 0 0;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  color: var(--text-2);
+  overflow-x: auto;
+  max-width: 100%;
+}
+.timing-overlay table {
+  border-collapse: collapse;
+  white-space: nowrap;
+}
+.timing-overlay th,
+.timing-overlay td {
+  padding: 0 var(--space-2) 0 0;
+  font-weight: var(--weight-regular);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.timing-overlay th {
+  color: var(--text-3);
+}
+.timing-overlay tbody th,
+.timing-overlay thead th:first-child {
+  text-align: left;
+}
+.timing-overlay__label {
+  color: var(--text-3);
+}
+.timing-overlay td.is-none {
+  color: var(--text-3);
+}
+.timing-overlay .timing-overlay__model {
+  text-align: left;
+  color: var(--text-3);
+}
+.timing-overlay tr.is-live {
+  color: var(--accent-text);
+}
+
+/* The floating view's one line: never takes a click or the keyboard. */
+.timing-line {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  user-select: none;
+}

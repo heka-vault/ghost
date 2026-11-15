@@ -582,11 +582,17 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
         sources.push(s.source());
     }
     let events = d.events();
+    let fast_model = if no_model { None } else { d.fast_model() };
+    let on_latency = timing_sink(
+        d,
+        (!no_model).then(|| d.voice().llm_connection().provider),
+        fast_model.as_ref().map(|m| m.model_name()),
+    );
     let session = Arc::new(build_session(SessionParams {
         settings: voice.clone(),
         models,
         model,
-        fast_model: if no_model { None } else { d.fast_model() },
+        fast_model,
         sources,
         gate: gate.clone(),
         events: Some(events.clone()),
@@ -600,7 +606,7 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
             on_phase: Some(on_phase),
             on_hang_up: Some(on_hang_up),
             on_conversation: Some(on_conversation),
-            on_latency: None,
+            on_latency: Some(on_latency),
             on_level: Some(on_level),
             on_activity: Some(on_activity),
             on_heard: Some(on_heard),
@@ -943,6 +949,28 @@ impl PhoneEvents for PhoneEventsSink {
             let _ = self.0.send(&out);
         }
     }
+}
+
+/// Each turn's latency record as Developer's timing overlay shows it (`Event::Timing`, ADR
+/// 0073 amended 2026-11-14): numbers, the model's name and provider, fast or main. Made at
+/// the turn's end, off the turn's path, and only while the desktop is open to see it.
+pub fn timing_sink(
+    d: &Arc<Daemon>,
+    provider: Option<String>,
+    fast_model: Option<String>,
+) -> ghost_voice::latency::Sink {
+    let d = Arc::downgrade(d);
+    Arc::new(move |record| {
+        let Some(d) = d.upgrade() else { return };
+        if d.state.bus.subscribers() == 0 {
+            return;
+        }
+        if let Some(t) =
+            ghost_api::live::timing_of(record, provider.as_deref(), fast_model.as_deref())
+        {
+            d.state.publish_timing(t);
+        }
+    })
 }
 
 /// The pipeline's activity as the event stream carries it (`Event::Activity`, ADR 0055).

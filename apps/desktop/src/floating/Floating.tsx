@@ -27,7 +27,9 @@
  * comes forward whichever window has the keyboard, there are no buttons but a yes's and a
  * question's, and Ghost's own words are captioned, since the people watching may not hear it.
  */
+import { rereadDeveloper } from "../app/developer";
 import { typedSession } from "../app/listening";
+import { TimingLine } from "../app/TimingOverlay";
 import type { PendingProposal, QuestionView, Turn } from "@ghost/client-ts";
 import { agentName, splitSaid, useGhost, youSpeaking } from "@ghost/ui";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -108,6 +110,16 @@ export function FloatingRoom({ stage = false }: { stage?: boolean } = {}) {
   const debugOn = !!status?.debug_audio;
   // A typed session opened no microphone (2026-11-13): Wisp and the label say typing.
   const typed = typedSession(status);
+  // Developer's timing overlay is the main window's choice (ADR 0073 as amended): this second
+  // process reads it again on focus and every few seconds.
+  useEffect(() => {
+    const t = window.setInterval(rereadDeveloper, 3000);
+    window.addEventListener("focus", rereadDeveloper);
+    return () => {
+      window.clearInterval(t);
+      window.removeEventListener("focus", rereadDeveloper);
+    };
+  }, []);
 
   // When this session started here: the questions asked since then are its own.
   const [since, setSince] = useState<string | null>(null);
@@ -558,6 +570,7 @@ export function FloatingRoom({ stage = false }: { stage?: boolean } = {}) {
               {label}
               {micOff && scene !== "listening" ? <span className="flt-label__mic"> · mic off</span> : null}
             </p>
+            {!stage && <TimingLine className="flt-timing" />}
             {/* The first meeting: how to send Ghost back, said once, in Ghost's own words. */}
             {forward && !stage && shell.firstMeeting && <p className="flt-hint">Say “that’s all” to send me back</p>}
             {forward && !stage && (

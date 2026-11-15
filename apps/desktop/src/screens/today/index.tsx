@@ -22,6 +22,7 @@ import { appsDownOf, type DayCounts, type Moment, cluster, countsOf, dayLabel, h
 import { liveNeeds } from "./live";
 import { Now, WorkingNow } from "./Needs";
 import { Instruments } from "./Signal";
+import { TimingOverlay } from "../../app/TimingOverlay";
 import { TalkBar, useLiveSession } from "./TalkBar";
 import { Timeline } from "./Timeline";
 import "./today.css";
@@ -79,7 +80,15 @@ export default function TodayScreen(_: RouteProps) {
   const working = today.working.length;
 
   return (
-    <Page title="Today" bare width="wide" className="today" dock={isToday ? <TalkBar live={live} /> : undefined}>
+    <Page title="Today" bare width="wide" className="today" dock={
+        isToday ? (
+          <>
+            <TimingOverlay />
+            <TalkBar live={live} />
+          </>
+        ) : undefined
+      }
+    >
       <header className="today-head">
         <div className="today-day">
           <IconButton size="sm" variant="ghost" label={`The day before (${"["})`} icon={<ChevronLeft />} onClick={() => go(-1)} />

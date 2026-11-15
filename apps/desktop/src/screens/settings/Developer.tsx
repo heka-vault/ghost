@@ -8,15 +8,17 @@
  *   Experimental       a closed list of settings that are environment variables, each with
  *                      its real name, what it does, its value and where that comes from,
  *                      written to settings.env (GET/PUT /developer/switches)
- *   Tests              the model check, a test error report and ghostd check (commands to
- *                      copy), the first run again, the floating position, the speech models,
- *                      the version line; "Record a test session" opens the Hearing test
- *   Coming next        slots for a live timing overlay and a live microphone meter
- *                      (DeveloperLive.tsx, #/settings/developer/live): no data until built
+ *   Tests              the model check, Send a test error report (`POST /reports/test`, what
+ *                      was sent shown exactly) and Run Ghost's checks (`POST /developer/checks`,
+ *                      `ghostd check`'s lines, problems first), each with its command to copy;
+ *                      the first run again, the floating position, the speech models, the
+ *                      version line; "Record a test session" opens the Hearing test
+ *   Live views         the timing overlay's switch and Copy, and the microphone meter
+ *                      (DeveloperLive.tsx, #/settings/developer/live; ADR 0073 as amended)
  *
  * States by URL (mock): `?debug=on` (in the scenario `debugmode`) shows debug mode on.
  */
-import type { DebugAudioView, SwitchView, SwitchesView } from "@ghost/client-ts";
+import type { ChecksView, DebugAudioView, ReportTestView, SwitchView, SwitchesView } from "@ghost/client-ts";
 import { useGhost, versionLine } from "@ghost/ui";
 import { Copy } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
@@ -27,7 +29,7 @@ import { hrefFor, navigate } from "../../app/router";
 import { settingsPath } from "../../app/routes";
 import { Badge, Button, Card, ListRow, Notice, Section, Select, Input, Switch, errorText, useCopy, useToast } from "../../ui";
 import { SECTION_TITLE, sectionDomId, tildePath } from "./model";
-import { DeveloperComingNext } from "./DeveloperLive";
+import { LiveViews } from "./DeveloperLive";
 import { timeLeft } from "./plain";
 
 export function useNow(every = 1000): number {
@@ -244,9 +246,131 @@ function Experimental() {
 function CommandButton({ command }: { command: string }) {
   const [copied, copy] = useCopy();
   return (
-    <Button size="sm" variant="secondary" leadingIcon={<Copy />} onClick={() => copy(command)} aria-label={`Copy ${command}`}>
-      {copied ? "Copied" : command}
+    <Button size="sm" variant="ghost" leadingIcon={<Copy />} onClick={() => copy(command)} aria-label={`Copy ${command}`}>
+      {copied ? "Copied" : "Copy the command"}
     </Button>
+  );
+}
+
+/** Send a test error report now, and show exactly what went (or why nothing did). */
+function TestReport() {
+  const { client } = useGhost();
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<ReportTestView | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const send = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      setResult(await client.sendTestReport());
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <>
+      <ListRow
+        title="Send a test error report"
+        description="Sends one test report now, as ghostd reports test does, and shows exactly what went. A build from the checkout has no key and sends nothing."
+        trailing={
+          <span className="set-row-actions">
+            <CommandButton command="ghostd reports test" />
+            <Button size="sm" variant="secondary" loading={busy} onClick={() => void send()}>
+              Send
+            </Button>
+          </span>
+        }
+      />
+      {(result || error) && (
+        <div className="dev-result" data-testid="test-report-result">
+          {error ? (
+            <Notice tone="danger" title="Couldn’t send a test report">
+              {error}
+            </Notice>
+          ) : result && result.sent ? (
+            <>
+              <p className="dev-result__head">{result.message}</p>
+              <pre>{JSON.stringify(result.body, null, 2)}</pre>
+            </>
+          ) : (
+            <Notice tone={result?.available ? "warn" : "info"} title={result?.available ? "Nothing was sent" : "This build sends no error reports"}>
+              {result?.message}
+            </Notice>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
+/** `ghostd check`'s lines as a list, problems first. */
+export function checksSummary(v: ChecksView): string {
+  if (v.ok) return `All clear in ${v.secs.toFixed(1)} s.`;
+  return `${v.problems} problem${v.problems === 1 ? "" : "s"}, in ${v.secs.toFixed(1)} s.`;
+}
+
+/** Run `ghostd check` and show its lines, problems first. */
+function RunChecks() {
+  const { client } = useGhost();
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<ChecksView | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const run = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      setResult(await client.runChecks());
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <>
+      <ListRow
+        title="Run Ghost’s checks"
+        description="What ghostd check checks: the settings, the vault, the folder, the speech models, the microphone and each app (it connects each once, as the command does). Takes a few seconds."
+        trailing={
+          <span className="set-row-actions">
+            <CommandButton command="ghostd check" />
+            <Button size="sm" variant="secondary" loading={busy} onClick={() => void run()}>
+              Run
+            </Button>
+          </span>
+        }
+      />
+      {(result || error) && (
+        <div className="dev-result" data-testid="checks-result">
+          {error ? (
+            <Notice tone="danger" title="Couldn’t run the checks">
+              {error}
+            </Notice>
+          ) : (
+            result && (
+              <>
+                <p className="dev-result__head">
+                  <Badge size="sm" tone={result.ok ? "ok" : "danger"} dot>
+                    {result.ok ? "OK" : "Problems"}
+                  </Badge>{" "}
+                  {checksSummary(result)}
+                </p>
+                <ul>
+                  {result.lines.map((l, i) => (
+                    <li key={i} className={l.problem ? "is-problem" : l.warning ? "is-warning" : undefined}>
+                      {l.problem ? "✕ " : l.warning ? "! " : ""}
+                      {l.text}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )
+          )}
+        </div>
+      )}
+    </>
   );
 }
 
@@ -287,8 +411,8 @@ function Tests() {
       <Card list>
         <ListRow title="Record a test session" description="The Hearing test’s recorder: talk to Ghost as usual and keep the raw audio on this computer to score how well it hears." trailing={<Button size="sm" variant="secondary" href={hrefFor("/hear")}>Open the recorder</Button>} />
         <ListRow title="Check the model" description="A few short calls to the model connection: how soon the first word comes, and what works." trailing={<Button size="sm" variant="secondary" loading={checking} onClick={() => void runCheck()}>Run the check</Button>} />
-        <ListRow title="Send a test error report" description="Run it in a terminal; it prints exactly what was sent. A build from the checkout has no key and sends nothing." trailing={<CommandButton command="ghostd reports test" />} />
-        <ListRow title="Check Ghost’s settings, vault, folder and apps" description="Run it in a terminal; a problem is its exit code." trailing={<CommandButton command="ghostd check" />} />
+        <TestReport />
+        <RunChecks />
         <ListRow title="Check the speech models" description="Whether Parakeet’s and Kokoro’s files are all here." trailing={<Button size="sm" variant="secondary" onClick={() => void speech()}>Check</Button>} />
         <ListRow title="Replay the first run" description="Set up Ghost again from the start; it keeps what’s done." trailing={<Button size="sm" variant="secondary" href={hrefFor("/welcome")}>Open setup</Button>} />
         {floating.status && <ListRow title="Reset the floating position" description="Back to beside your work, on the other monitor." trailing={<Button size="sm" variant="secondary" onClick={() => void resetFloating()}>Reset</Button>} />}
@@ -332,8 +456,8 @@ export function DeveloperPage({ settingsPathText }: { settingsPathText: string |
       <DebugMode />
       <Tests />
       <Experimental />
+      <LiveViews />
       <AdvancedPages settingsPathText={settingsPathText ? tildePath(settingsPathText) : null} />
-      <DeveloperComingNext />
     </>
   );
 }

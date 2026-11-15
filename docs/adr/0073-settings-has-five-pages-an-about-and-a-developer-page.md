@@ -88,7 +88,7 @@ session", which opens the Hearing test's recorder); the **experimental switches*
 pages (Passwords, Skills, Outside tools, the Audit log, Notification routes, Permissions'
 Advanced, the settings file); and two slots marked "coming next" (a live timing overlay and a
 live microphone meter, `DeveloperLive.tsx`, `#/settings/developer/live`) with no data until they
-are built.
+are built. (Built 2026-11-14: see the amendment below.)
 
 **The experimental switches** are a closed list in code (`ghost_api::developer::SWITCHES`) of
 settings that are environment variables, each shown by its real name with a sentence, its value
@@ -152,3 +152,71 @@ sees. The owner approved a trim; nothing was removed, only moved (`moved.ts` and
   dependency; recordings ride in it as base64.
 - **Developer as a lock.** Nothing behind it is anything the operator can't do with a file or a
   terminal; a lock would be theatre, and hiding pages behind it would break their links.
+
+## Amendment, 2026-11-14: the live views and the test buttons
+
+The owner approved three things for testing release builds on a laptop: a live timing
+overlay, a live microphone meter, and making "Send a test error report" and "Run ghostd check"
+real buttons. All are on Developer; none is visible to a newcomer. The "coming next" slots are
+gone.
+
+**The live timing overlay.** A switch on Developer (off by default, remembered on this computer
+in the app's own storage, and off whenever Developer is hidden) shows each turn of a live
+session, small and monospace: under Today's live strip, under the conversation screen's stage,
+and as one line under the floating Ghost's label (inside the layout rule's share, never a
+target for a click or the keyboard). Its numbers are each turn's latency record (ADR 0018,
+`ghost_voice::latency`, the record `ghostd latency` and the diagnostic report read), sent at the
+turn's end as a `timing` event (`ghost_api::live::TimingView`, made by `timing_of`): the
+person's turn closing, speech to text, the model's first word, the first tool call and its
+result, the acknowledgment, Ghost's first sound, the reply's end, the model's name, the
+provider and fast or main. The turn under way is drawn from the `activity` events the window
+already has. The event is built only while the desktop's stream is open, off the turn's path
+(after the reply ends): 4.7 µs a turn in a release build, measured (`what_a_turns_timing_costs`).
+No stage was missing, so the pipeline is unchanged. **Copy the last ten turns** gives a
+plain-text table; the diagnostic report keeps carrying the last 30 records and is not duplicated.
+
+**The live microphone meter** (`#/settings/developer/live`, full width): the input level and peak
+over the last eight seconds, the room gate's levels (the room, the person, the line under which
+a segment is held, ADR 0072), whether the speech detector hears speech, and what Ghost decided
+about each stretch of sound, by kind only: taken as the person's turn (with a word count), read
+with no words, held as the room, let go, held then taken by Ghost's name, dropped as Ghost's own
+echo, too short to interrupt, a barge-in, a wake attempt and its score (and whether Parakeet's
+check let it wake Ghost), a near miss. The stages that already measure these report to
+`ghost_voice::meter`, a process-wide collector that is one atomic load and nothing else while
+closed; `ghostd::meter` holds a ten-second lease the page renews every four seconds and
+publishes about fifteen `meter` events a second while it is held, then one saying it closed.
+The page closing, hiding or going away ends it. On the on-chip array, where the room gate is
+off, the meter says so and why. With listening off (ADR 0057) no capture is open; the meter
+opens none and says there is nothing to measure. The phone's call is never metered.
+
+**The rule for levels before the wake.** CLAUDE.md's "idle audio stays on the machine" and "the
+control API never carries passive audio or passive transcripts" are kept as they were, and this
+is how the meter sits under them. While the operator has the meter page open, and only then, the
+passive listener's frame levels, the speech detector's state and the wake detector's scores and
+decisions reach the operator's own desktop over the control API's event stream. They are
+numbers and fixed kinds: not audio (one level per 20 ms frame, rounded to a tenth of a dB, is not
+sound anyone can be heard in), not a transcript, and never a word. They stay on this computer, as
+the desktop does. Nothing else subscribes to them: they are published only while the lease is
+held, the phone's stream and the outside listener read a closed list of event kinds that does
+not hold `meter` or `timing`, and no tool of Ghost's own app reaches the meter, the overlay, the
+test report or the checks. No history is kept: each reading carries only what came since the one
+before, the collector forgets everything when it closes, and the page keeps its last eight
+seconds and forty decisions in memory only. The types have no field for text
+(`MeterDecisionKind`, `TimingView`): `the_meter_and_timing_carry_no_words` and the speech-in
+stage's hostile fixture (`test_the_live_meter_sees_the_room_held_and_the_person_taken_and_no_words`)
+hold it. What is new is that passive telemetry reaches the desktop at all, while the operator is
+looking at it; the alternative, a meter that shows nothing until a wake, would not show why a
+wake failed, which is what the owner asked to see.
+
+**The test buttons.** "Send a test error report" calls `POST /reports/test`, which does what
+`ghostd reports test` does and returns what was sent exactly (the project's key shown as a
+placeholder) or why nothing was (no key in this build, reports off, a bound held). "Run Ghost's
+checks" calls `POST /developer/checks`, which runs this `ghostd` as `ghostd check --json` with
+Ghost's environment less every password (`child_env`), a two-minute bound, and gives its lines
+redacted, problems first, then warnings, then the rest. It connects each app once, as the
+command does. Each row keeps "Copy the command".
+
+All four routes (`PUT /developer/meter`, `POST /developer/checks`, `POST /reports/test`, and the
+events) are the control API's: the phone's routes refuse them (`the_phone_has_no_way_to_debug_mode_the_switches_or_a_report`),
+the outside listener forwards neither event (`the_live_meter_and_the_timing_overlay_never_reach_an_outside_tool`),
+and no tool names them (`no_tool_reaches_debug_mode_or_the_report`).

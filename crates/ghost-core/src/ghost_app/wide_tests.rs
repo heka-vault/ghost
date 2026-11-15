@@ -926,6 +926,12 @@ async fn no_tool_reaches_debug_mode_or_the_report() {
             "ghost_debug_audio",
             "experimental",
             "developer",
+            // Developer's live meter and timing overlay, the test report and Ghost's checks
+            // (ADR 0073 as amended 2026-11-14).
+            "meter",
+            "timing",
+            "reports_test",
+            "ghostd check",
         ] {
             assert!(!said.contains(word), "{} mentions {word}", t.name);
         }

@@ -11,6 +11,8 @@ export type { VoiceLevel } from "./voiceLevel";
 export { createReachLive, REACH_KEPT } from "./reachLive";
 export type { ReachLive } from "./reachLive";
 export { createHearLive } from "./hearLive";
+export { createDevLive, decisionTone, decisionWords, liveRow, modelLine, rowOf, secs, shortModel, STAGES, TIMINGS_KEPT, timingTable } from "./devLive";
+export type { DevLive, StageKey, TimingRow } from "./devLive";
 export type { HearLevel, HearLive } from "./hearLive";
 export { splitSummary, neverHappened, didNotHappen, pastTense, shortTarget } from "./audit";
 export type { Summarized } from "./audit";
