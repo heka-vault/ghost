@@ -89,16 +89,111 @@ pub struct Models {
     pub problem: Option<String>,
 }
 
+/// A speech model that did not load, with the part it is (#168): the daemon says it in plain
+/// words and reports the part and the error's kind, never the loader's text (ADR 0067).
+#[derive(Debug, thiserror::Error)]
+#[error("{source}")]
+pub struct LoadError {
+    pub part: ghost_reports::SpeechPart,
+    #[source]
+    pub source: ghost_infer::InferError,
+}
+
+impl LoadError {
+    /// The part, as the loader of `part` failed with `source`: ONNX Runtime's library and
+    /// espeak-ng are their own parts whichever model asked for them.
+    pub fn new(part: ghost_reports::SpeechPart, source: ghost_infer::InferError) -> Self {
+        use ghost_infer::InferError;
+        use ghost_reports::SpeechPart;
+        let part = match &source {
+            InferError::Runtime(_) => SpeechPart::Onnxruntime,
+            InferError::Espeak(_) | InferError::EspeakData { .. } => SpeechPart::Espeak,
+            _ => part,
+        };
+        Self { part, source }
+    }
+
+    /// What was wrong with espeak-ng, when it was its data.
+    pub fn espeak(&self) -> Option<ghost_reports::EspeakKind> {
+        use ghost_infer::espeak::DataProblem;
+        use ghost_reports::EspeakKind;
+        match &self.source {
+            ghost_infer::InferError::EspeakData { kind, .. } => Some(match kind {
+                DataProblem::Missing => EspeakKind::DataMissing,
+                DataProblem::VersionMismatch => EspeakKind::DataVersionMismatch,
+                DataProblem::Unreadable => EspeakKind::DataUnreadable,
+            }),
+            _ => None,
+        }
+    }
+
+    /// The report: the part, Ghost's own variant name, and espeak's kind. Nothing else.
+    pub fn failure(&self) -> ghost_reports::Failure {
+        let f = ghost_reports::Failure::new(ghost_reports::FailureKind::SpeechModelsLoad)
+            .error(self.source.variant())
+            .speech_part(self.part);
+        match self.espeak() {
+            Some(k) => f.espeak(k),
+            None => f,
+        }
+    }
+
+    /// For the person: what does not work, in plain words, and what to do, first; the
+    /// loader's detail after it.
+    pub fn plain(&self) -> String {
+        let detail = match &self.source {
+            ghost_infer::InferError::EspeakData { message, .. } => message.clone(),
+            other => other.to_string(),
+        };
+        if self.part == ghost_reports::SpeechPart::Espeak
+            && detail.starts_with(ghost_infer::espeak::ENV_VAR)
+        {
+            return format!(
+                "Ghost can't speak: {} in ~/.config/ghost/settings.env does not name a usable \
+                 espeak-ng-data folder. Fix it or remove it, then restart Ghost. Detail: \
+                 {detail}.",
+                ghost_infer::espeak::ENV_VAR
+            );
+        }
+        if self.part == ghost_reports::SpeechPart::Espeak {
+            return format!(
+                "Ghost can't speak: the pronunciation data its voice needs (espeak-ng) is not \
+                 usable on this computer. Install Ghost again, or set {} in \
+                 ~/.config/ghost/settings.env to an espeak-ng-data folder, then restart Ghost. \
+                 Detail: {detail}.",
+                ghost_infer::espeak::ENV_VAR
+            );
+        }
+        format!(
+            "Ghost's speech models are not loaded ({}): {detail}",
+            self.part.as_str()
+        )
+    }
+}
+
+/// Start espeak-ng with the data these settings choose (#168): a few milliseconds, and the
+/// same instance Kokoro uses later. Run at the daemon's start and by `ghostd check`, so a
+/// voice that cannot start is said before 2.9 GB of models are downloaded for it.
+pub fn espeak_ready(
+    s: &VoiceSettings,
+) -> std::result::Result<&'static ghost_infer::espeak::Espeak, LoadError> {
+    ghost_infer::espeak::Espeak::init(s.espeak_data.as_deref())
+        .map_err(|e| LoadError::new(ghost_reports::SpeechPart::Espeak, e))
+}
+
 impl Models {
     pub fn load(s: &VoiceSettings) -> anyhow::Result<Self> {
+        use ghost_reports::SpeechPart;
         let paths = s.parakeet_paths();
         info!(
             "Loading {} ({})",
             s.stt_model,
             s.stt_quantization.as_deref().unwrap_or("fp32")
         );
-        let parakeet = Parakeet::load(&paths, s.stt_threads)?;
-        let mut kokoro = Kokoro::load(&s.kokoro_paths())?;
+        let parakeet = Parakeet::load(&paths, s.stt_threads)
+            .map_err(|e| LoadError::new(SpeechPart::Parakeet, e))?;
+        let mut kokoro =
+            Kokoro::load(&s.kokoro_paths()).map_err(|e| LoadError::new(SpeechPart::Kokoro, e))?;
         let (halves, problem) = windowed_halves(s);
         if let Some((halves, plan)) = halves {
             info!(
@@ -108,7 +203,8 @@ impl Models {
             kokoro = kokoro.with_windows(halves, plan);
         }
         let voices: Vec<String> = kokoro.voices().into_iter().map(String::from).collect();
-        let turn = SmartTurn::load(&s.smart_turn_model, s.smart_turn_threads)?;
+        let turn = SmartTurn::load(&s.smart_turn_model, s.smart_turn_threads)
+            .map_err(|e| LoadError::new(SpeechPart::SmartTurn, e))?;
         Ok(Self {
             stt: Arc::new(Mutex::new(parakeet)),
             tts: Arc::new(Mutex::new(kokoro)),
@@ -1428,5 +1524,55 @@ mod tests {
                 "cancel={cancel}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod load_error_tests {
+    use super::LoadError;
+    use ghost_infer::{InferError, espeak::DataProblem};
+    use ghost_reports::{EspeakKind, SpeechPart};
+
+    fn espeak(message: &str) -> InferError {
+        InferError::EspeakData {
+            kind: DataProblem::VersionMismatch,
+            message: message.into(),
+        }
+    }
+
+    #[test]
+    fn the_part_is_the_one_that_failed_whichever_model_asked() {
+        // Kokoro's load starts espeak-ng; its failure is espeak's.
+        let e = LoadError::new(SpeechPart::Kokoro, espeak("x"));
+        assert_eq!(e.part, SpeechPart::Espeak);
+        assert_eq!(e.espeak(), Some(EspeakKind::DataVersionMismatch));
+        // Any model's session needs ONNX Runtime's library first.
+        let e = LoadError::new(SpeechPart::Parakeet, InferError::Runtime("gone".into()));
+        assert_eq!(e.part, SpeechPart::Onnxruntime);
+        assert_eq!(e.espeak(), None);
+        let e = LoadError::new(SpeechPart::Kokoro, InferError::Model("shape".into()));
+        assert_eq!(e.part, SpeechPart::Kokoro);
+        let f = e.failure();
+        assert_eq!(f.facts.get("part").map(String::as_str), Some("kokoro"));
+        assert_eq!(f.error, Some("Model"));
+        assert!(!f.facts.contains_key("espeak"));
+    }
+
+    #[test]
+    fn the_person_is_told_what_to_do_first() {
+        let e = LoadError::new(
+            SpeechPart::Kokoro,
+            espeak("the data at /usr/share/espeak-ng-data is for espeak-ng 1.52"),
+        );
+        let plain = e.plain();
+        assert!(plain.starts_with("Ghost can't speak:"), "{plain}");
+        assert!(plain.contains("Install Ghost again"), "{plain}");
+        assert!(plain.contains("GHOST_ESPEAK_DATA"), "{plain}");
+        assert!(plain.contains("1.52"), "the detail after: {plain}");
+        // Their own setting at fault: fix it, not reinstall.
+        let e = LoadError::new(SpeechPart::Kokoro, espeak("GHOST_ESPEAK_DATA names /x"));
+        let plain = e.plain();
+        assert!(plain.contains("Fix it or remove it"), "{plain}");
+        assert!(!plain.contains("Install Ghost again"), "{plain}");
     }
 }

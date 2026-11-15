@@ -198,7 +198,7 @@ pub fn build(inputs: &Inputs, added: &Added, s: &Scrubber) -> (Value, Vec<Diagno
     part(
         "speech_models",
         "Speech models",
-        "whether Parakeet and Kokoro are here".into(),
+        "whether Parakeet and Kokoro are here, and whether Ghost's voice can start".into(),
         false,
         &get("speech_models"),
     );
@@ -427,6 +427,37 @@ fn folder_of(req: &DiagnoseRequest, home: &Path) -> Result<PathBuf, String> {
 
 // --- what the files give, with or without a daemon -----------------------------------------
 
+/// Kokoro's tokenizer (#168), as the same closed words an error report carries: started
+/// or not, and if not, which part, Ghost's error variant and espeak's kind. Never a path.
+pub fn voice_fact(voice: Option<&ghost_voice::config::VoiceSettings>) -> Value {
+    use ghost_infer::espeak::Source;
+    let Some(voice) = voice else {
+        return Value::Null;
+    };
+    match ghost_voice::pipeline::espeak_ready(voice) {
+        Ok(e) => json!({
+            "espeak": {
+                "ok": true,
+                "version": ghost_reports::report::fact_word(e.version()),
+                "data": match e.source() {
+                    Source::Setting => "setting",
+                    Source::Bundle => "bundle",
+                    Source::System => "system",
+                    Source::Default => "default",
+                },
+            }
+        }),
+        Err(l) => json!({
+            "espeak": {
+                "ok": false,
+                "part": l.part.as_str(),
+                "error": l.source.variant(),
+                "kind": l.espeak().map(|k| k.as_str()),
+            }
+        }),
+    }
+}
+
 /// The parts the files on this computer give: version, build, computer, display, the turn
 /// timings, the wake attempts, the kept error reports, the model's names.
 pub fn from_files(cfg: &crate::GhostdSettings, env: &BTreeMap<String, String>) -> Inputs {
@@ -462,6 +493,13 @@ pub fn from_files(cfg: &crate::GhostdSettings, env: &BTreeMap<String, String>) -
         latency,
         wake: wake_attempts(&takes),
         error_reports: reporter.kept().into_iter().map(|k| k.event).collect(),
+        speech_models: json!({
+            "voice": voice_fact(
+                ghost_voice::config::VoiceSettings::from_vars(|k| env.get(k).cloned())
+                    .ok()
+                    .as_ref()
+            ),
+        }),
         ..Inputs::default()
     }
 }
@@ -588,7 +626,9 @@ impl DiagnoseDesk {
             }
             if let Some(sm) = &deps.speech_models {
                 let v = sm.view();
+                let voice = inputs.speech_models["voice"].take();
                 inputs.speech_models = json!({
+                    "voice": voice,
                     "ready": v.ready,
                     "missing": v.missing.len(),
                     "missing_bytes": v.missing_bytes,
@@ -843,6 +883,28 @@ pub async fn cli(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i
 
 #[cfg(test)]
 mod tests {
+
+    /// #168: the diagnostic report carries the same closed words as the error report for a
+    /// voice that cannot start, never the folder.
+    #[test]
+    fn the_voice_fact_is_closed_words_and_names_no_folder() {
+        let t = tempfile::tempdir().unwrap();
+        let bad = t.path().join("alice-espeak");
+        std::fs::create_dir_all(&bad).unwrap();
+        let bad_s = bad.display().to_string();
+        let voice = ghost_voice::config::VoiceSettings::from_vars(|k| {
+            (k == "GHOST_ESPEAK_DATA").then(|| bad_s.clone())
+        })
+        .unwrap();
+        let v = voice_fact(Some(&voice));
+        assert_eq!(v["espeak"]["ok"], false, "{v}");
+        assert_eq!(v["espeak"]["part"], "espeak");
+        assert_eq!(v["espeak"]["error"], "EspeakData");
+        assert_eq!(v["espeak"]["kind"], "data_missing");
+        assert!(!v.to_string().contains("alice"), "{v}");
+        assert_eq!(voice_fact(None), Value::Null);
+    }
+
     use super::*;
 
     const PASSWORD: &str = "hunter2-vault-Zq8xT2v9";

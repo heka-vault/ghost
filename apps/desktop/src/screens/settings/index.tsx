@@ -64,7 +64,7 @@ import { AboutPage } from "./AboutPage";
 import { DeveloperPage } from "./Developer";
 import { DeveloperLivePage } from "./DeveloperLive";
 import { ErrorReportsSection } from "./ErrorReports";
-import { ConnectionsSection, FinishSetupRow, ReachSection, StartAtLogin } from "./General";
+import { ConnectionsSection, FinishSetupRow, GhostdCommandRow, ReachSection, StartAtLogin } from "./General";
 import { RemoveGhostSection } from "./RemoveGhost";
 import { SpeechModelsRow } from "../onboarding/speech";
 import { DEVELOPER_PAGE, DEVELOPER_SCREEN_PAGES, type RouteProps, SETTINGS_PAGES, SETTINGS_SCREEN_PAGES, SETTINGS_SUBPAGES, settingsPath } from "../../app/routes";
@@ -972,6 +972,7 @@ export default function SettingsScreen({ params: route }: RouteProps) {
               <Card list>
                 <FinishSetupRow scenario={design?.scenario.name ?? null} />
                 <StartAtLogin />
+                <GhostdCommandRow />
               </Card>
             </Section>
             <Section id={sectionDomId("floating")} title="Where Ghost appears" description="When you call it: over your work, or in this window." className="set-section">

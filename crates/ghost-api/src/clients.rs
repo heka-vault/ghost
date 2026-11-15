@@ -129,7 +129,8 @@ async fn create_client(
     // This process is ghostd: the command the other tool runs is this binary, unless it
     // runs from an AppImage, whose mount goes away; then the tool connects by address.
     let ghostd = if deps.in_appimage {
-        None
+        // ADR 0075: the `ghostd` command the person installed for this AppImage, if any.
+        ghost_core::ghost_app::clients::appimage_ghostd(|k| std::env::var(k).ok())
     } else {
         stable_ghostd(|_| None)
     };

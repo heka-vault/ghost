@@ -34,6 +34,8 @@ use crate::spoken::spoken;
 use crate::turns::TurnControl;
 
 pub const SAMPLE_RATE: u32 = 24_000;
+/// The language Kokoro phonemizes in. The bundle carries espeak-ng's dictionary for English
+/// only (`scripts/espeak.sh`, #168): another language adds its dictionary there first.
 pub const LANG: &str = "en-us";
 
 /// The model behind the stage: Kokoro, or a fake in tests.
@@ -1377,5 +1379,18 @@ in app, and the Redis versus Postgres call for the session cache.";
         )
         .err();
         assert_eq!(err, Some(TtsError::UnknownVoice("nope".into())));
+    }
+}
+
+#[cfg(test)]
+mod bundle_language {
+    #[test]
+    fn the_bundle_carries_espeaks_dictionary_for_the_language_ghost_speaks() {
+        let script = include_str!("../../../scripts/espeak.sh");
+        let dict = format!("{}_dict", super::LANG.split('-').next().unwrap());
+        assert!(
+            script.contains(&format!("DICTS=\"{dict}\"")),
+            "scripts/espeak.sh stages {dict}"
+        );
     }
 }

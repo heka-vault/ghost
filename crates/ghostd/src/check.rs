@@ -147,6 +147,22 @@ pub async fn check_folder(
 /// `GHOST_SMART_TURN_MODEL` name their own), Parakeet in Ghost's cache (or `GHOST_STT_DIR`;
 /// the Hugging Face cache for int8), Kokoro in Ghost's cache (or `GHOST_TTS_MODEL_PATH` and
 /// `GHOST_TTS_VOICES_PATH`), and in onnx wake mode the trained "hey ghost" classifier.
+/// `espeak-ng: 1.51, data at <folder> (the bundle's)`.
+pub fn espeak_line(e: &ghost_infer::espeak::Espeak) -> String {
+    use ghost_infer::espeak::Source;
+    let from = match e.source() {
+        Source::Setting => "GHOST_ESPEAK_DATA",
+        Source::Bundle => "the bundle's",
+        Source::System => "the system's",
+        Source::Default => "the library's default",
+    };
+    format!(
+        "espeak-ng: {}, data at {} ({from})",
+        e.version(),
+        e.data_path().display()
+    )
+}
+
 /// Prints the lines; returns the problems.
 pub fn check_models(
     cfg: &GhostdSettings,
@@ -532,6 +548,14 @@ async fn check_run(
                 &ghost_infer::models::resolve_for_process,
                 out,
             ));
+            // #168: Kokoro's tokenizer, espeak-ng, with the data Ghost chose for it: started
+            // here as `ghostd run` starts it, before any model is downloaded.
+            match ghost_voice::pipeline::espeak_ready(&voice) {
+                Ok(e) => {
+                    let _ = writeln!(out, "{}", espeak_line(e));
+                }
+                Err(e) => problems.push(e.plain()),
+            }
             // ADR 0064: the machine's case and what Ghost listens on. Said, never a
             // problem: a machine without sound devices still passes (`make deploy`).
             for line in crate::microphone::check_lines(

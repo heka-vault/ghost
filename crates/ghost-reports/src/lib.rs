@@ -44,7 +44,8 @@ use serde_json::Value;
 use tracing::debug;
 
 pub use report::{
-    Component, Context, Failure, FailureKind, PageError, PageSource, What, status_class,
+    Component, Context, EspeakKind, Failure, FailureKind, PageError, PageSource, SpeechPart, What,
+    status_class,
 };
 pub use scrub::{Redact, Scrubber};
 

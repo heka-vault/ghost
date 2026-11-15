@@ -679,12 +679,66 @@ pub async fn cli(
             1
         }
         Some("fetch") => fetch_cli(&client(), &wanted, out, tty).await,
+        Some("voice-test") => voice_test(voice, out),
         Some(other) => {
             let _ = writeln!(
                 out,
-                "unknown: ghostd models {other}; ghostd models [list|fetch]"
+                "unknown: ghostd models {other}; ghostd models [list|fetch|voice-test]"
             );
             2
+        }
+    }
+}
+
+/// `ghostd models voice-test` (#168): Kokoro and its tokenizer loaded as `ghostd run` loads
+/// them, one fixed sentence rendered into memory, never played. Says how long it took, or in
+/// plain words why Ghost's voice cannot start.
+pub fn voice_test(voice: &VoiceSettings, out: &mut (dyn std::io::Write + Send)) -> i32 {
+    const SENTENCE: &str = "Ghost can speak on this computer.";
+    let espeak = match ghost_voice::pipeline::espeak_ready(voice) {
+        Ok(e) => e,
+        Err(e) => {
+            let _ = writeln!(out, "{}", e.plain());
+            return 1;
+        }
+    };
+    let _ = writeln!(out, "{}", crate::check::espeak_line(espeak));
+    let started = std::time::Instant::now();
+    let mut kokoro = match ghost_infer::Kokoro::load(&voice.kokoro_paths()) {
+        Ok(k) => k,
+        Err(e) => {
+            let e = ghost_voice::pipeline::LoadError::new(ghost_reports::SpeechPart::Kokoro, e);
+            let _ = writeln!(out, "{}", e.plain());
+            return 1;
+        }
+    };
+    let loaded = started.elapsed();
+    let rendered = std::time::Instant::now();
+    match kokoro.synthesize(
+        SENTENCE,
+        &voice.tts_voice,
+        voice.tts_speed as f32,
+        ghost_voice::tts::LANG,
+    ) {
+        Ok(audio) if !audio.is_empty() => {
+            let _ = writeln!(
+                out,
+                "voice: rendered {:.2} s of audio ({} samples at 24 kHz) in {} ms; Kokoro loaded \
+                 in {} ms",
+                audio.len() as f64 / 24_000.0,
+                audio.len(),
+                rendered.elapsed().as_millis(),
+                loaded.as_millis()
+            );
+            0
+        }
+        Ok(_) => {
+            let _ = writeln!(out, "voice: Kokoro rendered nothing");
+            1
+        }
+        Err(e) => {
+            let _ = writeln!(out, "voice: {e}");
+            1
         }
     }
 }

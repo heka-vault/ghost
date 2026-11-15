@@ -20,6 +20,7 @@ pub mod fakes;
 pub mod folder;
 pub mod gate;
 pub mod ghost_app;
+pub mod ghostd_command;
 pub mod hooks;
 pub mod jev;
 pub mod leftovers;

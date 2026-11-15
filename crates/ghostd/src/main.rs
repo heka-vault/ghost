@@ -209,6 +209,13 @@ fn main() -> anyhow::Result<()> {
                 &mut std::io::stderr(),
             ))
         }
+        // ADR 0075: the `ghostd` command for the AppImage, in ~/.local/bin
+        Some("command") => std::process::exit(ghostd::ghostd_command::cli(
+            &args[1..],
+            &ghostd::ghostd_command::Env::process(),
+            &mut std::io::stdout(),
+            &mut std::io::stderr(),
+        )),
         // #147: what Ghost left on this computer, listed and removed by the person
         Some("uninstall") => std::process::exit(ghostd::uninstall::cli(&args[1..])),
         Some("api-schema") => {
@@ -222,7 +229,7 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Some(other) => anyhow::bail!(
-            "unknown command {other:?}; commands: run, status, wake, say, sleep, check, models, echo-cancel, reports, debug-audio, diagnose, push, latency, llm, perf, restore-volumes, passwords, mcp, setup, uninstall, api-schema, version"
+            "unknown command {other:?}; commands: run, status, wake, say, sleep, check, models, echo-cancel, command, reports, debug-audio, diagnose, push, latency, llm, perf, restore-volumes, passwords, mcp, setup, uninstall, api-schema, version"
         ),
     }
 }
