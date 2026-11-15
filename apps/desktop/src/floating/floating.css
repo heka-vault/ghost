@@ -468,3 +468,7 @@ body {
   .flt-card::before, .flt-captions, .flt-pill, .flt-shared, .flt-sharecard { background: Canvas; }
   .flt-shared__dot { background: Mark; box-shadow: none; }
 }
+
+/* Debug mode (ADR 0073): worn like “Screen shared”, amber. */
+.flt-shared--debug { border-color: rgb(255 184 77 / 0.75); box-shadow: 0 0 16px rgb(255 184 77 / 0.3); }
+.flt-shared--debug .flt-shared__dot { background: var(--flt-amber); box-shadow: 0 0 10px var(--flt-amber); }

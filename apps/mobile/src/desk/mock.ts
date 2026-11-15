@@ -118,6 +118,7 @@ export class MockDesk implements Desk {
       ending: false,
       waiting: 0,
       not_listening: null,
+      debug_audio: null,
       uptime_secs: 0,
       version: "2026.10.0",
       build: { kind: "dev", commit: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678", dirty: false },

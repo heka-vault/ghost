@@ -186,7 +186,7 @@ reads the same files (`crates/ghost-infer/tests/parity.rs`).
 
 An installed Ghost updates itself (ADR 0066): the app checks
 `https://github.com/heka-vault/ghost/releases/latest/download/latest.json` when it starts and
-once a day (Settings › General › Updates, "Check for updates", on by default), and the
+once a day (Settings › About › Updates, "Check for updates", on by default), and the
 operator's **Update and restart** downloads the new .deb or AppImage, verifies its signature
 against the public key in `apps/desktop/src-tauri/tauri.conf.json` (`plugins.updater.pubkey`),
 waits for a session or a run to end, installs it (the .deb with `pkexec dpkg -i`, one password

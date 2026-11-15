@@ -10,6 +10,7 @@
  * Every row is an icon over a label, so the rail reads at a glance and a screen reader hears
  * the label and the count: “Today, 2 need you”.
  */
+import { RailDebugMark } from "./DebugMark";
 import { useGhost } from "@ghost/ui";
 import { AudioWaveform, Blocks, CircleArrowUp, Eye, FlaskConical, Plus, Settings2, Sun } from "lucide-react";
 import { type ReactNode, Suspense, lazy, useRef, useState } from "react";
@@ -80,13 +81,13 @@ export function Rail() {
   const working = today.working.length + (inSession ? 1 : 0);
   const inSettings = path.startsWith("/settings");
   const agents = railAgents({ agents: today.agents, working: today.working, needs: [...today.needs.decide, ...today.needs.answer], session: inSession ? (status?.conversation ?? "ghost") : null, phase });
-  const openAgent = path.startsWith("/agents/") ? decodeURIComponent(path.slice("/agents/".length)) : null;
+  const openAgent = path.startsWith("/agents/") ? decodeURIComponent(path.slice("/agents/".length).split("/")[0]) : null;
   const hire = () => {
     // The roster's own dialog, opened from its address (?open=new, before the hash).
     const q = new URLSearchParams(window.location.search);
     q.set("open", "new");
     window.history.replaceState(window.history.state, "", `${window.location.pathname}?${q}${window.location.hash}`);
-    navigate("/settings/agents");
+    navigate("/agents");
   };
   const showSwitch = connection !== "offline" && connection !== "connecting";
   // ADR 0066: a new version, said quietly; Settings › General has the button.
@@ -128,6 +129,7 @@ export function Rail() {
           <span className="rail__state">{state}</span>
         </a>
       </Tooltip>
+      <RailDebugMark status={status} />
 
       <nav className="rail__nav" aria-label="Main">
         <ul role="list">
@@ -172,7 +174,7 @@ export function Rail() {
           {updateLine && (
             <li>
               <Tooltip side="right" content={updateLine} asChild>
-                <a className="rail__item rail__item--small rail__update" href={hrefFor("/settings/general/updates")} aria-label={updateLine}>
+                <a className="rail__item rail__item--small rail__update" href={hrefFor("/settings/about/updates")} aria-label={updateLine}>
                   <span className="rail__icon">
                     <CircleArrowUp />
                   </span>

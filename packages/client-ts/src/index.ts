@@ -23,6 +23,15 @@ export type Status = Schemas["Status"];
 export type Build = Schemas["Build"];
 export type Phase = Schemas["Phase"];
 export type NotListening = Schemas["NotListening"];
+export type DebugAudioMark = Schemas["DebugAudioMark"];
+export type DebugAudioView = Schemas["DebugAudioView"];
+export type SwitchView = Schemas["SwitchView"];
+export type SwitchesView = Schemas["SwitchesView"];
+export type SwitchesResult = Schemas["SwitchesResult"];
+export type DiagnoseRequest = Schemas["DiagnoseRequest"];
+export type DiagnosePreview = Schemas["DiagnosePreview"];
+export type DiagnosePart = Schemas["DiagnosePart"];
+export type DiagnoseSaved = Schemas["DiagnoseSaved"];
 export type ListeningView = Schemas["ListeningView"];
 export type Turn = Schemas["Turn"];
 export type PendingProposal = Schemas["PendingProposal"];
@@ -838,6 +847,31 @@ export class GhostClient {
   /** Off sends nothing, keeps nothing waiting, and deletes the install's id. */
   setReportsChoice(send: boolean) {
     return unwrap(this.api.PUT("/reports/choice", { body: { send } }));
+  }
+  // ------------------------------------------------------------------ Settings › Developer (ADR 0072, ADR 0073)
+  /** The experimental switches: each one's real name, value now and where it comes from. */
+  developerSwitches() {
+    return unwrap(this.api.GET("/developer/switches"));
+  }
+  /** Write switches to settings.env; "" or null takes one out. Only the closed list. */
+  setDeveloperSwitches(values: Record<string, string | null>) {
+    return unwrap(this.api.PUT("/developer/switches", { body: { values } }));
+  }
+  /** Debug mode: on or off, and when it ends. */
+  debugAudio() {
+    return unwrap(this.api.GET("/debug-audio"));
+  }
+  /** On for an hour, or off now. Held in the daemon's memory only. */
+  setDebugAudio(on: boolean) {
+    return unwrap(this.api.PUT("/debug-audio", { body: { on } }));
+  }
+  /** What a diagnostic report would hold, part by part, and its size. Nothing is written. */
+  diagnosePreview(body: DiagnoseRequest) {
+    return unwrap(this.api.POST("/diagnose/preview", { body }));
+  }
+  /** Save a diagnostic report as a file. Nothing is uploaded. */
+  diagnose(body: DiagnoseRequest) {
+    return unwrap(this.api.POST("/diagnose", { body }));
   }
   // ------------------------------------------------------------------ removing Ghost (#147)
   /** What Ghost left on this computer, by kind, with sizes. The removal is the app's (`remove_ghost`). */

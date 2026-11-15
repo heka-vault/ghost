@@ -911,6 +911,28 @@ async fn no_tool_reaches_error_reports() {
 }
 
 #[tokio::test]
+async fn no_tool_reaches_debug_mode_or_the_report() {
+    // ADR 0072, ADR 0073: debug mode (Ghost logging what it hears) and the diagnostic report
+    // (a file of what Ghost knows) are the operator's, on Settings › Developer and About or at
+    // their terminal. No agent, run or outside client (served a part of these same tools, ADR
+    // 0048) turns debug mode on, reads its log, or starts or reads a report: a model told by
+    // an app's text to "turn on debugging" would have a way to keep what it hears.
+    let w = world().await;
+    for t in w.server.tools() {
+        let said = format!("{} {}", t.name, t.description.as_deref().unwrap_or("")).to_lowercase();
+        for word in [
+            "debug",
+            "diagnos",
+            "ghost_debug_audio",
+            "experimental",
+            "developer",
+        ] {
+            assert!(!said.contains(word), "{} mentions {word}", t.name);
+        }
+    }
+}
+
+#[tokio::test]
 async fn no_tool_turns_listening_on_or_off() {
     // ADR 0057: the microphone is the operator's switch. An agent never turns it back on,
     // and never off either: a model told by an app's text to mute Ghost would leave the

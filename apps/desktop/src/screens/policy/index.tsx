@@ -69,7 +69,7 @@ const lineless = (s: string) => sentence(s.replace(/^(request:\s*)?line \d+:\s*/
 const DEFAULT_PATH = "~/.config/ghost/policy.toml";
 const MODE_ICON: Record<Mode, typeof Hand> = { open: Megaphone, ask: Hand, "read-only": ShieldOff };
 
-export default function PermissionsScreen(_: RouteProps) {
+export default function PermissionsScreen({ params }: RouteProps) {
   const { client, appsVersion } = useGhost();
   const { online } = useLive();
   const toast = useToast();
@@ -353,7 +353,7 @@ export default function PermissionsScreen(_: RouteProps) {
         <Decided choices={choices} online={online} setting={setting} onRemove={(c) => void removeChoice(c)} />
       </Section>
 
-      <Disclosure summary="Advanced: the mode, every rule and the policy file" className="policy-advanced">
+      <Disclosure summary="Advanced: the mode, every rule and the policy file" className="policy-advanced" defaultOpen={params.section === "advanced"}>
       <Section id="perm-mode" title="When no rule says otherwise" description="What Ghost does with a change no rule below names. Reads always run unless blocked.">
         <RadioGroup<Mode>
           variant="card"

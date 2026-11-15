@@ -219,6 +219,7 @@ pub fn status_snapshot(deps: &Deps) -> Status {
         ending: st.ending(),
         waiting: st.waiting(),
         not_listening: st.not_listening(),
+        debug_audio: st.debug_audio(),
     }
 }
 
@@ -1665,6 +1666,7 @@ pub fn create_app(deps: SharedDeps) -> (axum::Router, utoipa::openapi::OpenApi) 
         .merge(crate::calls::router())
         .merge(crate::reach::router())
         .merge(crate::permission_choices::router())
+        .merge(crate::developer::router())
         .routes(routes!(get_status))
         .routes(routes!(wake))
         .routes(routes!(sleep))

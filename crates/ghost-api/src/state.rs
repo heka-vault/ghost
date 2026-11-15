@@ -98,6 +98,8 @@ struct Fields {
     ending: bool,
     /// The microphone is closed (ADR 0057).
     not_listening: Option<NotListening>,
+    /// Debug mode is on (ADR 0073).
+    debug_audio: Option<Box<crate::models::DebugAudioMark>>,
     /// Items on the waiting list still to be heard (ADR 0029).
     waiting: u64,
     turns: VecDeque<Turn>,
@@ -153,6 +155,7 @@ impl DaemonState {
                 session_typed: false,
                 ending: false,
                 not_listening: None,
+                debug_audio: None,
                 waiting: 0,
                 turns: VecDeque::with_capacity(TURNS_KEPT),
             }),
@@ -243,6 +246,23 @@ impl DaemonState {
 
     pub fn not_listening(&self) -> Option<NotListening> {
         self.lock().not_listening.clone()
+    }
+
+    pub fn debug_audio(&self) -> Option<Box<crate::models::DebugAudioMark>> {
+        self.lock().debug_audio.clone()
+    }
+
+    /// Debug mode turned on or off (ADR 0073); the desktop hears it with the status.
+    pub fn set_debug_audio(&self, mark: Option<crate::models::DebugAudioMark>) {
+        let mark = mark.map(Box::new);
+        {
+            let mut f = self.lock();
+            if f.debug_audio == mark {
+                return;
+            }
+            f.debug_audio = mark;
+        }
+        self.publish_status();
     }
 
     pub fn waiting(&self) -> u64 {
@@ -571,6 +591,7 @@ impl DaemonState {
             ending: f.ending,
             waiting: f.waiting,
             not_listening: f.not_listening.clone(),
+            debug_audio: f.debug_audio.clone(),
         }
     }
 

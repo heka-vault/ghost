@@ -89,7 +89,7 @@ An agent manages the watches it made, Ghost any agent's; yours are yours alone. 
 | `quiet_until` | change | quiet | Do not disturb until a time or for a while, as "nothing until two" does | no |
 | `quiet_off` | change | quiet | Ends do-not-disturb | no |
 
-Which routes are on, and their order, stay yours: Settings › Notifications.
+Which routes are on, and their order, stay yours: Settings › General › How Ghost reaches you, and Developer › Notification routes.
 
 ## Why Ghost asked before a change
 

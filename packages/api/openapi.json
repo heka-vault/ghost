@@ -1476,6 +1476,65 @@
         ],
         "type": "object"
       },
+      "DebugAudioMark": {
+        "description": "Debug mode is on (ADR 0073).",
+        "properties": {
+          "until": {
+            "description": "When it turns itself off (RFC 3339); null when Ghost was started with\n`GHOST_DEBUG_AUDIO=1`, on until that process ends.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "until"
+        ],
+        "type": "object"
+      },
+      "DebugAudioRequest": {
+        "properties": {
+          "on": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "on"
+        ],
+        "type": "object"
+      },
+      "DebugAudioView": {
+        "properties": {
+          "from_environment": {
+            "description": "Ghost was started with `GHOST_DEBUG_AUDIO=1`: on for the life of that process, and\nthe switch can't turn that off.",
+            "type": "boolean"
+          },
+          "log_bytes": {
+            "description": "Bytes of the debug log kept for a diagnostic report while the switch is on (0600,\ndeleted when it turns off).",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "on": {
+            "description": "Ghost is logging what it hears and its audio decisions now.",
+            "type": "boolean"
+          },
+          "until": {
+            "description": "When the switch turns itself off (RFC 3339); None when it is off, or on only because\nGhost was started with `GHOST_DEBUG_AUDIO=1`.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "on",
+          "until",
+          "from_environment",
+          "log_bytes"
+        ],
+        "type": "object"
+      },
       "DeviceInfo": {
         "properties": {
           "default_samplerate": {
@@ -1559,6 +1618,128 @@
           "output_device",
           "echo_cancel_active",
           "echo_cancel_source_present"
+        ],
+        "type": "object"
+      },
+      "DiagnosePart": {
+        "description": "One part of the report, for the summary the person sees before saving.",
+        "properties": {
+          "bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "key": {
+            "type": "string"
+          },
+          "personal": {
+            "description": "The person's own words or voice: added only when they tick its box.",
+            "type": "boolean"
+          },
+          "summary": {
+            "description": "What is in it, in a few words (\"120 log lines\", \"18 turns' timings\").",
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "title",
+          "summary",
+          "personal",
+          "bytes"
+        ],
+        "type": "object"
+      },
+      "DiagnosePreview": {
+        "properties": {
+          "bytes": {
+            "description": "The file's size as it would be saved.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "debug_log_available": {
+            "description": "Debug mode is keeping a log now (the debug-log box can add something).",
+            "type": "boolean"
+          },
+          "parts": {
+            "items": {
+              "$ref": "#/components/schemas/DiagnosePart"
+            },
+            "type": "array"
+          },
+          "path": {
+            "description": "Where it would go, home shown as `~`.",
+            "type": "string"
+          },
+          "wake_recordings": {
+            "description": "Kept wake recordings there are.",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "parts",
+          "bytes",
+          "path",
+          "debug_log_available",
+          "wake_recordings"
+        ],
+        "type": "object"
+      },
+      "DiagnoseRequest": {
+        "description": "What the person chose to add, and what the desktop's shell knows that the daemon doesn't.",
+        "properties": {
+          "debug_log": {
+            "description": "Add the debug log debug mode is keeping now (what Ghost heard, word for word).",
+            "type": "boolean"
+          },
+          "folder": {
+            "description": "The folder to save in (absolute); the Downloads folder when unset.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "shell": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "The shell's own facts, each a short line: whether Ghost can float and why not, the\nupdater's state, this window's version. Scrubbed like a log line.",
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "transcripts": {
+            "description": "Add the last turns of the conversation with Ghost: your words and Ghost's.",
+            "type": "boolean"
+          },
+          "wake_recordings": {
+            "description": "Add the kept wake recordings (your voice).",
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "DiagnoseSaved": {
+        "properties": {
+          "bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "path": {
+            "description": "The file written, home shown as `~`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "bytes"
         ],
         "type": "object"
       },
@@ -6963,6 +7144,17 @@
               "null"
             ]
           },
+          "debug_audio": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DebugAudioMark",
+                "description": "Set while debug mode is on (ADR 0073): Ghost is logging what it hears and its audio\ndecisions to its own log on this computer. The desktop shows it, unmistakably."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "ending": {
             "description": "Ghost has decided to hang up: its goodbye may still be playing.",
             "type": "boolean"
@@ -7050,7 +7242,8 @@
           "session_typed",
           "ending",
           "waiting",
-          "not_listening"
+          "not_listening",
+          "debug_audio"
         ],
         "type": "object"
       },
@@ -7066,6 +7259,143 @@
         },
         "required": [
           "status"
+        ],
+        "type": "object"
+      },
+      "SwitchView": {
+        "properties": {
+          "choices": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "default": {
+            "description": "Ghost's own default (\"\" for one it works out itself).",
+            "type": "string"
+          },
+          "file_value": {
+            "description": "What `settings.env` holds for it, if anything.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "description": "What a switch's value is.",
+            "enum": [
+              "flag",
+              "choice",
+              "number"
+            ],
+            "type": "string"
+          },
+          "max": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "name": {
+            "description": "The variable's real name.",
+            "type": "string"
+          },
+          "sentence": {
+            "type": "string"
+          },
+          "source": {
+            "description": "Where the value Ghost reads comes from.",
+            "enum": [
+              "file",
+              "environment",
+              "default"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "value": {
+            "description": "The value Ghost reads now (\"\" when nothing sets it).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "title",
+          "sentence",
+          "kind",
+          "value",
+          "file_value",
+          "source",
+          "default",
+          "choices",
+          "max"
+        ],
+        "type": "object"
+      },
+      "SwitchesResult": {
+        "properties": {
+          "applied": {
+            "description": "The names a running Ghost took at once.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "restart_required": {
+            "description": "Something saved waits for Ghost's restart.",
+            "type": "boolean"
+          },
+          "switches": {
+            "$ref": "#/components/schemas/SwitchesView"
+          }
+        },
+        "required": [
+          "switches",
+          "applied",
+          "restart_required"
+        ],
+        "type": "object"
+      },
+      "SwitchesUpdate": {
+        "properties": {
+          "values": {
+            "additionalProperties": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "description": "Name to value; \"\" or null takes it out of `settings.env` (Ghost's default again).",
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "values"
+        ],
+        "type": "object"
+      },
+      "SwitchesView": {
+        "properties": {
+          "settings_path": {
+            "description": "`settings.env`, home shown as `~`.",
+            "type": "string"
+          },
+          "switches": {
+            "items": {
+              "$ref": "#/components/schemas/SwitchView"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "switches",
+          "settings_path"
         ],
         "type": "object"
       },
@@ -7456,7 +7786,8 @@
           "passwords",
           "outside-tools",
           "apps",
-          "watching"
+          "watching",
+          "developer"
         ],
         "type": "string"
       },
@@ -9076,6 +9407,126 @@
         ]
       }
     },
+    "/debug-audio": {
+      "get": {
+        "operationId": "debug_audio_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DebugAudioView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Debug mode",
+        "tags": [
+          "developer"
+        ]
+      },
+      "put": {
+        "operationId": "debug_audio_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DebugAudioRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DebugAudioView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Turn debug mode on or off",
+        "tags": [
+          "developer"
+        ]
+      }
+    },
+    "/developer/switches": {
+      "get": {
+        "operationId": "developer_switches_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwitchesView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "The experimental switches",
+        "tags": [
+          "developer"
+        ]
+      },
+      "put": {
+        "operationId": "developer_switches_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwitchesUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwitchesResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save experimental switches",
+        "tags": [
+          "developer"
+        ]
+      }
+    },
     "/devices": {
       "get": {
         "operationId": "devices_devices_get",
@@ -9094,6 +9545,88 @@
         "summary": "Devices",
         "tags": [
           "setup"
+        ]
+      }
+    },
+    "/diagnose": {
+      "post": {
+        "operationId": "diagnose_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiagnoseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiagnoseSaved"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save a diagnostic report",
+        "tags": [
+          "developer"
+        ]
+      }
+    },
+    "/diagnose/preview": {
+      "post": {
+        "operationId": "diagnose_preview_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiagnoseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiagnosePreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview a diagnostic report",
+        "tags": [
+          "developer"
         ]
       }
     },

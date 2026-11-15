@@ -54,7 +54,7 @@ define ghostd
 cargo build -q -p ghostd || exit 1; $(load_env) $(GHOSTD)
 endef
 
-.PHONY: help prereqs setup sync env passwords passwords-import echo-cancel echo-cancel-off demo-audio \
+.PHONY: help licences prereqs setup sync env passwords passwords-import echo-cancel echo-cancel-off demo-audio \
         dev daemon desktop desktop-web reload start stop restart \
         wake say status check latency restore-volumes \
         lint fmt test deny typecheck contract web ci api-schema version release screenshots marks \
@@ -220,6 +220,9 @@ contract: ## openapi.json current from the Rust types, and the TS client current
 web: ## the TypeScript tests (vitest) and the desktop's production build
 	pnpm test
 	pnpm build
+
+licences: ## write apps/desktop/public/licences.json from the lock files (Settings › About)
+	$(UV) run --project tools python tools/licences.py
 
 api-schema: ## regenerate packages/api/openapi.json from the Rust types (crates/ghost-api), then the TS client
 	cargo run -q -p ghost-api --bin ghost-api-export > packages/api/openapi.json

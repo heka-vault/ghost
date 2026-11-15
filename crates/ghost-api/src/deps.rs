@@ -454,6 +454,10 @@ pub struct Deps {
     pub in_appimage: bool,
     /// The AI tools already on this computer (ADR 0068); None where there is no home.
     pub other_tools: Option<Arc<dyn OtherToolsPort>>,
+    /// Debug mode (ADR 0073): the runtime switch, in the daemon's memory only.
+    pub debug_audio: Option<Arc<dyn crate::developer::DebugAudioPort>>,
+    /// The diagnostic report (ADR 0072): one file the person saves.
+    pub diagnose: Option<Arc<dyn crate::developer::DiagnosePort>>,
 }
 
 impl Deps {
@@ -510,6 +514,8 @@ impl Deps {
             questions: None,
             in_appimage: false,
             other_tools: None,
+            debug_audio: None,
+            diagnose: None,
         }
     }
 

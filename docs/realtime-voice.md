@@ -43,7 +43,7 @@ A few more things to know:
 
 ## Turning it on
 
-1. Get an API key from the OpenAI platform and save it in **Settings › Passwords** as
+1. Get an API key from the OpenAI platform and save it right there on **Settings › Sound** (the voice mode's Password row) as
    `OPENAI_API_KEY` (or under another name and set that name in Voice mode).
 2. In **Settings › Sound › Voice mode**, choose **Realtime** and read what changes.
 3. Press **Test**: Ghost connects, has it say one line and hands it one request, and shows

@@ -10,8 +10,9 @@ type Place = NonNullable<WaitingItemView["place"]>;
 export const PLACES: Record<Place, { path: string; label: string }> = {
   model: { path: "/settings/model", label: "Open Settings › Model" },
   sound: { path: "/settings/sound", label: "Open Settings › Sound" },
-  passwords: { path: "/settings/passwords", label: "Open Settings › Passwords" },
-  "outside-tools": { path: "/settings/tools", label: "Open Settings › Outside tools" },
+  passwords: { path: "/settings/developer/passwords", label: "Open Passwords" },
+  "outside-tools": { path: "/settings/developer/tools", label: "Open Outside tools" },
+  developer: { path: "/settings/developer/debug", label: "Open Settings › Developer" },
   apps: { path: "/apps", label: "Open Apps" },
   watching: { path: "/watching", label: "Open Watching" },
 };

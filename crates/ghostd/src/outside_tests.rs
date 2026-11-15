@@ -834,6 +834,10 @@ async fn nothing_an_outside_client_must_not_reach_is_offered() {
     // it takes. (`recall` and `transcript_read` are offered, over the turns of the runs the
     // client itself started, ADR 0052: tested in `a_client_recalls_only_its_own_runs`.)
     let forbidden = [
+        // ADR 0072, ADR 0073: debug mode and the diagnostic report are the operator's.
+        "debug",
+        "diagnose",
+        "diagnostic",
         "password",
         "passwords",
         "secret",

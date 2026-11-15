@@ -10,7 +10,34 @@ import type { DevicesView, ModelConnectionView, SettingsView } from "@ghost/clie
  * section's page. `apps` and `skills` were sections of the one long page; they are pages of
  * their own now, and their old links land there.
  */
-export type SectionId = "setup" | "about" | "updates" | "reports" | "remove" | "secrets" | "model" | "apps" | "skills" | "voice" | "audio" | "models" | "phone" | "privacy" | "sounds" | "wave" | "voice-mode";
+export type SectionId =
+  | "setup"
+  | "about"
+  | "updates"
+  | "reports"
+  | "remove"
+  | "secrets"
+  | "model"
+  | "apps"
+  | "skills"
+  | "voice"
+  | "audio"
+  | "models"
+  | "phone"
+  | "privacy"
+  | "sounds"
+  | "wave"
+  | "voice-mode"
+  | "floating"
+  | "login"
+  | "reach"
+  | "connections"
+  | "diagnostic"
+  | "licences"
+  | "advanced"
+  | "experimental"
+  | "debug"
+  | "tests";
 
 export const SECTION_TITLE: Record<SectionId, string> = {
   setup: "Finish setup",
@@ -30,19 +57,42 @@ export const SECTION_TITLE: Record<SectionId, string> = {
   sounds: "Sounds",
   wave: "While Ghost speaks",
   "voice-mode": "Voice mode",
+  floating: "Floating",
+  login: "Start at login",
+  reach: "How Ghost reaches you",
+  connections: "Connections",
+  diagnostic: "Diagnostic report",
+  licences: "Licences",
+  advanced: "Advanced pages",
+  experimental: "Experimental switches",
+  debug: "Debug mode",
+  tests: "Tests",
 };
 
-/** The pages this screen draws (SETTINGS_SCREEN_PAGES in app/routes.tsx). */
-export type PageId = "general" | "model" | "passwords" | "sound" | "phone" | "tools";
+/**
+ * The pages this screen draws (SETTINGS_SCREEN_PAGES and DEVELOPER_SCREEN_PAGES in
+ * app/routes.tsx): `passwords` and `tools` are Developer's sub-pages, `phone` General's.
+ */
+export type PageId = "general" | "model" | "sound" | "about" | "developer" | "passwords" | "phone" | "tools" | "live";
 
 /** The settings page each section is on (#/settings/<page>). */
 export const SECTION_PAGE: Record<SectionId, string> = {
   setup: "general",
-  about: "general",
-  updates: "general",
+  floating: "general",
+  login: "general",
+  reach: "general",
+  connections: "general",
   reports: "general",
   remove: "general",
   privacy: "general",
+  about: "about",
+  updates: "about",
+  diagnostic: "about",
+  licences: "about",
+  advanced: "developer",
+  experimental: "developer",
+  debug: "developer",
+  tests: "developer",
   model: "model",
   secrets: "passwords",
   apps: "apps",

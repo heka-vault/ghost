@@ -1,8 +1,10 @@
 /**
  * Owner: conversations. Agents (ADR 0014, ADR 0035): conversations with a persona and a job.
- *   #/settings/agents        every agent, with live state, Switch and New agent; Ghost's
+ *   #/agents                 every agent, with live state, Switch and New agent; Ghost's
  *                            rules (Add rule, Open folder) and what Ghost made in out/
- *   #/settings/agents/:slug  one agent's settings: voice, persona and look, memory and notes,
+ *                            (Settings › Agents until 2026-11-14, ADR 0072; that address
+ *                            redirects here)
+ *   #/agents/:slug/settings  one agent's own page: voice, persona and look, memory and notes,
  *                            history
  *   #/agents/:slug           the conversation with one agent, which the rail opens: its brief,
  *                            the transcript and the composer
@@ -24,13 +26,13 @@ const GHOST_TABS = ["persona", "memory", "history"];
 export default function ConversationsScreen({ params }: RouteProps) {
   // Ghost’s conversation is the conversation screen (#/session): one place to talk to Ghost, not two. Its persona,
   // memory and history still open here, from home's ⋯ menu.
-  const manage = window.location.hash.startsWith("#/settings/agents");
+  const manage = !params.slug || /^#\/agents\/[^/?]+\/settings/.test(window.location.hash);
   const ghostHome = !manage && params.slug === "ghost" && !GHOST_TABS.includes(readParam("tab", "ghost") ?? "");
   useEffect(() => {
     if (ghostHome) navigate("/session", { replace: true });
   }, [ghostHome]);
   if (ghostHome) return null;
-  // Settings › Agents (the roster and each agent's settings) or the conversation with one
-  // (#/agents/:slug, which the rail opens): the owner's split, 2026-11-12.
+  // The roster and each agent's own page, or the conversation with one (#/agents/:slug,
+  // which the rail opens): the owner's split, 2026-11-12; out of Settings, 2026-11-14.
   return params.slug ? <AgentDetail key={`${manage}-${params.slug}`} slug={params.slug} manage={manage} /> : <AgentsIndex />;
 }

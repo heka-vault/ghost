@@ -1,5 +1,7 @@
 /**
- * Owner: settings. Settings › Passwords (#/settings/passwords): Ghost's vault (ADR 0036).
+ * Owner: settings. Passwords (#/settings/developer/passwords, under Developer since ADR 0072;
+ * every page that uses a password adds and replaces it in place, `PasswordInPlace`): Ghost's
+ * vault (ADR 0036).
  *
  * Every password Ghost knows of, by name: what uses it, when Ghost last filled it in, and
  * Set or Not set (Unknown while the keyring is locked: `set` is null then). Add, replace and delete each save at once on their own row; a value goes
@@ -16,6 +18,8 @@ import { KeyRound, MoreHorizontal, Plus, ShieldCheck, Trash2 } from "lucide-reac
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
 import { Badge, Button, Card, IconButton, Input, Menu, Notice, Skeleton, errorText, relativeTime, useConfirm, useLive, useToast } from "../../ui";
+import { hrefFor } from "../../app/router";
+import { settingsPath } from "../../app/routes";
 import { passwordFromEnvironment } from "./environment";
 import { SECRET_INFO, isAppSecret, secretLabel, tildePath } from "./model";
 import { secretActionId } from "./parts";
@@ -468,5 +472,70 @@ function NewPassword({ taken, onClose, onSaved }: { taken: string[]; onClose: ()
       </div>
       {error && <p className="set-error">{error.text}</p>}
     </form>
+  );
+}
+
+/* ------------------------------------------------------------------------------ in place */
+
+/**
+ * A password where it is used (ADR 0072): the vault's own row for `name`, so it is added,
+ * replaced or deleted right there, with "Stored in Ghost's vault · Manage" leading to the list
+ * of every name (Settings › Developer › Passwords). The model page has its own; Sound's
+ * realtime voice and an app's page use this one.
+ */
+export function PasswordInPlace({ name, usedBy, onChanged }: { name: string; usedBy: string; onChanged?: (restart: boolean) => void }) {
+  const { client } = useGhost();
+  const { online } = useLive();
+  const toast = useToast();
+  const { confirm, dialog } = useConfirm();
+  const [vault, setVault] = useState<PasswordsView | null>(null);
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    client.passwords().then(setVault, () => {});
+  }, [client]);
+  const row: PasswordInfo = vault?.passwords.find((p) => p.name === name) ?? {
+    name,
+    set: false,
+    ghost: false,
+    used_by: [usedBy],
+    from_environment: false,
+    added: null,
+    updated: null,
+    last_used: null,
+  };
+  const closed = !!vault && vault.vault.state !== "open";
+  const remove = async (p: PasswordInfo) => {
+    const title = passwordTitle(p);
+    if (!(await confirm({ title: `Delete the ${title} password?`, description: `${usedBy} can’t use it any more until you add it again.`, confirmLabel: `Delete ${title}`, tone: "danger" }))) return;
+    try {
+      const r = await client.deletePassword(p.name);
+      setVault(r.passwords);
+      onChanged?.(r.restart_required);
+      toast({ title: "Deleted", description: `${title} is gone from the vault.` });
+    } catch (e) {
+      toast({ title: "Couldn’t delete it", description: errorText(e), tone: "danger" });
+    }
+  };
+  return (
+    <div className="set-inplace">
+      {dialog}
+      <PasswordRow
+        p={row}
+        open={open}
+        onOpen={() => setOpen(true)}
+        onClose={() => setOpen(false)}
+        onSaved={(v, restart) => {
+          setVault(v);
+          onChanged?.(restart);
+        }}
+        onDelete={(p) => void remove(p)}
+        waiting={false}
+        disabled={!online || closed}
+      />
+      <p className="set-inplace__where">
+        {closed ? "Ghost’s vault is locked: unlock it on " : "Stored in Ghost’s vault, never in a file · "}
+        <a href={hrefFor(settingsPath("passwords"))}>{closed ? "Passwords" : "Manage"}</a>
+      </p>
+    </div>
   );
 }

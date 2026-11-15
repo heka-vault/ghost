@@ -418,6 +418,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/debug-audio": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Debug mode */
+        get: operations["debug_audio_get"];
+        /** Turn debug mode on or off */
+        put: operations["debug_audio_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/developer/switches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The experimental switches */
+        get: operations["developer_switches_get"];
+        /** Save experimental switches */
+        put: operations["developer_switches_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/devices": {
         parameters: {
             query?: never;
@@ -429,6 +465,40 @@ export interface paths {
         get: operations["devices_devices_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/diagnose": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Save a diagnostic report */
+        post: operations["diagnose_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/diagnose/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview a diagnostic report */
+        post: operations["diagnose_preview_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2731,6 +2801,37 @@ export interface components {
             /** @description The voice heard: its own, else Ghost's. */
             voice: string;
         };
+        /** @description Debug mode is on (ADR 0073). */
+        DebugAudioMark: {
+            /**
+             * @description When it turns itself off (RFC 3339); null when Ghost was started with
+             *     `GHOST_DEBUG_AUDIO=1`, on until that process ends.
+             */
+            until: string | null;
+        };
+        DebugAudioRequest: {
+            on: boolean;
+        };
+        DebugAudioView: {
+            /**
+             * @description Ghost was started with `GHOST_DEBUG_AUDIO=1`: on for the life of that process, and
+             *     the switch can't turn that off.
+             */
+            from_environment: boolean;
+            /**
+             * Format: int64
+             * @description Bytes of the debug log kept for a diagnostic report while the switch is on (0600,
+             *     deleted when it turns off).
+             */
+            log_bytes: number;
+            /** @description Ghost is logging what it hears and its audio decisions now. */
+            on: boolean;
+            /**
+             * @description When the switch turns itself off (RFC 3339); None when it is off, or on only because
+             *     Ghost was started with `GHOST_DEBUG_AUDIO=1`.
+             */
+            until: string | null;
+        };
         DeviceInfo: {
             /** Format: double */
             default_samplerate: number;
@@ -2751,6 +2852,55 @@ export interface components {
             input_device: string | null;
             microphone?: components["schemas"]["MicrophoneView"] | null;
             output_device: string | null;
+        };
+        /** @description One part of the report, for the summary the person sees before saving. */
+        DiagnosePart: {
+            /** Format: int64 */
+            bytes: number;
+            key: string;
+            /** @description The person's own words or voice: added only when they tick its box. */
+            personal: boolean;
+            /** @description What is in it, in a few words ("120 log lines", "18 turns' timings"). */
+            summary: string;
+            title: string;
+        };
+        DiagnosePreview: {
+            /**
+             * Format: int64
+             * @description The file's size as it would be saved.
+             */
+            bytes: number;
+            /** @description Debug mode is keeping a log now (the debug-log box can add something). */
+            debug_log_available: boolean;
+            parts: components["schemas"]["DiagnosePart"][];
+            /** @description Where it would go, home shown as `~`. */
+            path: string;
+            /** @description Kept wake recordings there are. */
+            wake_recordings: number;
+        };
+        /** @description What the person chose to add, and what the desktop's shell knows that the daemon doesn't. */
+        DiagnoseRequest: {
+            /** @description Add the debug log debug mode is keeping now (what Ghost heard, word for word). */
+            debug_log?: boolean;
+            /** @description The folder to save in (absolute); the Downloads folder when unset. */
+            folder?: string | null;
+            /**
+             * @description The shell's own facts, each a short line: whether Ghost can float and why not, the
+             *     updater's state, this window's version. Scrubbed like a log line.
+             */
+            shell?: {
+                [key: string]: string;
+            };
+            /** @description Add the last turns of the conversation with Ghost: your words and Ghost's. */
+            transcripts?: boolean;
+            /** @description Add the kept wake recordings (your voice). */
+            wake_recordings?: boolean;
+        };
+        DiagnoseSaved: {
+            /** Format: int64 */
+            bytes: number;
+            /** @description The file written, home shown as `~`. */
+            path: string;
         };
         /**
          * @description `PUT /first-meeting`: the first run opens (or closes) its moment (ADR 0059 as amended
@@ -4465,6 +4615,7 @@ export interface components {
             build: components["schemas"]["Build"];
             /** @description Slug of the agent the session is with (ADR 0014). */
             conversation?: string | null;
+            debug_audio: components["schemas"]["DebugAudioMark"] | null;
             /** @description Ghost has decided to hang up: its goodbye may still be playing. */
             ending: boolean;
             models_ready: boolean;
@@ -4497,6 +4648,49 @@ export interface components {
              * @enum {string}
              */
             type: "status";
+        };
+        SwitchesResult: {
+            /** @description The names a running Ghost took at once. */
+            applied: string[];
+            /** @description Something saved waits for Ghost's restart. */
+            restart_required: boolean;
+            switches: components["schemas"]["SwitchesView"];
+        };
+        SwitchesUpdate: {
+            /** @description Name to value; "" or null takes it out of `settings.env` (Ghost's default again). */
+            values: {
+                [key: string]: string | null;
+            };
+        };
+        SwitchesView: {
+            /** @description `settings.env`, home shown as `~`. */
+            settings_path: string;
+            switches: components["schemas"]["SwitchView"][];
+        };
+        SwitchView: {
+            choices: string[];
+            /** @description Ghost's own default ("" for one it works out itself). */
+            default: string;
+            /** @description What `settings.env` holds for it, if anything. */
+            file_value: string | null;
+            /**
+             * @description What a switch's value is.
+             * @enum {string}
+             */
+            kind: "flag" | "choice" | "number";
+            /** Format: double */
+            max: number | null;
+            /** @description The variable's real name. */
+            name: string;
+            sentence: string;
+            /**
+             * @description Where the value Ghost reads comes from.
+             * @enum {string}
+             */
+            source: "file" | "environment" | "default";
+            title: string;
+            /** @description The value Ghost reads now ("" when nothing sets it). */
+            value: string;
         };
         /**
          * @description How a take ends.
@@ -4634,7 +4828,7 @@ export interface components {
          *     route of its own, and nothing an app or a model sends can name another.
          * @enum {string}
          */
-        WaitingPlace: "model" | "sound" | "passwords" | "outside-tools" | "apps" | "watching";
+        WaitingPlace: "model" | "sound" | "passwords" | "outside-tools" | "apps" | "watching" | "developer";
         WaitingView: {
             /**
              * Format: int64
@@ -4814,8 +5008,15 @@ export type SchemaConversationDetail = components['schemas']['ConversationDetail
 export type SchemaConversationEvent = components['schemas']['ConversationEvent'];
 export type SchemaConversationUpdate = components['schemas']['ConversationUpdate'];
 export type SchemaConversationView = components['schemas']['ConversationView'];
+export type SchemaDebugAudioMark = components['schemas']['DebugAudioMark'];
+export type SchemaDebugAudioRequest = components['schemas']['DebugAudioRequest'];
+export type SchemaDebugAudioView = components['schemas']['DebugAudioView'];
 export type SchemaDeviceInfo = components['schemas']['DeviceInfo'];
 export type SchemaDevicesView = components['schemas']['DevicesView'];
+export type SchemaDiagnosePart = components['schemas']['DiagnosePart'];
+export type SchemaDiagnosePreview = components['schemas']['DiagnosePreview'];
+export type SchemaDiagnoseRequest = components['schemas']['DiagnoseRequest'];
+export type SchemaDiagnoseSaved = components['schemas']['DiagnoseSaved'];
 export type SchemaFirstMeetingRequest = components['schemas']['FirstMeetingRequest'];
 export type SchemaFirstMeetingView = components['schemas']['FirstMeetingView'];
 export type SchemaFoundAppView = components['schemas']['FoundAppView'];
@@ -4968,6 +5169,10 @@ export type SchemaSpeechModelsFetchState = components['schemas']['SpeechModelsFe
 export type SchemaSpeechModelsView = components['schemas']['SpeechModelsView'];
 export type SchemaStatus = components['schemas']['Status'];
 export type SchemaStatusEvent = components['schemas']['StatusEvent'];
+export type SchemaSwitchesResult = components['schemas']['SwitchesResult'];
+export type SchemaSwitchesUpdate = components['schemas']['SwitchesUpdate'];
+export type SchemaSwitchesView = components['schemas']['SwitchesView'];
+export type SchemaSwitchView = components['schemas']['SwitchView'];
 export type SchemaTakeEnding = components['schemas']['TakeEnding'];
 export type SchemaTurn = components['schemas']['Turn'];
 export type SchemaTurnEvent = components['schemas']['TurnEvent'];
@@ -5842,6 +6047,112 @@ export interface operations {
             };
         };
     };
+    debug_audio_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DebugAudioView"];
+                };
+            };
+        };
+    };
+    debug_audio_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DebugAudioRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DebugAudioView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    developer_switches_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SwitchesView"];
+                };
+            };
+        };
+    };
+    developer_switches_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SwitchesUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SwitchesResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     devices_devices_get: {
         parameters: {
             query?: never;
@@ -5858,6 +6169,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DevicesView"];
+                };
+            };
+        };
+    };
+    diagnose_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DiagnoseRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DiagnoseSaved"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    diagnose_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DiagnoseRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DiagnosePreview"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

@@ -1,7 +1,7 @@
 /**
  * Owner: settings. What Ghost and this window are (docs/releasing.md): the daemon's version
- * and build, the desktop app's own version, and a quiet notice when the two differ. General's
- * About card holds the rows; the notice sits above it.
+ * and build, the desktop app's own version, and a quiet notice when the two differ. Settings ›
+ * About (AboutPage.tsx) holds the rows; the notice sits above it.
  */
 import type { Status } from "@ghost/client-ts";
 
@@ -19,12 +19,17 @@ function buildDescription(build: Status["build"] | undefined): string {
     : "Running from a checkout (make dev).";
 }
 
-/** The About card's version rows: Ghost's version, its build and this window's version. */
-export function VersionRows({ status }: { status: Status | null }) {
+/**
+ * The About card's version rows: Ghost's version, its build and this window's version.
+ * `only="rest"` leaves the version's own row to the page (About's counts clicks).
+ */
+export function VersionRows({ status, only }: { status: Status | null; only?: "rest" }) {
   const build = status ? buildText(status.build) : null;
   return (
     <>
-      <ListRow title="Version" description="The Ghost running on this computer." meta={<span className="set-value is-mono">{status?.version ?? "–"}</span>} />
+      {only !== "rest" && (
+        <ListRow title="Version" description="The Ghost running on this computer." meta={<span className="set-value is-mono">{status?.version ?? "–"}</span>} />
+      )}
       {status && (
         <ListRow title="Build" description={buildDescription(status.build)} meta={<span className="set-value is-mono">{build ?? "–"}</span>} />
       )}

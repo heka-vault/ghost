@@ -1,16 +1,23 @@
 /**
- * Owner: settings. Six of the settings pages (#/settings/<page>), one screen so that moving
- * between them keeps one draft and one save bar:
- *   general    Finish setup while it is unfinished, Ghost's version and build and this
- *              window's (About.tsx), the settings file
+ * Owner: settings. The settings pages this screen draws (#/settings/<page>), one screen so
+ * that moving between them keeps one draft and one save bar. Five pages for everyone since
+ * 2026-11-14 (ADR 0072), and Developer once About's version was clicked seven times:
+ *   general    Finish setup while it is unfinished, Set up Ghost, floating, start at login,
+ *              how Ghost reaches you (General.tsx), connections (your phone, Apps), error
+ *              reports, Remove Ghost from this computer
  *   model      where Ghost sends a session to think
- *   passwords  Ghost's vault (ADR 0036): every password, each saved on its own row (Passwords.tsx)
  *   sound      Ghost's voice, wake and your yes; microphone and speakers; voice models
- *   phone      the one phone Ghost pairs with
- *   tools      the outside tools connected to Ghost (ADR 0048, OutsideTools.tsx)
- * Apps, Skills, Permissions, Notifications and the Audit log are their owners' screens; the
- * shell's settings nav (app/SettingsFrame.tsx) lists them all and marks a page here with
- * unsaved changes, a field to fix or a restart owed.
+ *   about      the version (seven clicks for Developer), updates, the site and Privacy,
+ *              the diagnostic report, licences (AboutPage.tsx)
+ *   developer  debug mode, tests, experimental switches, the advanced pages (Developer.tsx)
+ * and under them, each at its own address and in no nav:
+ *   phone      (General's) the one phone Ghost pairs with; /settings/phone/pair opens Pair
+ *   passwords  (Developer's, /settings/developer/passwords) Ghost's vault (ADR 0036)
+ *   tools      (Developer's, /settings/developer/tools) the outside tools (ADR 0048)
+ *   live       (Developer's, /settings/developer/live) the slot for live views, coming next
+ * Permissions, Skills, the Audit log and the notification routes are their owners' screens;
+ * the shell's settings nav (app/SettingsFrame.tsx) marks a page here with unsaved changes, a
+ * field to fix or a restart owed, a sub-page's on its parent.
  *
  * Edits collect into one draft across the pages; a save bar in the Page dock appears once
  * something changed (Klaviyo), and says afterwards what applied now and what waits for a
@@ -53,12 +60,14 @@ import { hrefFor, navigate } from "../../app/router";
 import { ListeningButton } from "../../app/ListeningSwitch";
 import { FloatingRoomSettings } from "../../app/FloatingSettings";
 import { listeningSentence, notListening } from "../../app/listening";
-import { VersionNotice, VersionRows } from "./About";
+import { AboutPage } from "./AboutPage";
+import { DeveloperPage } from "./Developer";
+import { DeveloperLivePage } from "./DeveloperLive";
 import { ErrorReportsSection } from "./ErrorReports";
+import { ConnectionsSection, ReachSection, StartAtLogin } from "./General";
 import { RemoveGhostSection } from "./RemoveGhost";
-import { UpdatesSection } from "./Updates";
 import { SpeechModelsRow } from "../onboarding/speech";
-import { type RouteProps, SETTINGS_PAGES, SETTINGS_SCREEN_PAGES } from "../../app/routes";
+import { DEVELOPER_PAGE, DEVELOPER_SCREEN_PAGES, type RouteProps, SETTINGS_PAGES, SETTINGS_SCREEN_PAGES, SETTINGS_SUBPAGES, settingsPath } from "../../app/routes";
 import { type SettingsMark, type SettingsMarks, setSettingsMarks } from "../../app/settingsMarks";
 import { useDesign } from "../../design/context";
 import {
@@ -177,7 +186,9 @@ function stickyBottom(): number {
 const LAND_GAP = 24;
 
 export default function SettingsScreen({ params: route }: RouteProps) {
-  const page = route.page as PageId;
+  // A sub-page of Developer is drawn here under its own id (passwords, tools, live).
+  const sub = route.page === "developer" && route.section && DEVELOPER_SCREEN_PAGES.includes(route.section) ? route.section : null;
+  const page = (sub ?? route.page) as PageId;
   const { client, status, conversationsVersion } = useGhost();
   const { online, connection } = useLive();
   const design = useDesign();
@@ -390,7 +401,7 @@ export default function SettingsScreen({ params: route }: RouteProps) {
       const target = SECTION_PAGE[id];
       if (target !== page) {
         landNext.current = { id, focus: opts.focus !== false, then: opts.then };
-        navigate(`/settings/${target}`);
+        navigate(settingsPath(target));
         return;
       }
       scrollToSection(id, opts);
@@ -435,13 +446,13 @@ export default function SettingsScreen({ params: route }: RouteProps) {
   // one of those ends it. An old link to the Apps or Skills section lands on that page.
   // `?settings=pairing` opens on Phone. Each happens once: the query stays, the operator moves on.
   // ?section=voice, or /settings/sound/audio (a waiting note's place)
-  const target = params.get("section") ?? route.section ?? null;
+  const target = params.get("section") ?? (sub ? null : route.section) ?? null;
   const sentOnce = useRef(false);
   useEffect(() => {
     if (sentOnce.current) return;
     sentOnce.current = true;
     const to = forced === "pairing" ? "phone" : isSectionId(target) ? SECTION_PAGE[target] : null;
-    if (to && to !== page) navigate(`/settings/${to}`, { replace: true });
+    if (to && to !== page) navigate(settingsPath(to), { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const landed = useRef(false);
@@ -635,7 +646,7 @@ export default function SettingsScreen({ params: route }: RouteProps) {
       const a = (e.target as Element | null)?.closest?.("a[href^='#/']");
       const to = a?.getAttribute("href")?.slice(1);
       // The other pages this screen draws keep the draft, a typed secret included.
-      const stays = SETTINGS_SCREEN_PAGES.some((p) => to === `/settings/${p}`) || to === "/settings";
+      const stays = [...SETTINGS_SCREEN_PAGES, ...DEVELOPER_SCREEN_PAGES].some((p) => to === settingsPath(p)) || to === "/settings";
       if (!a || !to || stays || layoutRef.current?.contains(a)) return;
       e.preventDefault();
       e.stopPropagation();
@@ -759,8 +770,20 @@ export default function SettingsScreen({ params: route }: RouteProps) {
     if (ids.includes("audio") && micDiffers(devices, s?.values.GHOST_INPUT_DEVICE)) return "restart";
     return undefined;
   };
-  const marks: SettingsMarks = Object.fromEntries(SETTINGS_SCREEN_PAGES.map((pg) => [pg, pageMark(pg)]));
-  const keptMarks: SettingsMarks = Object.fromEntries(SETTINGS_SCREEN_PAGES.map((pg) => [pg, pageMark(pg, true)]));
+  // A sub-page's mark is its parent's in the nav: Phone's on General, Passwords' and Outside
+  // tools' on Developer; the most pressing one wins.
+  const navMarks = (onlyKept: boolean): SettingsMarks => {
+    const out: Record<string, SettingsMark | undefined> = {};
+    const rank = (m: SettingsMark | undefined) => (m === "error" ? 3 : m === "dirty" ? 2 : m === "restart" ? 1 : 0);
+    for (const pg of [...SETTINGS_SCREEN_PAGES, ...DEVELOPER_SCREEN_PAGES]) {
+      const nav = pg === "phone" ? "general" : DEVELOPER_SCREEN_PAGES.includes(pg) ? "developer" : pg;
+      const m = pageMark(pg, onlyKept);
+      if (rank(m) > rank(out[nav])) out[nav] = m;
+    }
+    return out;
+  };
+  const marks: SettingsMarks = navMarks(false);
+  const keptMarks: SettingsMarks = navMarks(true);
   const keptRef = useRef(keptMarks);
   keptRef.current = keptMarks;
   useEffect(() => setSettingsMarks(marks));
@@ -786,7 +809,7 @@ export default function SettingsScreen({ params: route }: RouteProps) {
         },
       ]
     : [];
-  const pageInfo = SETTINGS_PAGES.find((p) => p.id === page);
+  const pageInfo = [...SETTINGS_PAGES, DEVELOPER_PAGE, ...SETTINGS_SUBPAGES].find((p) => p.id === page);
 
   // The microphone saved before this visit but not yet opened by Ghost owes a restart too; the
   // pill carries the command even when nothing was saved on this page.
@@ -867,7 +890,13 @@ export default function SettingsScreen({ params: route }: RouteProps) {
 
   const description: ReactNode =
     page === "general" ? (
-      "What Ghost is running, and where it keeps its settings."
+      "How Ghost starts, where it appears, how it reaches you, and what it connects to."
+    ) : page === "about" ? (
+      "What Ghost is, its updates, and a report to hand to whoever is helping you."
+    ) : page === "developer" ? (
+      "For testing a build: debug mode, checks, experimental switches and the advanced pages."
+    ) : page === "live" ? (
+      "Live views for testing Ghost, coming next."
     ) : page === "model" ? (
       "Where Ghost thinks: every session, its tool calls and its summaries go to this model."
     ) : page === "passwords" ? (
@@ -921,13 +950,8 @@ export default function SettingsScreen({ params: route }: RouteProps) {
         {s && page === "general" && (
           <>
             {showSetup && <SetupSection steps={steps} onGo={(id) => go(id)} />}
-            <Section id="floating" title="The floating room" description="To have Ghost big and present, let it float: when you call it, it comes forward over your desktop instead of staying in this window." className="set-section">
-              <FloatingRoomSettings />
-            </Section>
-            <Section id={sectionDomId("about")} title={SECTION_TITLE.about} className="set-section">
-              <VersionNotice status={status} />
+            <Section id={sectionDomId("login")} title="Ghost on this computer" className="set-section">
               <Card list>
-                <VersionRows status={status} />
                 <ListRow
                   title="Set up Ghost"
                   description="The first run again: the model, the microphone, its name, its voice, an app, an agent and a first question. It keeps what’s done."
@@ -937,14 +961,14 @@ export default function SettingsScreen({ params: route }: RouteProps) {
                     </Button>
                   }
                 />
-                <ListRow
-                  title="Settings file"
-                  description="Where these pages save. Passwords are in Ghost’s vault, never in this file."
-                  meta={<span className="set-value is-mono">{tildePath(s.settings_path) || "~/.config/ghost/settings.env"}</span>}
-                />
+                <StartAtLogin />
               </Card>
             </Section>
-            <UpdatesSection />
+            <Section id={sectionDomId("floating")} title="The floating room" description="Where Ghost appears when you call it: big and present over your work, or in this window." className="set-section">
+              <FloatingRoomSettings />
+            </Section>
+            <ReachSection />
+            <ConnectionsSection />
             <ErrorReportsSection />
             {mock && Prototype && (
               <Suspense fallback={null}>
@@ -954,6 +978,12 @@ export default function SettingsScreen({ params: route }: RouteProps) {
             <RemoveGhostSection confirmOpen={mock && new URLSearchParams(window.location.search).get("remove") === "confirm"} />
           </>
         )}
+
+        {s && page === "about" && <AboutPage forced={mock ? new URLSearchParams(window.location.search).get("about") : null} />}
+
+        {s && page === "developer" && <DeveloperPage settingsPathText={s.settings_path} />}
+
+        {s && page === "live" && <DeveloperLivePage />}
 
         {s && page === "passwords" && (
           <Section id={sectionDomId("secrets")} className="set-section">
@@ -1370,7 +1400,7 @@ export default function SettingsScreen({ params: route }: RouteProps) {
           </>
         )}
 
-        {s && page === "phone" && <PhoneSection settingsPath={s.settings_path} openOnLoad={forced === "pairing"} />}
+        {s && page === "phone" && <PhoneSection settingsPath={s.settings_path} openOnLoad={forced === "pairing" || route.section === "pair"} />}
         {s && page === "tools" && <OutsideToolsSection />}
       </div>
     </Page>
