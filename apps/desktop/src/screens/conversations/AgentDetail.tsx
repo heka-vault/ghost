@@ -83,7 +83,7 @@ let keptWake: { base: string; draft: string } | null = null;
 const sameWake = (a: string, b: string) => joinList(splitList(a)) === joinList(splitList(b));
 
 /**
- * `manage`: Settings › Agents › this agent (its persona, voice, look, memory and history); else
+ * `manage`: the agent's own page, #/agents/<slug>/settings (its persona, voice, look, memory and history); else
  * the conversation with it (#/agents/:slug), which the rail opens (the owner, 2026-11-12).
  */
 export function AgentDetail({ slug, manage = false }: { slug: string; manage?: boolean }) {
@@ -137,7 +137,7 @@ export function AgentDetail({ slug, manage = false }: { slug: string; manage?: b
       navigate("/session");
       return;
     }
-    // The conversation and the agent's settings are two places: Settings › Agents holds the rest.
+    // The conversation and the agent's own page are two places: its page (#/agents/<slug>/settings) holds the rest.
     if (t === "transcript" && manage) {
       writeParam("tab", null, slug);
       navigate(`/agents/${encodeURIComponent(slug)}`);
@@ -145,7 +145,7 @@ export function AgentDetail({ slug, manage = false }: { slug: string; manage?: b
     }
     if (t !== "transcript" && !manage) {
       writeParam("tab", t, slug);
-      navigate(`/settings/agents/${encodeURIComponent(slug)}`);
+      navigate(`/agents/${encodeURIComponent(slug)}/settings`);
       return;
     }
     setTabState(t);
@@ -158,7 +158,7 @@ export function AgentDetail({ slug, manage = false }: { slug: string; manage?: b
   }, [slug]);
   useEffect(
     () => () => {
-      if (!window.location.hash.startsWith("#/agents/") && !window.location.hash.startsWith("#/settings/agents/")) clearParams();
+      if (!window.location.hash.startsWith("#/agents/") && !window.location.hash.startsWith("#/agents")) clearParams();
     },
     [],
   );
@@ -527,7 +527,7 @@ export function AgentDetail({ slug, manage = false }: { slug: string; manage?: b
       await client.deleteConversation(slug);
       drafts.delete(slug);
       toast({ title: `Deleted ${name}` });
-      navigate("/settings/agents");
+      navigate("/agents");
     } catch (e) {
       fail(`Couldn’t delete ${name}`, e);
     }
@@ -769,7 +769,7 @@ export function AgentDetail({ slug, manage = false }: { slug: string; manage?: b
       // Ghost's page here is only its settings views; their bar's “← Conversation” goes home.
       crumb={
         manage ? (
-          <Link to="/settings/agents">
+          <Link to="/agents">
             <ChevronLeft size={14} aria-hidden />
             Agents
           </Link>
@@ -868,7 +868,7 @@ export function AgentDetail({ slug, manage = false }: { slug: string; manage?: b
             </Section>
 
             {!isGhost && (
-              <Section id="conv-look" title="How it looks" description="Its shape and colour, wherever it appears: the rail, Today, the floating room. Ghost is always Wisp.">
+              <Section id="conv-look" title="How it looks" description="Its shape and colour, wherever it appears: the rail, Today, over your desktop. Ghost is always Wisp.">
                 <LookPicker value={lookOf(slug, draft.look || null)} onChange={(l) => setDraft({ look: lookText(l) })} name={draft.name || name} disabled={readOnly} />
               </Section>
             )}
@@ -993,7 +993,7 @@ export function AgentDetail({ slug, manage = false }: { slug: string; manage?: b
                     variant="secondary"
                     onClick={() => {
                       newAgentSeed.slug = slug;
-                      navigate("/settings/agents");
+                      navigate("/agents");
                     }}
                   >
                     Start an agent from this memory

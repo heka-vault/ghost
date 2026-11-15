@@ -9,9 +9,9 @@ import type { RealtimeView, SettingsView } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
 import { useCallback, useEffect, useState } from "react";
 
-import { navigate } from "../../app/router";
 import { Badge, Button, Card, ConfirmDialog, Field, Input, ListRow, Notice, RadioGroup, Section, Select, errorText, useLive, useToast } from "../../ui";
 import { Row } from "./parts";
+import { PasswordInPlace } from "./Passwords";
 import {
   SPEND_NOTE,
   type VoiceMode,
@@ -146,21 +146,8 @@ export function RealtimeVoiceSection({ onSettings }: { onSettings?: (s: Settings
               />
             </Field>
           </Row>
-          <ListRow
-            title="Password"
-            description={
-              <>
-                {view.password_set ? "In Ghost’s vault." : "Not in Ghost’s vault yet: sessions use the voice on this machine until it is."}{" "}
-                <span className="set-detail">{view.password}</span>
-              </>
-            }
-            meta={view.password_set ? <Badge tone="ok" size="sm" dot>Set</Badge> : <Badge tone="warn" size="sm" dot>Not set</Badge>}
-            trailing={
-              <Button size="sm" variant="secondary" onClick={() => navigate("/settings/passwords")}>
-                {view.password_set ? "Passwords" : "Add it"}
-              </Button>
-            }
-          />
+          {/* ADR 0073: added and replaced here, where it is used. */}
+          <PasswordInPlace name={view.password} usedBy="The realtime voice" onChanged={() => void load()} />
           <Row>
             <Field
               layout="inline"

@@ -8,7 +8,7 @@ import { DaemonNotices } from "./daemon";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { Offline } from "./Offline";
 import { hrefFor, navigate, usePath } from "./router";
-import { SETTINGS_PAGES, redirectFor, resolve, settingsPageOf } from "./routes";
+import { SETTINGS_PAGES, SETTINGS_SUBPAGES, redirectFor, resolve, settingsNavId, settingsPageOf } from "./routes";
 import { SettingsFrame } from "./SettingsFrame";
 import { opensFirstRun, useSetupNeeded } from "./setup";
 import { parseSaved, storageKey } from "../screens/onboarding/state";
@@ -48,7 +48,7 @@ export function App() {
   const [setupClaims, setSetupClaims] = useState(0);
   const claimSetupPrompt = useCallback((d: number) => setSetupClaims((n) => Math.max(0, n + d)), []);
   // A locked keyring (ADR 0036) is fixed on Passwords, by unlocking: nothing to set up.
-  const passwordsPage = SETTINGS_PAGES.find((p) => p.id === "passwords") ?? SETTINGS_PAGES[0];
+  const passwordsPage = SETTINGS_SUBPAGES.find((p) => p.id === "passwords") ?? SETTINGS_PAGES[0];
   const setupHref = hrefFor(setup.locked ? passwordsPage.path : "/welcome");
   // ADR 0066: a fresh install lands in the first run, once.
   const firstRunOpened = useRef(false);
@@ -223,7 +223,7 @@ export function App() {
                 state === "offline" ? <Offline /> : <ScreenSkeleton />
               ) : settingsPage ? (
                 // Settings has its own nav beside the page; it stays put while a page loads.
-                <SettingsFrame current={settingsPage.id}>{screen}</SettingsFrame>
+                <SettingsFrame current={settingsNavId(settingsPage)}>{screen}</SettingsFrame>
               ) : (
                 screen
               )}

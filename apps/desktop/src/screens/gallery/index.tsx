@@ -1161,7 +1161,7 @@ function Specimens({ theme }: { theme: string }) {
             <p className="t-2">Reconnecting: the same words as the sidebar card, the dot still under the moving banner, writes off.</p>
           </div>
           <p className="t-small t-3">
-            Automatic for every Page with a header. The actions are the header’s own, moved into the bar, not a copy: one instance, one tab stop. Scroll <a href={scenarioHref("busy", "/settings/audit")}>the audit log in Busy</a> to see it live.
+            Automatic for every Page with a header. The actions are the header’s own, moved into the bar, not a copy: one instance, one tab stop. Scroll <a href={scenarioHref("busy", "/settings/developer/audit")}>the audit log in Busy</a> to see it live.
           </p>
         </Spec>
       </Block>

@@ -103,6 +103,8 @@ export function FloatingRoom({ stage = false }: { stage?: boolean } = {}) {
   const session = status?.session_id ?? null;
   const deskSession = connected && !!session && status?.session_origin !== "phone";
   const micOff = !!status?.not_listening;
+  // ADR 0074: debug mode is on, so Ghost wears it, as it wears “Screen shared”.
+  const debugOn = !!status?.debug_audio;
   // A typed session opened no microphone (2026-11-13): Wisp and the label say typing.
   const typed = typedSession(status);
 
@@ -506,6 +508,7 @@ export function FloatingRoom({ stage = false }: { stage?: boolean } = {}) {
           {micOff ? <MicOff /> : <span className="flt-line__light" />}
           {scene === "hold" && <span className="flt-line__hold">{label}</span>}
           {sharedMark && !forward && <SharedMark />}
+          {debugOn && !forward && <DebugMark />}
         </div>
       )}
 
@@ -548,6 +551,7 @@ export function FloatingRoom({ stage = false }: { stage?: boolean } = {}) {
           </div>
           <div className="flt-under">
             {sharedMark && <SharedMark />}
+            {debugOn && <DebugMark />}
             <p className="flt-label">
               <span className="flt-label__dot" />
               {label}
@@ -629,6 +633,16 @@ export function FloatingRoom({ stage = false }: { stage?: boolean } = {}) {
         </p>
       )}
     </div>
+  );
+}
+
+/** The mark Ghost wears while debug mode logs what it hears (ADR 0074). */
+function DebugMark() {
+  return (
+    <span className="flt-shared flt-shared--debug" role="note">
+      <span className="flt-shared__dot" />
+      Debug mode: logging what it hears
+    </span>
   );
 }
 

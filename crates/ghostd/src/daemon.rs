@@ -435,6 +435,8 @@ pub struct Late {
     pub outside: OnceLock<Arc<crate::outside::OutsideHost>>,
     /// The speech models' download (ADR 0066).
     pub speech_models: OnceLock<Arc<crate::speech_models::SpeechModelsDesk>>,
+    /// Debug mode's switch (ADR 0074).
+    pub debug_audio: OnceLock<Arc<crate::debug_audio::DebugAudio>>,
 }
 
 /// What a session with any agent reaches (ADR 0034, ADR 0035).
@@ -510,6 +512,8 @@ pub struct Daemon {
     pub(crate) origin: Mutex<Option<SessionOrigin>>,
     route_names: Mutex<Vec<RouteName>>,
     log_mirror: LogMirror,
+    /// Debug mode's capture for a diagnostic report (ADR 0074), a layer of the subscriber.
+    debug_capture: crate::debug_audio::Capture,
     /// Not listening (ADR 0057): the operator's switch for the microphone, kept in the store.
     pub mic: Arc<Mic>,
     /// What the microphone path is and how it is doing (ADR 0064).
@@ -591,6 +595,7 @@ impl Daemon {
             origin: Mutex::new(None),
             route_names: Mutex::new(Vec::new()),
             log_mirror: LogMirror::default(),
+            debug_capture: crate::debug_audio::Capture::default(),
             mic: Arc::new(Mic::new()),
             mic_health: Arc::new(Mutex::new(crate::microphone::Health::default())),
             wake_level: Arc::new(Mutex::new(None)),
@@ -633,6 +638,40 @@ impl Daemon {
     pub fn with_log_mirror(mut self, mirror: LogMirror) -> Self {
         self.log_mirror = mirror;
         self
+    }
+
+    /// Debug mode's capture the subscriber was built with (ADR 0074).
+    pub fn with_debug_capture(mut self, capture: crate::debug_audio::Capture) -> Self {
+        self.debug_capture = capture;
+        self
+    }
+
+    /// Debug mode's switch, made once: off at every start (ADR 0074).
+    pub fn debug_audio(self: &Arc<Self>) -> Arc<crate::debug_audio::DebugAudio> {
+        self.late
+            .debug_audio
+            .get_or_init(|| {
+                let d = crate::debug_audio::DebugAudio::new(
+                    self.voice().debug_audio,
+                    self.debug_capture.clone(),
+                    &self.cfg().data_dir,
+                    self.state.clone(),
+                );
+                let weak = Arc::downgrade(self);
+                d.set_on_change(Arc::new(move || {
+                    if let Some(me) = weak.upgrade() {
+                        me.refresh_waiting_now();
+                        me.set_waiting_count();
+                    }
+                }));
+                d
+            })
+            .clone()
+    }
+
+    /// The last lines Ghost logged, for a diagnostic report (ADR 0073).
+    pub fn log_tail(&self) -> Vec<String> {
+        self.log_mirror.tail()
     }
 
     // --- reads --------------------------------------------------------------------------
@@ -1850,6 +1889,10 @@ impl Daemon {
                         if let Some(note) = d.mic_note() {
                             out.push((crate::microphone::NOTE_KEY.to_string(), note));
                         }
+                        // ADR 0074: debug mode is on, and until when.
+                        if let Some(note) = d.late.debug_audio.get().and_then(|x| x.note()) {
+                            out.push((crate::debug_audio::NOTE_KEY.to_string(), note));
+                        }
                         out
                     }
                 }))
@@ -2789,6 +2832,8 @@ impl Daemon {
         let cfg = self.cfg();
         let voice = self.voice();
         let socket = cfg.api_socket.clone().unwrap_or_else(default_socket_path);
+        // Made before the literal below, which holds the settings' locks while it is built.
+        let debug_audio = self.debug_audio();
         let deps = Arc::new(Deps {
             state: self.state.clone(),
             control: self.clone(),
@@ -2848,6 +2893,10 @@ impl Daemon {
             in_appimage: ghost_core::ghost_app::clients::in_appimage(|k| std::env::var(k).ok()),
             other_tools: Some(Arc::new(ghost_api::deps::LiveOtherTools {
                 started_env: self.started_env.clone(),
+            })),
+            debug_audio: Some(Arc::new(crate::debug_audio::DebugAudioDesk(debug_audio))),
+            diagnose: Some(Arc::new(crate::diagnose::DiagnoseDesk {
+                daemon: Arc::downgrade(self),
             })),
         });
         self.late.deps.set(deps.clone()).ok();
@@ -3211,11 +3260,28 @@ pub fn device_of(
 #[derive(Clone, Default)]
 pub struct LogMirror {
     state: Arc<RwLock<Option<Arc<DaemonState>>>>,
+    /// The last lines, redacted, for a diagnostic report (ADR 0073). Never debug mode's
+    /// lines (`ghost_voice::debug`), which stay in the daemon's own log.
+    tail: Arc<Mutex<std::collections::VecDeque<String>>>,
 }
+
+/// How many lines the mirror keeps for a diagnostic report.
+pub const LOG_TAIL_LINES: usize = 400;
 
 impl LogMirror {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// The last lines Ghost logged, oldest first, each `time LEVEL message`, redacted
+    /// against the vault (not yet scrubbed: the report does that).
+    pub fn tail(&self) -> Vec<String> {
+        self.tail
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .cloned()
+            .collect()
     }
 
     /// The daemon's state, once it is there.
@@ -3224,7 +3290,8 @@ impl LogMirror {
     }
 }
 
-struct MessageVisitor(String);
+#[derive(Default)]
+pub(crate) struct MessageVisitor(pub(crate) String);
 
 impl tracing::field::Visit for MessageVisitor {
     fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
@@ -3246,9 +3313,9 @@ impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for LogMirror {
         if level > tracing::Level::INFO {
             return;
         }
-        let state = self.state.read().unwrap_or_else(|e| e.into_inner()).clone();
-        let Some(state) = state else { return };
-        if state.bus.subscribers() == 0 {
+        // Debug mode's lines (what Ghost heard) go to the daemon's own log only: never the
+        // desktop's mirror, never a report's tail (ADR 0074).
+        if event.metadata().target() == crate::debug_audio::TARGET {
             return;
         }
         let mut v = MessageVisitor(String::new());
@@ -3258,7 +3325,23 @@ impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for LogMirror {
             tracing::Level::WARN => "WARNING",
             _ => "INFO",
         };
-        state.log(name, &redact_text(&v.0));
+        let message = redact_text(&v.0);
+        {
+            let mut tail = self.tail.lock().unwrap_or_else(|e| e.into_inner());
+            if tail.len() >= LOG_TAIL_LINES {
+                tail.pop_front();
+            }
+            tail.push_back(format!(
+                "{} {name} {message}",
+                chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ")
+            ));
+        }
+        let state = self.state.read().unwrap_or_else(|e| e.into_inner()).clone();
+        let Some(state) = state else { return };
+        if state.bus.subscribers() == 0 {
+            return;
+        }
+        state.log(name, &message);
     }
 }
 

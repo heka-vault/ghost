@@ -7,7 +7,7 @@
 
 [![ci](https://github.com/heka-vault/ghost/actions/workflows/ci.yml/badge.svg)](https://github.com/heka-vault/ghost/actions/workflows/ci.yml)
 
-**Ghost floats over your work when you call it.** With the floating room on, say "Ghost" and it comes forward beside
+**Ghost floats over your work when you call it.** With floating on, say "Ghost" and it comes forward beside
 whatever you are doing, with no window: you see it listen, a beam to each app and agent it
 reaches for, and its voice moving as it answers. When you are done it falls back to a thin line
 at the bottom of the screen.
@@ -25,7 +25,7 @@ conversation, what Ghost is watching and every change it made.
 
 ### Over your desktop
 
-The floating room shows what a voice can't: the state, where Ghost is looking, and a change or
+Floating, Ghost shows what a voice can't: the state, where Ghost is looking, and a change or
 a question that needs your answer, in a card with buttons. It shows no transcript, never takes
 the keyboard, and lets every click through except its own buttons. It is off until you turn it
 on in Settings › General, and it needs an X11 session or XWayland (GNOME on Wayland has it by
@@ -131,7 +131,7 @@ runs on PulseAudio rather than PipeWire it can't be set up, and Ghost says so; u
 headphones there.
 
 **Updates.** Ghost checks for a new release when it starts and once a day, and says
-"Update available" on the rail; Settings › General shows what's new and has **Update and
+"Update available" on the rail; Settings › About shows what's new and has **Update and
 restart** (the .deb asks for your password once; the AppImage replaces itself). The check is
 one request to GitHub carrying nothing about you; turn it off there. Your settings, agents
 and memory in `~/.config/ghost` and `~/.local/share/ghost` stay as they are.
@@ -195,7 +195,7 @@ anything of Ghost's still running, then delete what you want gone:
   `~/.cache/heka-ghost-desktop`, `~/.local/state/ghost`, `$XDG_RUNTIME_DIR/ghost`.
 - Your data: `~/.config/ghost`, `~/.local/share/ghost/ghost.db`,
   `~/.local/share/ghost/ghost.db-wal`, `~/.local/share/ghost/ghost.db-shm`,
-  `~/.local/share/ghost/wake/takes`, `~/.local/share/ghost/hear`,
+  `~/.local/share/ghost/wake/takes`, `~/.local/share/ghost/debug-audio.log`, `~/.local/share/ghost/hear`,
   `~/.local/share/ghost/reports`, and the rest of `~/.local/share/ghost`.
 - Your passwords: `~/.local/share/ghost/passwords.vault`,
   `~/.local/share/ghost/passwords.vault.lock`, and the key in your login keyring
@@ -272,7 +272,7 @@ and answers again when it resets, or with another model you choose. Ghost doesn'
 second, faster model or start answering before you finish with this connection, so the first
 word is about 0.6 s after a turn ends on Haiku.
 
-Save the password from the desktop (**Settings › Passwords**) or the terminal; it is read
+Save the password from the desktop (on **Settings › Model**, where it is used) or the terminal; it is read
 without echo and never shown again:
 
 ```bash
@@ -294,7 +294,7 @@ to `settings.env` applies from the next session (`make reload` restarts the daem
 Every `ghostd` command reads `settings.env` itself, so `ghostd run`, `check`, `llm test`,
 `passwords` and `listening` behave the same by hand as from `make` or the service. A variable
 exported in the shell you start it from wins over the file for that start (an empty one too),
-and **Settings › Model** and **Settings › Passwords** say which ones come "from the environment
+and **Settings › Model** and **Settings › Developer › Passwords** say which ones come "from the environment
 Ghost was started in"; a password is never read from the file.
 
 **What it costs.** A spoken turn sends about 7,000 tokens of prompt and tools, almost all of it
@@ -347,8 +347,8 @@ a second or two more before Ghost starts to answer; the model's own first word i
 With `make dev` running and the window open, the first run takes you to Ghost in three short
 steps: a model (one click when Ollama, LM Studio or a key is already on the computer; skip it and
 Ghost still meets you), its ears (no click when the microphone is fine; the speech models download
-from Welcome on), and "Hey Ghost". Ghost comes forward over your desktop in the floating room,
-says hello in its own words and answers. The floating room stays on after that; the switch is
+from Welcome on), and "Hey Ghost". Ghost comes forward over your desktop,
+says hello in its own words and answers. Floating stays on after that; the switch is
 right there. Its voice, an app, an agent and a first question follow, each optional.
 
 1. **Wake it.** Say "Hey Ghost". You hear a chime and a greeting; the window shows Listening.
@@ -357,7 +357,7 @@ right there. Its voice, an app, an agent and a first question follow, each optio
    `make say TEXT="what can you do?"` from a terminal.
 2. **Use an app.** A pretend GitHub (`ghost-mock-github`, with repositories `ghost-mock/app` and
    `ghost-mock/infra`) is connected out of the box. Ask "what issues are open in the app repo?",
-   then "label 151 as a duplicate". Ghost does it and says so; **Settings › Audit log** has the
+   then "label 151 as a duplicate". Ghost does it and says so; **Settings › Developer › Audit log** (and Today's timeline) has the
    change.
 3. **Connect a real app.** **Apps › Add an app** searches the public registry of apps; sign in
    or paste a key and every agent can use it. Make an app ask first: **Settings › Permissions**,
@@ -367,18 +367,26 @@ right there. Its voice, an app, an agent and a first question follow, each optio
    uses, each one click to connect, and offer to let it use Ghost (`ghostd setup detect` from a
    terminal).
 4. **Hire an agent.** "Hey Ghost, hire an agent called Ledger to keep an eye on my invoices", or
-   **Settings › Agents › New agent**, where you also pick its shape, colour and voice. It
+   the **+** by the agents on the rail (**New agent**), where you also pick its shape, colour and voice. It
    appears on the left rail; "transfer me to Ledger" hands the conversation over.
 5. **Make a schedule.** "Every weekday at nine, check what's open in the app repo and tell me",
    or type it on **On its own** (**Set it up by hand** has the form). The run happens with nobody there; its answer lands on
    **Today**. A change it would make that needs your yes waits there instead.
-6. **The floating room.** The first run turns it on when you first say "Hey Ghost";
-   **Settings › General › The floating room › Float over the desktop** (or the rail, or the tray) turns it off and on.
+6. **Ghost floats.** The first run turns it on when you first say "Hey Ghost";
+   **Settings › General › Floating › Where Ghost appears** (or the rail, or the tray) turns it off and on.
    It shows Ghost over your work while you talk to it, without the window. It needs X11 or XWayland (GNOME on Wayland has XWayland
    by default). See [docs/floating-room.md](docs/floating-room.md).
 7. **Stop listening.** Ctrl+Shift+M, the switch by Ghost's name in the window, "Ghost, stop
    listening", or `target/debug/ghostd listening off`. No microphone is open at all until you
    turn it back on (the same ways, except by voice); typing still works.
+
+**Where the settings are.** Settings has five pages: **General** (setup, start at login, where
+Ghost appears, how it reaches you, your phone and apps, error reports, removing Ghost), **Model**,
+**Sound**, **Permissions** and **About** (the version, updates, licences and **Save a diagnostic
+report**). An agent's settings are on its own page, and a password is added where it is used.
+Click the version on About seven times for **Developer**: debug mode, checks, experimental
+switches and the advanced pages (passwords, skills, outside tools, the audit log, notification
+routes). Nothing there is locked away: each is also a file or a command.
 
 ## What's rough
 
@@ -393,7 +401,7 @@ right there. Its voice, an app, an agent and a first question follow, each optio
   devices but haven't been tested: a laptop's built-in microphone takes a noisy room's sound
   for yours, and open speakers without cancellation echo (see
   [Sound](#sound)). The Hearing test's recorder (`docs/hear-recording.md`) needs `ghost.mic`.
-- **The floating room** needs X11 or XWayland and hides during screen sharing; there is no
+- **Floating** needs X11 or XWayland and hides during screen sharing; there is no
   native Wayland, KDE or wlroots version yet.
 - **The phone app** (`apps/mobile`, Android) needs your own build (`make android`, with the
   Android SDK and JDK 17) and pairing on your own network:
@@ -425,8 +433,18 @@ is not logged, stored or shown. With listening off, the microphone isn't opened 
   test and retrain the detector on your own voice with `make wake-train`
   ([docs/wake-takes.md](docs/wake-takes.md));
   deleting `~/.local/share/ghost/` (with Ghost stopped) removes everything Ghost has kept;
-- `GHOST_DEBUG_AUDIO=1`, off by default and set only by you, prints what Ghost heard (idle
-  included) to your terminal, not to a file.
+- **debug mode**, off by default and turned on only by you: `GHOST_DEBUG_AUDIO=1` when you
+  start Ghost by hand, or the switch on Settings › Developer (or `ghostd debug-audio on`) for one
+  hour. It writes what Ghost heard (idle included) and its audio decisions to Ghost's own log on
+  this computer; the switch also keeps them in a small private file so you can add them to a
+  diagnostic report, deleted when debug mode ends. It turns itself off after the hour and
+  whenever Ghost restarts, and while it is on the rail and the floating Ghost say so;
+- **diagnostic reports** you save from Settings › About: one file in your Downloads folder,
+  with this version, your computer's kind, sound devices, the model's name and timings, recent
+  turns' timings, wake scores, error reports and Ghost's own log, scrubbed of passwords, paths
+  and anything you said. Your transcripts, the debug log or wake recordings go in only if you
+  tick their boxes. Ghost uploads nothing: you choose who gets the file
+  ([docs/diagnostic-report.md](docs/diagnostic-report.md)).
 
 **What leaves the machine after the wake word:** the words of the conversation (as text), with
 Ghost's instructions and the results of the apps it calls, go to the model provider you chose;
@@ -437,7 +455,7 @@ by your login keyring and are never shown, logged or given to the model.
 
 **What Ghost itself fetches:** an installed Ghost asks GitHub once when it starts and once a
 day whether there is a new release (one request for the release's `latest.json`, with no
-identifier; turn it off in Settings › General › Updates), and downloads a new version only
+identifier; turn it off in Settings › About › Updates), and downloads a new version only
 when you press Update and restart. The first run downloads the speech models once, from their
 publishers on Hugging Face and GitHub.
 

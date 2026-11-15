@@ -1,4 +1,4 @@
-//! Start at login (ADR 0038): on by default, off from the tray. The operator's choice is a
+//! Start at login (ADR 0038): on by default, off from the tray or Settings › General (ADR 0073). The operator's choice is a
 //! word in `~/.local/state/ghost/autostart` (`off`); without it the app registers itself at
 //! every launch, so a moved AppImage registers its new path. A checkout's debug build never
 //! registers: `make dev` is not a login item.
@@ -46,4 +46,33 @@ pub fn set(app: &AppHandle, on: bool) {
         eprintln!("ghost: cannot write {}: {e}", path.display());
     }
     apply(app);
+}
+
+/// The tray's item, kept so a change from Settings shows there too.
+pub struct LoginTray(pub tauri::menu::CheckMenuItem<tauri::Wry>);
+
+/// What Settings › General shows: whether this build registers a login item, and the choice.
+#[derive(serde::Serialize)]
+pub struct LoginView {
+    pub managed: bool,
+    pub on: bool,
+}
+
+#[tauri::command]
+pub fn login_status() -> LoginView {
+    LoginView {
+        managed: managed(),
+        on: wanted(),
+    }
+}
+
+/// Settings › General's switch: the same as the tray's.
+#[tauri::command]
+pub fn login_set(app: AppHandle, on: bool) -> LoginView {
+    use tauri::Manager;
+    set(&app, on);
+    if let Some(t) = app.try_state::<LoginTray>() {
+        let _ = t.0.set_checked(on);
+    }
+    login_status()
 }

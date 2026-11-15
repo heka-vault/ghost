@@ -62,6 +62,7 @@ import { HttpError } from "./errors";
 import { type HearDesign, MockHear } from "./hear";
 import { MockReports } from "./reports";
 import { uninstallView } from "./uninstall";
+import { MockDeveloper } from "./developer";
 import { MockWakeTakes } from "./wakeTakes";
 import { isConnectionKey, isModelOnly, MockModel } from "./model";
 import { MockOtherTools } from "./otherTools";
@@ -273,6 +274,8 @@ export class MockDaemon {
   private hear: MockHear;
   private wakeTakes = new MockWakeTakes();
   private reports = new MockReports();
+  /** Settings › Developer (ADR 0073, ADR 0074): the switches, debug mode, the report. */
+  private developer: MockDeveloper;
   /** What the agents do on their own (ADR 0047): the schedules and their runs. */
   private schedules: MockSchedules;
   /** The AI tools already on this computer (ADR 0068), from the scenario. */
@@ -283,6 +286,10 @@ export class MockDaemon {
 
   constructor(scenario: Scenario, f: Fixtures, options: MockOptions = {}) {
     this.scenario = scenario;
+    this.developer = new MockDeveloper(
+      !!scenario.debugAudio || (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("debug") === "on"),
+      () => this.pushStatus({ debug_audio: this.developer.mark() }),
+    );
     this.phone = f.settings.phone;
     const hoursAgo = (h: number) => new Date(Date.now() - h * 3600_000).toISOString();
     const cursor: ClientView = { name: "cursor", title: "Cursor", created_at: hoursAgo(24 * 3), last_used_at: null };
@@ -381,6 +388,15 @@ export class MockDaemon {
         ...this.waitingItems,
       ];
     }
+    const debugMark = this.developer.mark();
+    if (debugMark?.until) {
+      const at = new Date().toISOString();
+      const ends = new Date(debugMark.until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      this.waitingItems = [
+        { key: "debug:audio", source: "ghost", title: `Debug mode is on: Ghost is logging what it hears and its audio decisions on this computer until ${ends}. Turn it off on Settings › Developer.`, state: "new", first_seen: at, changed_at: at, age_secs: 0, place: "developer" },
+        ...this.waitingItems,
+      ];
+    }
     this.status = {
       phase: scenario.phase,
       session_id: f.session.sessionId,
@@ -398,6 +414,7 @@ export class MockDaemon {
       ending: false,
       waiting: this.waitingItems.filter((i) => i.state === "new" || i.state === "delivered").length,
       not_listening: scenario.notListening === undefined ? null : { until: scenario.notListening === true ? null : new Date(Date.now() + scenario.notListening * 60_000).toISOString() },
+      debug_audio: this.developer.mark(),
     };
     if (this.pending && scenario.pendingExpiresIn) {
       const secs = scenario.pendingExpiresIn;
@@ -1948,6 +1965,10 @@ export class MockDaemon {
       if (answer !== undefined) return answer;
     }
     if (method === "GET" && path === "/uninstall") return uninstallView();
+    if (path.startsWith("/debug-audio") || path.startsWith("/developer") || path.startsWith("/diagnose")) {
+      const answer = this.developer.handle(method, path, b);
+      if (answer !== undefined) return answer;
+    }
     if (path.startsWith("/reports")) {
       const answer = this.reports.handle(method, path, b);
       if (answer !== undefined) return answer;

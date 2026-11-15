@@ -706,6 +706,7 @@ mod tests {
                 ending: false,
                 waiting: 0,
                 not_listening: None,
+                debug_audio: None,
             }
         }
 
@@ -1043,6 +1044,24 @@ mod tests {
             ("GET", "/reports", None),
             ("PUT", "/reports/choice", Some(json!({"send": false}))),
             ("POST", "/reports", Some(json!({"type": "Error"}))),
+        ] {
+            let (r, _) = signed(&p.app, &creds, method, path, body).await;
+            assert_eq!(r.status, StatusCode::NOT_FOUND, "{method} {path}");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_phone_has_no_way_to_debug_mode_the_switches_or_a_report() {
+        // ADR 0073, ADR 0074: the desk's only.
+        let p = phone();
+        let creds = pair(&p).await;
+        for (method, path, body) in [
+            ("GET", "/debug-audio", None),
+            ("PUT", "/debug-audio", Some(json!({"on": true}))),
+            ("GET", "/developer/switches", None),
+            ("PUT", "/developer/switches", Some(json!({"values": {}}))),
+            ("POST", "/diagnose", Some(json!({}))),
+            ("POST", "/diagnose/preview", Some(json!({}))),
         ] {
             let (r, _) = signed(&p.app, &creds, method, path, body).await;
             assert_eq!(r.status, StatusCode::NOT_FOUND, "{method} {path}");

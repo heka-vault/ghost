@@ -5,6 +5,8 @@
 //! turns' time went (ADR 0018). `ghostd llm test`: the provider check of the saved
 //! connection (ADR 0056). `ghostd api-schema`: the control API's document.
 //! `ghostd reports`: the operator's switch for error reports (ADR 0067).
+//! `ghostd debug-audio`: debug mode for an hour (ADR 0074). `ghostd diagnose`: a diagnostic
+//! report saved as a file (ADR 0073).
 //! `ghostd mcp`: the outside tools connected to Ghost, and the bridge one of them runs
 //! (ADR 0048). `ghostd version`: what this build is. `ghostd restore-volumes`: what the shell runs
 //! before a start and after a stop (ADR 0038).
@@ -64,6 +66,8 @@ fn main() -> anyhow::Result<()> {
             }
         });
     let mirror = LogMirror::new();
+    // ADR 0074: debug mode's lines, kept for a diagnostic report only while its switch is on.
+    let capture = ghostd::debug_audio::Capture::new();
     tracing_subscriber::registry()
         .with(EnvFilter::try_new(&level).unwrap_or_else(|_| EnvFilter::new("info")))
         .with(
@@ -75,12 +79,17 @@ fn main() -> anyhow::Result<()> {
                 .with_ansi(std::io::stderr().is_terminal()),
         )
         .with(mirror.clone())
+        .with(capture.clone())
         .init();
 
     log_settings_file(&settings_path, &settings);
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
-        None | Some("run") => run(mirror),
+        None | Some("run") => run(mirror, capture),
+        // ADR 0074: the operator's switch, through the running daemon
+        Some("debug-audio") => std::process::exit(debug_audio(&args[1..])),
+        // ADR 0073: a diagnostic report, as a file
+        Some("diagnose") => std::process::exit(diagnose(&args[1..])),
         Some("status") => client("status", &args[1..]),
         Some("wake") => client("wake", &args[1..]),
         Some("say") => client("say", &args[1..]),
@@ -213,7 +222,7 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Some(other) => anyhow::bail!(
-            "unknown command {other:?}; commands: run, status, wake, say, sleep, check, models, echo-cancel, reports, push, latency, llm, perf, restore-volumes, passwords, mcp, setup, uninstall, api-schema, version"
+            "unknown command {other:?}; commands: run, status, wake, say, sleep, check, models, echo-cancel, reports, debug-audio, diagnose, push, latency, llm, perf, restore-volumes, passwords, mcp, setup, uninstall, api-schema, version"
         ),
     }
 }
@@ -247,7 +256,7 @@ fn log_settings_file(path: &std::path::Path, s: &ghost_core::environment::Settin
 /// from the daemon's environment; then the daemon, until SIGTERM, SIGINT or the parent
 /// going away.
 #[tokio::main]
-async fn run(mirror: LogMirror) -> anyhow::Result<()> {
+async fn run(mirror: LogMirror, capture: ghostd::debug_audio::Capture) -> anyhow::Result<()> {
     let base = GhostdSettings::load()?;
     // ADR 0067: error reports first, so a panic anywhere after this is spooled. Redaction
     // reads the vault's values as they are loaded.
@@ -285,7 +294,8 @@ async fn run(mirror: LogMirror) -> anyhow::Result<()> {
         Daemon::new(cfg, voice, Ports::live())
             .with_passwords(vault)
             .with_environ(environ)
-            .with_log_mirror(mirror),
+            .with_log_mirror(mirror)
+            .with_debug_capture(capture),
     );
     parent::watch(&PARENT_GONE);
     tokio::spawn({
@@ -351,6 +361,34 @@ async fn setup(args: &[String]) -> i32 {
         &mut std::io::stderr(),
     )
     .await
+}
+
+/// `ghostd debug-audio on|off|status` (ADR 0074), through the running daemon: debug mode
+/// lives in its memory only.
+#[tokio::main]
+async fn debug_audio(args: &[String]) -> i32 {
+    let path = default_socket_path();
+    if !path.exists() {
+        eprintln!(
+            "ghostd is not running (no socket at {}); debug mode is off",
+            path.display()
+        );
+        return 2;
+    }
+    let client = GhostClient::new(&path);
+    ghostd::debug_audio::cli(
+        args,
+        &client,
+        &mut std::io::stdout(),
+        &mut std::io::stderr(),
+    )
+    .await
+}
+
+/// `ghostd diagnose [--out FILE] [...]` (ADR 0073).
+#[tokio::main]
+async fn diagnose(args: &[String]) -> i32 {
+    ghostd::diagnose::cli(args, &mut std::io::stdout(), &mut std::io::stderr()).await
 }
 
 /// `ghostd llm test`: the provider check, run by the daemon that holds the vault (ADR 0056).

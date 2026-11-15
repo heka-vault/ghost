@@ -338,6 +338,10 @@ fn claude_code_without_its_program_is_a_command_for_the_person() {
 /// here as one Ghost reads and never writes, with why.
 const READ_NOT_WRITTEN: &[(&str, &str)] = &[
     (
+        ".config/user-dirs.dirs",
+        "read for the Downloads folder a diagnostic report is saved in (ADR 0073); the report is the person's file",
+    ),
+    (
         ".config/Cursor",
         "Cursor's own sign-in, refused by other_tools::read",
     ),

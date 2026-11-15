@@ -173,7 +173,7 @@ Before a request reaches the server, a guard refuses any that carries an `Origin
 browser sends one, a tool does not: the DNS-rebinding defence, with rmcp's `Host`
 allow-list behind it) and any without a client's token. A client is a name and a token
 (`ghost_core::ghost_app::clients`): made by `ghostd mcp add <name>` or
-`POST /clients` (Settings › Outside tools), shown once, kept as its SHA-256 in the store's
+`POST /clients` (Settings › Developer › Outside tools), shown once, kept as its SHA-256 in the store's
 `outside_clients` table with when it was made and last used, compared in constant time.
 Five wrong tokens for a name refuse it for five minutes. A removed client is refused at
 its next request, since the listener reads the store each time.

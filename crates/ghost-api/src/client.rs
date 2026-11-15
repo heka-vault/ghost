@@ -150,6 +150,37 @@ impl GhostClient {
         self.request(m, path, body).await
     }
 
+    /// Debug mode (ADR 0074): `GET /debug-audio`, or `PUT` it on or off.
+    pub async fn debug_audio(&self, on: Option<bool>) -> Result<Value, ClientError> {
+        match on {
+            None => self.expect_ok(Method::GET, "/debug-audio", None).await,
+            Some(on) => {
+                let body = serde_json::json!({"on": on});
+                self.expect_ok(Method::PUT, "/debug-audio", Some(&body))
+                    .await
+            }
+        }
+    }
+
+    /// Save a diagnostic report (ADR 0073); the body is a `DiagnoseRequest`.
+    pub async fn diagnose(&self, body: &Value) -> Result<Value, ClientError> {
+        let reply = self
+            .request_with(
+                Method::POST,
+                "/diagnose",
+                Some(body),
+                Duration::from_secs(60),
+            )
+            .await?;
+        if !reply.ok() {
+            return Err(ClientError::Status {
+                status: reply.status,
+                body: reply.body.to_string(),
+            });
+        }
+        Ok(reply.body)
+    }
+
     pub async fn status(&self) -> Result<Value, ClientError> {
         self.expect_ok(Method::GET, "/status", None).await
     }

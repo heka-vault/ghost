@@ -7,6 +7,8 @@
  * rule that still decides the tool is named under it. Under the tools, its own limits in
  * apps.json (`AppLimits.tsx`, ADR 0046), committed with the page's save bar.
  */
+import { settingsPath } from "../../app/routes";
+import { PasswordInPlace } from "../settings/Passwords";
 import type { AppAction, AppView, PermissionsView, ReachView } from "@ghost/client-ts";
 import { permissionLabel, useGhost } from "@ghost/ui";
 import { ChevronLeft, ExternalLink, Megaphone, MoreHorizontal, RotateCw, SearchX, VolumeX } from "lucide-react";
@@ -308,12 +310,22 @@ export function AppDetail({ name }: { name: string }) {
 
           {limits.section}
 
+          {app.settings.length > 0 && (
+            <Section title={app.settings.length === 1 ? "Its password" : "Its passwords"} description="Add or replace it here; Ghost keeps it in its vault and sends it only to this app.">
+              <Card list>
+                {app.settings.map((n) => (
+                  <PasswordInPlace key={n} name={n} usedBy={title} />
+                ))}
+              </Card>
+            </Section>
+          )}
+
           <p className="apps-foot t-small t-3">
             Rules call it <span className="t-mono">{name}</span>, and a tool <span className="t-mono">{name}.&lt;tool&gt;</span>.{" "}
             {app.settings.length > 0 && (
               <>
                 Its {app.settings.length === 1 ? "password is" : "passwords are"} in Ghost’s vault as <span className="t-mono">{app.settings.join(", ")}</span>, on{" "}
-                <a href={hrefFor("/settings/passwords")}>Passwords</a>.{" "}
+                <a href={hrefFor(settingsPath("passwords"))}>Passwords</a>.{" "}
               </>
             )}
             Descriptions are {title}’s own words; Ghost never follows instructions in them.

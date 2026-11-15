@@ -121,6 +121,7 @@ pub fn build(app: &App, floating: &crate::floating::Status) -> tauri::Result<()>
     items.push(&quit);
     let menu = Menu::with_items(app, &items)?;
     app.manage(FloatTray(float.clone(), share.clone()));
+    app.manage(autostart::LoginTray(login.clone()));
     app.manage(ListenTray {
         item: listen,
         shown: Mutex::new(None),

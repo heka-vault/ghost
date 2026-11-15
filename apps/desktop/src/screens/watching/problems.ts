@@ -52,7 +52,7 @@ export function problemOf(raw: string, c: ProblemContext): Problem {
     return {
       ...base,
       sentence: m[3] === "is retired" ? `The ${nameOf(m[1])} schedule can’t run: ${who} is retired.` : `The ${nameOf(m[1])} schedule can’t run: there is no agent called ${who}.`,
-      fix: { label: "See your agents", path: "/settings/agents" },
+      fix: { label: "See your agents", path: "/agents" },
     };
   }
 
@@ -79,7 +79,7 @@ export function problemOf(raw: string, c: ProblemContext): Problem {
     }
     const agent = /\bagent\s+["“]?([a-z0-9-]{1,64})["”]?\b.*\b(retired|not an agent|isn’t an agent|doesn't have|doesn’t have)/i.exec(rest);
     if (agent) {
-      return { ...base, sentence: `The ${name} ${what} can’t act: ${c.agentName(agent[1])} ${/retired/i.test(agent[2]) ? "is retired" : "isn’t one of your agents"}.`, fix: { label: "See your agents", path: "/settings/agents" } };
+      return { ...base, sentence: `The ${name} ${what} can’t act: ${c.agentName(agent[1])} ${/retired/i.test(agent[2]) ? "is retired" : "isn’t one of your agents"}.`, fix: { label: "See your agents", path: "/agents" } };
     }
     return { ...base, sentence: `The ${name} ${what} is off: Ghost can’t read how it is set up.`, fix: null };
   }

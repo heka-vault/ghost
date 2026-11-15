@@ -113,6 +113,19 @@
 /* A new version (ADR 0066): quiet, in the accent, never a badge that counts. */
 .rail__update .rail__icon { color: var(--accent); }
 
+/* Debug mode (ADR 0074): under the presence while Ghost logs what it hears, a link to where it is turned off. */
+.rail__debug {
+  display: inline-flex; align-items: center; justify-content: center; gap: 3px;
+  margin: calc(var(--space-1) * -1) auto var(--space-1); padding: 2px 6px; max-width: 100%;
+  border: 1px solid var(--warn-border); border-radius: 999px; background: var(--warn-soft); color: var(--warn);
+  font-size: 10px; line-height: 1.2; font-variant-numeric: tabular-nums; font-weight: var(--weight-semibold); text-decoration: none; white-space: nowrap;
+}
+.rail__debug:hover { background: color-mix(in srgb, var(--warn-soft), var(--warn) 12%); }
+.rail__debug:focus-visible { outline: 2px solid var(--focus-ring-color); outline-offset: 2px; }
+.rail__debug-label { text-transform: uppercase; letter-spacing: 0.04em; }
+.rail__debug-time { font-variant-numeric: tabular-nums; opacity: 0.9; }
+@media (forced-colors: active) { .rail__debug { border-color: Mark; background: Canvas; color: CanvasText; } }
+
 /* All agents (the owner's simplification, 2026-11-14): the agents the rail leaves out, and
    hiring. The same row as an agent, its mark the Agents icon on the hover tint, with how many
    more as a quiet count on its corner (never the accent: nothing waits on the operator there). */

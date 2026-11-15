@@ -6,16 +6,17 @@
  * Owned by the foundation. To add a route, follow docs/design-system.md#adding-a-route.
  */
 import {
+  Activity,
   BellRing,
   Blocks,
   BookOpen,
   Cpu,
   Ghost,
   Inbox,
+  Info,
   KeyRound,
   LayoutGrid,
   type LucideIcon,
-  MessagesSquare,
   PanelTop,
   PlugZap,
   Repeat,
@@ -26,6 +27,7 @@ import {
   Smartphone,
   Sun,
   Volume2,
+  Wrench,
 } from "lucide-react";
 import { type ComponentType, lazy, type LazyExoticComponent } from "react";
 
@@ -104,15 +106,16 @@ export const ROUTES: RouteDef[] = [
   },
   {
     id: "agents",
-    // Every agent and each one's settings: a page of Settings.
-    patterns: ["/settings/agents/:slug?"],
-    path: "/settings/agents",
+    // Every agent, and each one's own page (its profile: name, look, voice, job, memory, what
+    // it does on its own, its activity). Out of Settings since 2026-11-14 (ADR 0073): an
+    // agent's settings live on the agent. The rail's agents and its + lead here.
+    patterns: ["/agents", "/agents/:slug/settings"],
+    path: "/agents",
     owner: "conversations",
     title: "Agents",
     kind: "screen",
     chrome: "app",
     needsDaemon: true,
-    area: "settings",
     component: lazy(() => import("../screens/conversations")),
   },
   {
@@ -145,8 +148,8 @@ export const ROUTES: RouteDef[] = [
   },
   {
     id: "skills",
-    patterns: ["/settings/skills"],
-    path: "/settings/skills",
+    patterns: ["/settings/developer/skills"],
+    path: "/settings/developer/skills",
     owner: "skills",
     title: "Skills",
     kind: "screen",
@@ -157,7 +160,9 @@ export const ROUTES: RouteDef[] = [
   },
   {
     id: "policy",
-    patterns: ["/settings/permissions"],
+    // `/settings/permissions/advanced` opens with Advanced open (Developer links there).
+    patterns: ["/settings/permissions/:section?"],
+    accept: (p) => !p.section || p.section === "advanced",
     path: "/settings/permissions",
     owner: "policy",
     title: "Permissions",
@@ -169,10 +174,10 @@ export const ROUTES: RouteDef[] = [
   },
   {
     id: "routes",
-    patterns: ["/settings/notifications"],
-    path: "/settings/notifications",
+    patterns: ["/settings/developer/notifications"],
+    path: "/settings/developer/notifications",
     owner: "routes",
-    title: "Notifications",
+    title: "Notification routes",
     kind: "screen",
     chrome: "app",
     needsDaemon: true,
@@ -181,8 +186,8 @@ export const ROUTES: RouteDef[] = [
   },
   {
     id: "audit",
-    patterns: ["/settings/audit"],
-    path: "/settings/audit",
+    patterns: ["/settings/developer/audit"],
+    path: "/settings/developer/audit",
     owner: "audit",
     title: "Audit log",
     kind: "screen",
@@ -207,8 +212,8 @@ export const ROUTES: RouteDef[] = [
     component: lazy(() => import("../screens/hear")),
   },
   {
-    // General, Model, Passwords, Sound, Phone and Outside tools: one screen, so moving between them keeps
-    // one draft (a typed password included) and one save bar.
+    // General, Model, Sound, About, Developer, and under them Phone, Passwords and Outside tools: one
+    // screen, so moving between them keeps one draft (a typed password included) and one save bar.
     id: "settings",
     // `/settings/sound/audio` lands on a section, as `?section=audio` does: a waiting note's place.
     patterns: ["/settings/:page/:section?"],
@@ -302,59 +307,109 @@ export const ROUTES: RouteDef[] = [
 
 /**
  * Settings: one place with a page per topic and its own nav (the operator's call,
- * 2026-10-28), in this order. Each page is `#/settings/<id>`; `#/settings` is the first.
+ * 2026-10-28). Since 2026-11-14 (ADR 0073) five pages a newcomer sees, in this order, and a
+ * sixth, Developer, once the version on About has been clicked seven times. Each page is
+ * `#/settings/<id>`; `#/settings` is the first.
+ *
+ * Under a page, a sub-page keeps its parent's place in the nav: Phone under General, and the
+ * advanced pages (Passwords, Skills, Outside tools, the Audit log, notification routes) under
+ * Developer, each at `#/settings/developer/<id>`. A sub-page is reachable by its address and
+ * from where it is used whether or not Developer is in the nav: Developer is not a lock.
  */
 export interface SettingsPage {
   id: string;
   label: string;
   icon: LucideIcon;
   path: string;
+  /** A sub-page: the nav marks this page as the current one. */
+  parent?: string;
 }
 const page = (id: string, label: string, icon: LucideIcon): SettingsPage => ({ id, label, icon, path: `/settings/${id}` });
+const sub = (parent: string, id: string, label: string, icon: LucideIcon): SettingsPage => ({
+  id,
+  label,
+  icon,
+  parent,
+  path: parent === "developer" ? `/settings/developer/${id}` : `/settings/${id}`,
+});
+/** The pages in the nav for everyone. */
 export const SETTINGS_PAGES: SettingsPage[] = [
   page("general", "General", Settings),
   page("model", "Model", Cpu),
-  page("agents", "Agents", MessagesSquare),
-  page("passwords", "Passwords", KeyRound),
-  page("skills", "Skills", BookOpen),
-  page("permissions", "Permissions", ShieldCheck),
   page("sound", "Sound", Volume2),
-  page("phone", "Phone", Smartphone),
-  page("tools", "Outside tools", PlugZap),
-  page("notifications", "Notifications", BellRing),
-  page("audit", "Audit log", ScrollText),
+  page("permissions", "Permissions", ShieldCheck),
+  page("about", "About", Info),
+];
+/** The page the version's seven clicks add to the nav (app/developer.ts). */
+export const DEVELOPER_PAGE: SettingsPage = page("developer", "Developer", Wrench);
+/** The sub-pages: in no nav, each under its parent. */
+export const SETTINGS_SUBPAGES: SettingsPage[] = [
+  sub("general", "phone", "Phone", Smartphone),
+  sub("developer", "passwords", "Passwords", KeyRound),
+  sub("developer", "skills", "Skills", BookOpen),
+  sub("developer", "tools", "Outside tools", PlugZap),
+  sub("developer", "audit", "Audit log", ScrollText),
+  sub("developer", "notifications", "Notification routes", BellRing),
+  sub("developer", "live", "Live views", Activity),
 ];
 /** The pages the settings screen itself draws; the rest are their owners' screens. */
-export const SETTINGS_SCREEN_PAGES = ["general", "model", "passwords", "sound", "phone", "tools"];
+export const SETTINGS_SCREEN_PAGES = ["general", "model", "sound", "about", "developer", "phone"];
+/** The developer sub-pages the settings screen draws (`/settings/developer/<id>`). */
+export const DEVELOPER_SCREEN_PAGES = ["passwords", "tools", "live"];
 
-/** The settings page a path is on ("sound" for /settings/sound, "apps" for /settings/apps/github), or null. */
+/**
+ * The settings page a path is on, sub-pages included ("sound" for /settings/sound,
+ * "passwords" for /settings/developer/passwords), or null.
+ */
 export function settingsPageOf(path: string): SettingsPage | null {
-  const [, area, id] = path.split("/");
-  return area === "settings" ? (SETTINGS_PAGES.find((p) => p.id === id) ?? null) : null;
+  const [, area, id, more] = path.split("/");
+  if (area !== "settings") return null;
+  if (id === "developer" && more) return SETTINGS_SUBPAGES.find((p) => p.parent === "developer" && p.id === more) ?? DEVELOPER_PAGE;
+  if (id === "developer") return DEVELOPER_PAGE;
+  return SETTINGS_PAGES.find((p) => p.id === id) ?? SETTINGS_SUBPAGES.find((p) => p.parent !== "developer" && p.id === id) ?? null;
+}
+
+/** The address of a settings page or sub-page by its id ("passwords" → /settings/developer/passwords). */
+export function settingsPath(id: string): string {
+  return [...SETTINGS_PAGES, DEVELOPER_PAGE, ...SETTINGS_SUBPAGES].find((p) => p.id === id)?.path ?? `/settings/${id}`;
+}
+
+/** The nav item a settings page belongs under: itself, or its parent. */
+export function settingsNavId(p: SettingsPage): string {
+  return p.parent ?? p.id;
 }
 
 /**
  * Old addresses and where they live now, so links in notes, docs and bookmarks keep working.
  * The shell replaces the hash; the query before it (a mock scenario, an audit filter) stays.
  */
-const REDIRECTS: { from: string; to: (p: Record<string, string>) => string }[] = [
+export const REDIRECTS: { from: string; to: (p: Record<string, string>) => string }[] = [
   { from: "/settings", to: () => SETTINGS_PAGES[0].path },
+  // The simpler Settings (ADR 0073, 2026-11-14): eleven pages became five, and Developer.
+  { from: "/settings/agents", to: () => "/agents" },
+  { from: "/settings/agents/:slug", to: (p) => `/agents/${encodeURIComponent(p.slug)}/settings` },
+  { from: "/settings/passwords/:section?", to: () => "/settings/developer/passwords" },
+  { from: "/settings/skills", to: () => "/settings/developer/skills" },
+  { from: "/settings/tools/:section?", to: () => "/settings/developer/tools" },
+  { from: "/settings/audit", to: () => "/settings/developer/audit" },
+  { from: "/settings/notifications", to: () => "/settings/developer/notifications" },
+  // The version, its build and the updates moved from General to About.
+  { from: "/settings/general/about", to: () => "/settings/about" },
+  { from: "/settings/general/updates", to: () => "/settings/about/updates" },
   // What needs you is Today's first block now (the combined direction, 2026-11-12).
   { from: "/waiting", to: () => "/" },
   // Apps was a page of Settings until the owner moved it out (2026-11-12).
   { from: "/settings/apps/:name?", to: (p) => (p.name ? `/apps/${encodeURIComponent(p.name)}` : "/apps") },
-  // The agents' roster moved under Settings; an agent's own address is its conversation.
-  { from: "/agents", to: () => "/settings/agents" },
   // Watching became On its own (2026-11-14); #/departments was its slot before ADR 0035.
   { from: "/watching/:rest?", to: () => "/on-its-own" },
   { from: "/departments/:slug?/:more?", to: () => "/on-its-own" },
   // #/servers and #/policy were these screens' addresses before ADR 0034.
   { from: "/servers", to: () => "/apps" },
-  { from: "/skills", to: () => "/settings/skills" },
+  { from: "/skills", to: () => "/settings/developer/skills" },
   { from: "/permissions", to: () => "/settings/permissions" },
   { from: "/policy", to: () => "/settings/permissions" },
-  { from: "/routes", to: () => "/settings/notifications" },
-  { from: "/audit", to: () => "/settings/audit" },
+  { from: "/routes", to: () => "/settings/developer/notifications" },
+  { from: "/audit", to: () => "/settings/developer/audit" },
 ];
 
 /** Where an old address lives now, or null when the path is current. */

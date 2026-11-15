@@ -287,6 +287,20 @@ pub struct Status {
     #[serde(default)]
     #[schema(required)]
     pub not_listening: Option<NotListening>,
+    /// Set while debug mode is on (ADR 0074): Ghost is logging what it hears and its audio
+    /// decisions to its own log on this computer. The desktop shows it, unmistakably.
+    #[serde(default)]
+    #[schema(required)]
+    pub debug_audio: Option<Box<DebugAudioMark>>,
+}
+
+/// Debug mode is on (ADR 0074).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct DebugAudioMark {
+    /// When it turns itself off (RFC 3339); null when Ghost was started with
+    /// `GHOST_DEBUG_AUDIO=1`, on until that process ends.
+    #[schema(required)]
+    pub until: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -711,6 +725,8 @@ pub enum WaitingPlace {
     Apps,
     /// Watching: the schedules, watches and Ghost's folder (ADR 0035, ADR 0047).
     Watching,
+    /// Settings › Developer: debug mode's note (ADR 0074).
+    Developer,
 }
 
 /// Where Ghost's own note leads, from its key. Only source `ghost`: an item from a watch, a
@@ -730,6 +746,7 @@ pub fn waiting_place(source: &str, key: &str) -> Option<WaitingPlace> {
         ("passwords", _) => WaitingPlace::Passwords,
         ("app", _) => WaitingPlace::Apps,
         ("folder", _) | ("watch", _) | ("schedule", _) | ("schedules", _) => WaitingPlace::Watching,
+        (_, "debug:audio") => WaitingPlace::Developer,
         _ => return None,
     })
 }

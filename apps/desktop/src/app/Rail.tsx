@@ -12,6 +12,7 @@
  * Every row is an icon over a label, so the rail reads at a glance and a screen reader hears
  * the label and the count: “Today, 2 need you”.
  */
+import { RailDebugMark } from "./DebugMark";
 import { useGhost } from "@ghost/ui";
 import { Blocks, CircleArrowUp, FlaskConical, MessagesSquare, Repeat, Settings2, Sun } from "lucide-react";
 import { type ReactNode, Suspense, lazy, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -80,10 +81,10 @@ export function Rail() {
             : "Listening for its name";
   const needs = today.needs.decide.length + today.needs.answer.length;
   const working = today.working.length + (inSession ? 1 : 0);
-  const inRoster = path === "/settings/agents" || path.startsWith("/settings/agents/");
-  const inSettings = path.startsWith("/settings") && !inRoster;
+  const inRoster = path === "/agents" || /^\/agents\/[^/]+\/settings/.test(path);
+  const inSettings = path.startsWith("/settings");
   const all = railAgents({ agents: today.agents, working: today.working, needs: [...today.needs.decide, ...today.needs.answer], session: inSession ? (status?.conversation ?? "ghost") : null, phase });
-  const openAgent = path.startsWith("/agents/") ? decodeURIComponent(path.slice("/agents/".length)) : null;
+  const openAgent = path.startsWith("/agents/") ? decodeURIComponent(path.slice("/agents/".length).split("/")[0]) : null;
   // The room the agents have, measured, and their order held while the pointer is on them.
   const { navRef, mainRef, groupRef, listRef, fit } = useRailFit();
   const [hold, setHold] = useState(false);
@@ -137,6 +138,7 @@ export function Rail() {
           <span className="rail__state">{state}</span>
         </a>
       </Tooltip>
+      <RailDebugMark status={status} />
 
       <nav className="rail__nav" aria-label="Main" ref={navRef}>
         <ul role="list" ref={mainRef}>
@@ -176,7 +178,7 @@ export function Rail() {
           <Tooltip side="right" content={`Every agent, and hiring one · ${allWords}`} asChild>
             <a
               className={cx("rail__agent rail__all", inRoster && "is-current")}
-              href={hrefFor("/settings/agents")}
+              href={hrefFor("/agents")}
               aria-current={inRoster ? "page" : undefined}
               aria-label={`All agents, ${allWords}`}
             >
@@ -195,7 +197,7 @@ export function Rail() {
           {updateLine && (
             <li>
               <Tooltip side="right" content={updateLine} asChild>
-                <a className="rail__item rail__item--small rail__update" href={hrefFor("/settings/general/updates")} aria-label={updateLine}>
+                <a className="rail__item rail__item--small rail__update" href={hrefFor("/settings/about/updates")} aria-label={updateLine}>
                   <span className="rail__icon">
                     <CircleArrowUp />
                   </span>

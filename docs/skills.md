@@ -35,7 +35,7 @@ In this order, and the first folder with a name wins:
 
 ## Finding and installing skills (#35)
 
-Settings › Skills has **Find skills**: a search of [skills.sh](https://skills.sh), the open
+Settings › Developer › Skills has **Find skills**: a search of [skills.sh](https://skills.sh), the open
 directory behind the `npx skills` CLI, and **Install from GitHub…** for a skill it doesn't
 list. Everything here is the operator's doing, from the desktop (`ghost_core::skill_catalog`,
 `ghost_api::skill_catalog`).
@@ -98,7 +98,7 @@ Control API: `GET /skill-catalog?search=`, `POST /skill-catalog/preview`,
 
 A folder without `SKILL.md` is not a skill and is ignored. A `SKILL.md` whose `name` is not
 the folder's name, or whose front matter will not parse, is a **problem**: `ghostd check`,
-`GET /skills` and the desktop's Skills page (Settings › Skills) list it with the reason, and it is never
+`GET /skills` and the desktop's Skills page (Settings › Developer › Skills) list it with the reason, and it is never
 offered to the model. A skill folder that is itself a symlink is followed (linking skills
 between tools is common); links inside a skill are not.
 

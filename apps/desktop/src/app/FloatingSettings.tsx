@@ -1,54 +1,21 @@
 /**
- * Settings › General, The floating room (ADR 0059): Ghost big and present over the desktop,
- * and Ghost on stage. Since 2026-11-14 the only way Ghost fills more than its strip: the
- * in-window room is gone, and its section here is this one. Kept beside this window, not in
+ * Settings › General, The floating room (ADR 0059): where Ghost appears when you call it, as
+ * one choice: floating over your work, or in this window. Since 2026-11-14 the only way Ghost
+ * fills more than its strip: the in-window room is gone. Kept beside this window, not in
  * Ghost's settings: the floating room's choices are the shell's (`floating.json`), since the
  * shell starts the surface before any window opens, and take effect at once, so these are
- * switches, not part of the page's draft. Ghost on stage opens the stage window, the floating
- * room on its own backdrop for showing Ghost.
+ * switches, not part of the page's draft. Captions are a choice inside floating. Ghost on
+ * stage (the stage window, for showing Ghost to people) is the tray's item (ADR 0073).
  */
-import { Button, Card, ListRow, Notice, Select, Switch } from "../ui";
-import { inTauri } from "../transport";
+import { Card, ListRow, Notice, SegmentedControl, Select } from "../ui";
 import { type FloatingCaptions, type FloatingPlacement, prefOf, prefValue, useFloating, type WhileShared } from "./floating";
 
-/** The section's body: the floating room's switch and choices, then Ghost on stage. */
+/** The section's body. */
 export function FloatingRoomSettings() {
-  return (
-    <>
-      <FloatingSettings />
-      <StageSettings />
-    </>
-  );
+  return <FloatingSettings />;
 }
 
-/** Open the stage window: the floating room on its own backdrop (`stage.html`). */
-async function openStage(): Promise<void> {
-  if (!inTauri) {
-    window.open("/stage.html?mock=floating", "_blank");
-    return;
-  }
-  const { invoke } = await import("@tauri-apps/api/core");
-  await invoke("stage_open").catch(() => undefined);
-}
-
-/** Ghost on stage: a window made to be shared or recorded, for showing Ghost to people. */
-function StageSettings() {
-  return (
-    <Card list>
-      <ListRow
-        title="Ghost on stage"
-        description="Ghost in a window of its own, on a dark stage, made for showing Ghost to people: in a meeting, share this window (it is called “Ghost · Stage”), or record it. It shows what the floating room shows, with Ghost’s words written under it for people who can’t hear it, and it never hides from a share. Also in the tray."
-        trailing={
-          <Button size="sm" variant="secondary" onClick={() => void openStage()}>
-            Open the stage
-          </Button>
-        }
-      />
-    </Card>
-  );
-}
-
-/** The floating room: on or off, which monitor, and what it can see of the desktop. */
+/** Where Ghost appears: floating, with its choices, or in the window. */
 function FloatingSettings() {
   const { status, set, error } = useFloating();
   if (!status) return null;
@@ -65,12 +32,24 @@ function FloatingSettings() {
     <>
       <Card list>
         <ListRow
-          title="Float over the desktop"
+          title="Where Ghost appears"
           description={
             refused ??
-            "When you call Ghost and this window isn’t the one you’re using, Ghost comes forward over your desktop instead, with no window around it, and goes back to a thin line at the bottom of the screen when you’re done. It never takes your keyboard, and clicks pass through everywhere it isn’t drawn. To send it away, say “Ghost, goodbye” or click Done under it."
+            (on
+              ? "When you call Ghost and this window isn’t the one you’re using, Ghost comes forward over your desktop instead, with no window around it, and goes back to a thin line at the bottom of the screen when you’re done. It never takes your keyboard, and clicks pass through everywhere it isn’t drawn. To send it away, say “Ghost, goodbye” or click Done under it."
+              : "In this window: Today’s talk bar becomes a live strip while you talk, with a yes or a question and its buttons.")
           }
-          trailing={<Switch aria-label="Float over the desktop" checked={on} disabled={!!refused} onChange={(v: boolean) => void set({ ...status.settings, on: v })} />}
+          trailing={
+            <SegmentedControl
+              aria-label="Where Ghost appears"
+              value={on ? "float" : "window"}
+              onChange={(v: string) => void set({ ...status.settings, on: v === "float" })}
+              options={[
+                { value: "float", label: "Over your work", disabled: !!refused },
+                { value: "window", label: "In the window" },
+              ]}
+            />
+          }
         />
         {on && (
           <ListRow

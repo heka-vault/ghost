@@ -12,7 +12,7 @@ without the others (ADR 0048).
 A coding agent setting Ghost up for you does this itself as its last step
 ([agent-setup.md](agent-setup.md)).
 
-In the desktop app: **Settings › Outside tools › Connect a tool**. Give it a name (Claude
+In the desktop app: **Settings › Developer › Outside tools › Connect a tool**. Give it a name (Claude
 Code, Cursor) and Ghost shows its token once, with the line to paste into the tool.
 
 Or from a terminal:
@@ -111,7 +111,7 @@ token. From the AppImage it connects by address instead, and its token is writte
 config, never shown. Restart the tool if it is open.
 
 From a terminal: `ghostd setup link cursor` (and `ghostd setup unlink cursor` to take Ghost back
-out), each asking first unless `--yes`. Removing the tool in Settings › Outside tools offers to
+out), each asking first unless `--yes`. Removing the tool in Settings › Developer › Outside tools offers to
 take Ghost's line back out of its settings too.
 
 ## See and remove them
@@ -121,7 +121,7 @@ ghostd mcp list
 ghostd mcp remove claude-code
 ```
 
-Settings › Outside tools shows the same list with when each was last used. A removed tool
+Settings › Developer › Outside tools shows the same list with when each was last used. A removed tool
 is refused from its next request.
 
 ## What a tool can do
@@ -143,7 +143,7 @@ is refused from its next request.
 | `routes_read()` | How Ghost reaches you now: the routes that are on, quiet hours, do-not-disturb |
 
 `say` speaks only when desk voice is on: `desk` in `[routes].enabled` of
-`~/.config/ghost/policy.toml` (Settings › Notifications), outside your quiet hours and
+`~/.config/ghost/policy.toml` (Settings › Developer › Notification routes), outside your quiet hours and
 do-not-disturb, with no session, hold or call under way.
 
 A tool cannot read your passwords, the policy file, your settings or permissions, an

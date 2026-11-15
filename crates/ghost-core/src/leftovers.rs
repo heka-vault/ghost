@@ -507,6 +507,13 @@ pub fn inventory(p: &Places, look: &dyn Look) -> Vec<Item> {
     ));
     items.push(item(
         Category::Data,
+        "debug-log",
+        "Debug mode's log, kept only while it is on (ADR 0074)",
+        vec![d.join("debug-audio.log")],
+        Removal::Paths,
+    ));
+    items.push(item(
+        Category::Data,
         "hearing-test",
         "The Hearing test's recordings",
         vec![d.join("hear")],

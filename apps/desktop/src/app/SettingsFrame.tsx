@@ -4,19 +4,25 @@
  * the app's sidebar stays as it is. The shell wraps every `area: "settings"` route in it; the
  * nav holds still while a page loads. A page with unsaved changes, a field to fix or a
  * restart owed carries a mark (settingsMarks.ts).
+ *
+ * Five pages for everyone, and Developer once the version on About was clicked seven times
+ * (app/developer.ts, ADR 0073). A sub-page (Phone, the advanced pages) marks its parent.
  */
 import { RotateCw } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { cx } from "../ui";
 import { hrefFor } from "./router";
-import { SETTINGS_PAGES } from "./routes";
+import { useDeveloper } from "./developer";
+import { DEVELOPER_PAGE, SETTINGS_PAGES } from "./routes";
 import { type SettingsMark, useSettingsMarks } from "./settingsMarks";
 
 const MARK_LABEL: Record<SettingsMark, string> = { dirty: "unsaved changes", restart: "restart to apply", error: "needs a fix" };
 
 export function SettingsFrame({ current, children }: { current: string; children: ReactNode }) {
   const marks = useSettingsMarks();
+  const developer = useDeveloper();
+  const pages = developer || current === DEVELOPER_PAGE.id ? [...SETTINGS_PAGES, DEVELOPER_PAGE] : SETTINGS_PAGES;
   return (
     <div className="shell-settings">
       <div className="shell-settings__rail">
@@ -25,7 +31,7 @@ export function SettingsFrame({ current, children }: { current: string; children
             Settings
           </p>
           <ul className="shell-settings__list" role="list">
-            {SETTINGS_PAGES.map((p) => {
+            {pages.map((p) => {
               const Icon = p.icon;
               const here = p.id === current;
               const mark = marks[p.id];

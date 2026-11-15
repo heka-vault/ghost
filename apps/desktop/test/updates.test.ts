@@ -53,10 +53,12 @@ describe("updates (ADR 0066)", () => {
     const notes = "## What's changed\n* Fix by @someone in [#12](https://x/12)\n**Full Changelog**: `v1...v2`";
     expect(plainNotes(notes)).toBe("What's changed\n• Fix by @someone in #12\nFull Changelog: v1...v2");
   });
-  it("the rail's link lands on the Updates section of General", () => {
-    const r = resolve("/settings/general/updates");
+  it("the rail's link lands on the Updates section of About (ADR 0073)", () => {
+    const r = resolve("/settings/about/updates");
     expect(r?.route.id).toBe("settings");
-    expect(r?.params.section).toBe("updates");
+    expect(r?.params).toEqual({ page: "about", section: "updates" });
+    // The old address, General's, still lands there.
+    expect(resolve("/settings/general/updates")?.params).toEqual({ page: "about", section: "updates" });
   });
 });
 

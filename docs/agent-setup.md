@@ -62,7 +62,7 @@ Read the result:
   works, but Ghost's echo canceller can't be set up there: suggest headphones.
 - **Space**: at least 4 GB free in `$HOME` and 500 MB in `/tmp`. Less: stop and say so.
 - **Already installed** (`/usr/bin/ghostd` printed): stop. Tell the person Ghost is here, and
-  that Settings › General › Updates checks for a new version. Run `ghostd version` and say it.
+  that Settings › About › Updates checks for a new version. Run `ghostd version` and say it.
 
 ## 3. Download the latest release and verify it
 
@@ -116,7 +116,7 @@ fetch ends; add `> /dev/null` after step 8's `--command` and `sleep 5;` before s
 
 **AppImage instead**: no password. Move the file from step 3's `ready:` path to
 `~/Applications/` and `chmod +x` it. There is no `ghostd` command with the AppImage: skip steps
-5 and 6 (the first run does both) and in step 8 use the app's Settings › Outside tools.
+5 and 6 (the first run does both) and in step 8 use the app's Settings › Developer › Outside tools.
 
 ## 5. Download Ghost's ears and voice
 
@@ -208,7 +208,7 @@ Then add Ghost to your own configuration:
   `{"mcpServers": {"ghost": {"command": "/usr/bin/ghostd", "args": ["mcp", "serve", "--client", "cursor"]}}}`
 
 Your new tools usually appear in your next session. With the AppImage there is no bridge
-command: ask the person to use Ghost's Settings › Outside tools › Connect a tool and paste the
+command: ask the person to use Ghost's Settings › Developer › Outside tools › Connect a tool and paste the
 line it shows into their own terminal, not this chat.
 
 ## 9. Ghost says hello
@@ -230,7 +230,7 @@ Read the `status` in the answer and say it plainly:
   short reply.
 - `on the waiting list` with `the operator has not let Ghost speak first at the desk`: this is
   the default. The hello is on Ghost's Today screen. To hear it, the person turns on **Ghost
-  asks at the desk** in Settings › Notifications themselves (a chime, the sentence, then Ghost
+  asks at the desk** in Settings › General › How Ghost reaches you themselves (a chime, the sentence, then Ghost
   listens for their reply); then you may send it once more. Don't change that setting.
 - Another reason (`the desk is busy`, `a quiet time`): say it; don't retry in a loop.
 

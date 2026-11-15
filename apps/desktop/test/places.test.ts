@@ -19,7 +19,7 @@ describe("where a waiting item leads", () => {
     }
     // a note with no section of its own: the page
     expect(placeOf({ place: "model", key: "model:slow" })?.path).toBe("/settings/model");
-    expect(placeOf({ place: "passwords", key: "passwords:locked" })?.path).toBe("/settings/passwords");
+    expect(placeOf({ place: "passwords", key: "passwords:locked" })?.path).toBe("/settings/developer/passwords");
   });
   it("leads an app's sign-in note to that app's page", () => {
     expect(placeOf({ place: "apps", key: "app:github_heka" })?.path).toBe("/apps/github_heka");

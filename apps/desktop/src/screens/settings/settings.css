@@ -268,3 +268,37 @@
 .claude-code-lead.is-selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-soft); }
 .claude-code-lead + .g-card, .claude-code-lead { margin-bottom: var(--space-4); }
 .claude-code-lead__else { display: flex; justify-content: flex-end; padding: 0 var(--space-3) var(--space-3); }
+
+/* About's version: clickable seven times for Developer (ADR 0073). */
+.set-version-tap { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.set-version-tap__button { background: none; border: 0; padding: 2px 4px; margin: -2px -4px; border-radius: var(--radius-sm); cursor: default; color: inherit; }
+.set-version-tap__button:focus-visible { outline: 2px solid var(--focus-ring-color); outline-offset: 2px; }
+.set-version-tap__hint { font-size: var(--text-xs); color: var(--text-3); min-height: 1em; }
+
+/* The diagnostic report's summary. */
+.set-diag { display: flex; flex-direction: column; gap: var(--space-3); }
+.set-diag__lead { margin: 0; font-weight: var(--weight-medium); }
+.set-diag__parts { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--radius-md); }
+.set-diag__parts li { display: grid; grid-template-columns: 1fr auto; gap: 0 var(--space-3); padding: var(--space-2) var(--space-3); border-top: 1px solid var(--border); }
+.set-diag__parts li:first-child { border-top: 0; }
+.set-diag__parts li.is-personal { background: var(--warn-soft); }
+.set-diag__title { display: inline-flex; align-items: center; gap: var(--space-1); font-weight: var(--weight-medium); }
+.set-diag__title svg { color: var(--warn); }
+.set-diag__summary { grid-column: 1; color: var(--text-2); font-size: var(--text-sm); }
+.set-diag__size { grid-column: 2; grid-row: 1 / span 2; align-self: center; color: var(--text-3); font-size: var(--text-sm); }
+.set-diag__box { display: flex; flex-direction: column; gap: 2px; }
+.set-diag__warning { margin: 0 0 0 28px; color: var(--text-2); font-size: var(--text-sm); }
+
+/* Licences. */
+.set-licences { max-height: 50vh; overflow: auto; margin-top: var(--space-2); }
+.set-licences__more { color: var(--text-3); font-size: var(--text-sm); }
+
+/* Developer's experimental switches. */
+.set-switch-name { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-3); margin-left: var(--space-1); }
+.set-switch-source { color: var(--text-3); }
+.set-switch-number { display: inline-flex; gap: var(--space-1); align-items: center; }
+.set-switch-number input { width: 6.5em; }
+@media (max-width: 560px) { .set-diag__parts li { grid-template-columns: 1fr; } .set-diag__size { grid-column: 1; grid-row: auto; } }
+
+/* A password where it is used (ADR 0073). */
+.set-inplace__where { margin: 0; padding: 0 var(--space-4) var(--space-3); color: var(--text-3); font-size: var(--text-sm); }

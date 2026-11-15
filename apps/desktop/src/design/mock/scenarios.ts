@@ -49,6 +49,8 @@ export interface Scenario {
    * this many minutes from load. Any scenario can set it with ?listening=off|<minutes>.
    */
   notListening?: true | number;
+  /** Debug mode is on (ADR 0074), 42 minutes left. Any scenario can set it with ?debug=on. */
+  debugAudio?: boolean;
   /**
    * Plays one spoken turn when the event stream opens, as the daemon sends it: three pieces
    * read at the operator's pauses (0.8 s, 2.6 s, 4.2 s), the turn closing (thinking, 5.2 s),
@@ -127,10 +129,11 @@ export const SCENARIOS: Scenario[] = [
   { name: "ending", label: "Hanging up", description: "Ghost says goodbye and the session ends.", daemon: true, phase: "listening", modelsReady: true, session: "ghost", pending: false, configured: true, data: "normal", story: "ending" },
   { name: "turn-error", label: "A turn failed", description: "The model failed on the last turn.", daemon: true, phase: "listening", modelsReady: true, session: "ghost", pending: false, configured: true, data: "normal", story: "error" },
   { name: "notlistening", label: "Not listening", description: "The microphone is closed until the operator turns it back on: no wake, typing still works.", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: true, data: "normal", notListening: true },
+  { name: "debugmode", label: "Debug mode on", description: "Debug mode is on with 42 minutes left: the rail's mark, the waiting note, and Settings › Developer's countdown.", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: true, data: "normal", debugAudio: true },
   { name: "pieces", label: "Said in pieces", description: "A live session; one spoken sentence arrives in three pieces with pauses, then Ghost answers.", daemon: true, phase: "listening", modelsReady: true, session: "ghost", pending: false, configured: true, data: "normal", pieces: true },
-  { name: "floating", label: "Floating room", description: "The floating room's whole sequence, over and over: the wake, your turn, calls, the reply, a yes, a question, goodbye.", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: true, data: "normal", floating: true },
-  { name: "floating-tour", label: "Floating room, the tour", description: "The README's pictures: one whole turn in 12 s with six places, then a change waiting for a yes, then an agent's question, once.", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: true, data: "normal", floatingTour: true },
-  { name: "floating-site", label: "Floating room, the site", description: "The site's hero: one turn with six places, a reply, a change waiting for a yes, the yes and the goodbye, on the clock of the site's sound (every 24.6 s).", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: true, data: "normal", floatingSite: true },
+  { name: "floating", label: "Floating", description: "Ghost floating, the whole sequence, over and over: the wake, your turn, calls, the reply, a yes, a question, goodbye.", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: true, data: "normal", floating: true },
+  { name: "floating-tour", label: "Floating, the tour", description: "The README's pictures: one whole turn in 12 s with six places, then a change waiting for a yes, then an agent's question, once.", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: true, data: "normal", floatingTour: true },
+  { name: "floating-site", label: "Floating, the site", description: "The site's hero: one turn with six places, a reply, a change waiting for a yes, the yes and the goodbye, on the clock of the site's sound (every 24.6 s).", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: true, data: "normal", floatingSite: true },
   { name: "realtime", label: "Realtime voice", description: "The operator chose the realtime voice: Settings › Sound shows the provider, today’s spend, the cap and a check.", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: true, data: "normal", realtime: true },
   { name: "busy", label: "Busy", description: "Months of use: many lines, 200 audit rows, seven apps, one of them not connecting.", daemon: true, phase: "listening", modelsReady: true, session: "legal", pending: false, configured: true, data: "busy" },
 ];

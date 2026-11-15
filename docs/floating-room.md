@@ -1,4 +1,4 @@
-# The floating room
+# Floating: Ghost over your desktop
 
 ADR 0059. Ghost big and present, without a window: a thin line of light at the bottom edge
 of a monitor until its name is called, then Ghost comes forward over the desktop with no

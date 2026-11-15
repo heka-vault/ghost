@@ -147,7 +147,9 @@ pub fn run() {
             updater::update_install,
             updater::update_cancel,
             reports::report_page_error,
-            uninstall::remove_ghost
+            uninstall::remove_ghost,
+            autostart::login_status,
+            autostart::login_set
         ])
         .setup(|app| {
             let floating = floating::setup(app.handle());

@@ -1,5 +1,7 @@
 /**
- * Owner: routes. Notifications (#/settings/notifications, once “How Ghost reaches you”): how
+ * Owner: routes. Notification routes (#/settings/developer/notifications since ADR 0073; once
+ * “Notifications”, and before that “How Ghost reaches you”, which is General's short section
+ * now, with the everyday routes as switches): how
  * Ghost reaches the operator about what needs them (ADR 0031): which
  * routes are on, how long a delivery waits to be heard before the next one, quiet hours,
  * and what desk voice says first. It edits `[routes]` in the policy file, the operator's

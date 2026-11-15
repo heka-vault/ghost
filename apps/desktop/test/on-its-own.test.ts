@@ -154,7 +154,7 @@ describe("what can't run, said for a newcomer", () => {
       "The invoices watch can’t run: QuickBooks isn’t connected.",
       "The billing webhook is off: Ghost can’t read how it is set up.",
     ]);
-    expect(said.map((p) => p.fix?.path ?? null)).toEqual(["/settings/agents", "/apps", null]);
+    expect(said.map((p) => p.fix?.path ?? null)).toEqual(["/agents", "/apps", null]);
     expect(said[1].fix?.label).toBe("Connect QuickBooks");
     // The raw line and its file stay for Details, never in the sentence.
     expect(said[1].detail).toBe(raw[1]);

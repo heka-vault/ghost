@@ -155,7 +155,7 @@ export function AgentsIndex() {
     return (
       <ListRow
         key={l.slug}
-        href={hrefFor(`/settings/agents/${encodeURIComponent(l.slug)}`)}
+        href={hrefFor(`/agents/${encodeURIComponent(l.slug)}/settings`)}
         leading={<LineGlyph slug={l.slug} name={name} size="lg" />}
         title={name}
         description={
@@ -322,7 +322,7 @@ export function AgentsIndex() {
                   return (
                     <ListRow
                       key={l.slug}
-                      href={hrefFor(`/settings/agents/${encodeURIComponent(l.slug)}`)}
+                      href={hrefFor(`/agents/${encodeURIComponent(l.slug)}/settings`)}
                       leading={<LineGlyph slug={l.slug} name={name} size="lg" />}
                       title={name}
                       description={
