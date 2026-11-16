@@ -1456,8 +1456,11 @@ impl Catalog {
     /// first-party apps of a first copy come in a second or two, the rest later.
     pub async fn wait(&self, secs: f64) {
         let deadline = Instant::now() + Duration::from_secs_f64(secs.max(0.0));
-        // Ghost's own list is always there; what is waited for is the registry's.
-        while self.refreshing() && lock(&self.copy).records.is_empty() {
+        // Ghost's own list is always there; what is waited for is the registry's, and in
+        // the index, where a lookup finds it: the records are filled a moment before the
+        // index is rebuilt, and a connect in that moment found nothing (a queue run of
+        // 2026-11-16).
+        while self.refreshing() && self.entries().entries.values().all(|e| e.in_tree) {
             if Instant::now() >= deadline {
                 return;
             }
@@ -2211,6 +2214,29 @@ mod tests {
             .filter(|u| u.contains(holding))
             .cloned()
             .collect()
+    }
+
+    #[tokio::test]
+    async fn waiting_for_a_first_copy_waits_until_a_lookup_finds_it() {
+        // The records of a first copy are there a moment before the index is rebuilt. A
+        // wait that ended on the records let a connect through that found nothing.
+        let dir = tempfile::tempdir().unwrap();
+        let cat = Arc::new(Catalog::with_options(
+            dir.path().join("catalog.json"),
+            CatalogOptions::default(),
+        ));
+        let name = "io.github.github/github-mcp-server";
+        lock(&cat.copy)
+            .records
+            .insert(name.to_string(), Arc::new(github()));
+        let indexing = Arc::clone(&cat);
+        *lock(&cat.refreshing) = Some(tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            indexing.index().await;
+        }));
+        assert!(cat.get(name).is_none());
+        cat.wait(5.0).await;
+        assert!(cat.get(name).is_some(), "the wait ended before the index");
     }
 
     #[tokio::test]
