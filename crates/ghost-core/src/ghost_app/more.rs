@@ -67,7 +67,10 @@ pub fn asks_by_default(tool: &str, args: Option<&Map<String, Value>>) -> bool {
 /// Ghost's own tools an outside client is never offered (ADR 0052): what reads an agent's
 /// private memory, the operator's settings or permissions, the apps' own text; and every
 /// change to apps, watches, quiet, outputs or skills. `outside::tests` and ghostd's
-/// `nothing_an_outside_client_must_not_reach_is_offered` hold this line.
+/// `nothing_an_outside_client_must_not_reach_is_offered` hold this line. Dictation and the
+/// clipboard (ADR 0077) are not here because Ghost's own app has no tool for them at all:
+/// `no_tool_starts_dictation_or_reaches_the_clipboard` holds that, and the outside test
+/// names them among the words no offered tool may carry.
 pub const NOT_FOR_OUTSIDE: [&str; 15] = [
     "memory_read",
     "app_connect",

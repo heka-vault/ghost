@@ -331,6 +331,9 @@ pub struct Capture {
     /// The channel kept when one is taken alone.
     take: Option<u16>,
     source: String,
+    /// The live-capture count's token (`crate::live`): the last field, so it is released
+    /// only after `Drop` has joined the thread and every other field is gone.
+    token: Option<crate::live::CaptureToken>,
 }
 
 /// The most channels a capture opens to take one of them alone.
@@ -380,6 +383,7 @@ impl Capture {
                 channels,
                 take,
                 source,
+                token: None,
             }),
             Ok(Err(e)) => {
                 let _ = thread.join();
@@ -474,6 +478,15 @@ impl Capture {
     /// Stop the stream and join its thread.
     pub fn close(self) {
         drop(self);
+    }
+}
+
+impl Capture {
+    /// Count this capture in a registry until it is gone. Take the token before the open
+    /// starts, so the open in flight is counted too.
+    pub fn with_token(mut self, token: crate::live::CaptureToken) -> Self {
+        self.token = Some(token);
+        self
     }
 }
 

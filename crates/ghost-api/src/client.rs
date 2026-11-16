@@ -162,6 +162,32 @@ impl GhostClient {
         }
     }
 
+    /// Dictation (ADR 0077): `GET /dictation` with no verb, else `POST /dictation/<verb>`
+    /// (`start`, `stop`, `toggle`, `cancel`). A stop waits for the read, so it has a longer
+    /// timeout than other calls.
+    pub async fn dictation(&self, verb: Option<&str>) -> Result<Value, ClientError> {
+        match verb {
+            None => self.expect_ok(Method::GET, "/dictation", None).await,
+            Some(verb) => {
+                let reply = self
+                    .request_with(
+                        Method::POST,
+                        &format!("/dictation/{verb}"),
+                        None,
+                        Duration::from_secs(60),
+                    )
+                    .await?;
+                if !reply.ok() {
+                    return Err(ClientError::Status {
+                        status: reply.status,
+                        body: reply.body.to_string(),
+                    });
+                }
+                Ok(reply.body)
+            }
+        }
+    }
+
     /// Save a diagnostic report (ADR 0073); the body is a `DiagnoseRequest`.
     pub async fn diagnose(&self, body: &Value) -> Result<Value, ClientError> {
         let reply = self

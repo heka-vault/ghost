@@ -57,9 +57,13 @@ percent-encoding.workspace = true
 async-trait.workspace = true
 nix.workspace = true
 zbus.workspace = true
+# The dictation clipboard's owner (ADR 0077): the X11 protocol in pure Rust.
+x11rb.workspace = true
+x11rb-protocol.workspace = true
 # termios: `ghostd passwords set` reads the value from the terminal without echo.
 # process: `run` stops when the shell that started it is gone (ADR 0038).
-rustix = { workspace = true, features = ["termios", "process"] }
+# event: the dictation clipboard's owner waits on the display's socket (ADR 0077).
+rustix = { workspace = true, features = ["termios", "process", "event", "net"] }
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -791,6 +791,48 @@ impl MediaIn for CaptureIn {
     }
 }
 
+/// A capture counted in the live-capture registry (ADR 0077): the token is taken before
+/// the open starts and dropped after the capture, which is declared first so it is dropped
+/// first (for `ghost_audio`'s capture, after its thread is joined).
+pub struct CountedIn {
+    inner: Box<dyn MediaIn>,
+    _token: ghost_audio::live::CaptureToken,
+}
+
+impl CountedIn {
+    pub fn new(inner: Box<dyn MediaIn>, token: ghost_audio::live::CaptureToken) -> Self {
+        Self {
+            inner,
+            _token: token,
+        }
+    }
+}
+
+#[async_trait]
+impl MediaIn for CountedIn {
+    async fn next_frame(&mut self) -> Option<ghost_voice::frames::Audio> {
+        self.inner.next_frame().await
+    }
+
+    fn close(&mut self) {
+        self.inner.close();
+    }
+}
+
+/// Wrap a media factory so each input it opens is counted for `holder` from before its
+/// open until after it is gone.
+pub fn counted(
+    inner: MediaFactory,
+    registry: Arc<ghost_audio::live::Registry>,
+    holder: ghost_audio::live::Holder,
+) -> MediaFactory {
+    Arc::new(move || {
+        let token = registry.take(holder);
+        let media = inner()?; // a failed open drops the token here
+        Ok(Box::new(CountedIn::new(media, token)) as Box<dyn MediaIn>)
+    })
+}
+
 /// The wake's input through `ghost_audio`, opened per pipeline (ADR 0064): `input()` is
 /// asked each time, so a changed device or a repair is picked up at the next build. One
 /// channel of the device is taken alone when the input names one (`node#N`); nothing named,

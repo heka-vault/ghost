@@ -549,6 +549,30 @@ still reads every segment: the transcript, `heard`, the fixed intents and the ga
 evidence are Ghost's own words. The phone's call, typed sessions and schedules never use
 it.
 
+### Dictation (ADR 0077)
+
+`ghostd::dictation` writes down what the operator says, onto the clipboard. The operator
+starts and stops it (`ghostd dictate`, `POST /dictation/*`, a desktop shortcut bound to
+`ghostd dictate toggle`); nothing else can. One coordinator serializes start, stop, toggle
+and cancel, with a generation per dictation so a read cancelled meanwhile does nothing. It
+takes the microphone from the passive loop with a lease, as the Hearing test does. Every desk
+capture (the wake's, the kept takes' tape's, a session's, the Hearing test's, dictation's) is
+counted in one registry, `ghost_audio::live`, from before its open until after its thread is
+joined; the loop stops the wake as always and grants the lease only when that count is zero
+(within 3 s, or dictation is refused as busy), and listens again once dictation's own capture
+has released its token, with no time limit but Ghost stopping and a note on the waiting list
+while it does not. Nothing else waits on the registry. A dictation is the coordinator's, not
+a request's: start and stop run as its tasks, a guard settles the stage on any exit, and the
+limit is in samples and in time. The recording (30 s at most) is read once
+on the shared Parakeet, cleaned up without a model (`dictation::cleanup`: fillers, a word
+said three times, control characters), and owned as the X11 CLIPBOARD by one joined thread
+through x11rb's pure-Rust connection, its setup bounded step by step and its wait for pastes
+interruptible (XWayland on GNOME,
+where mutter bridges it to Wayland apps; `dictation::clipboard`). The words reach nothing else; the API, the CLI and a
+`notify-send` note get kinds and numbers. Refused while not listening, in a session or the
+Hearing test, without the speech model or a microphone; cancelled by listening off, a
+session opening and Ghost stopping. See [dictation.md](dictation.md).
+
 ## Open items
 
 - Wake word: the transcript matcher costs continuous local STT while passive. Measure its CPU and false wakes against music; if either is a problem, train "Hey Ghost" with `livekit-wakeword` for the `OnnxWakeDetector` (ADR 0005, ADR 0010).

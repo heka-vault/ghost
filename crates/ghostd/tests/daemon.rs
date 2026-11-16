@@ -81,7 +81,7 @@ fn settings(tmp: &std::path::Path, wake_mode: &str) -> (GhostdSettings, VoiceSet
         wake_mode: wake_mode.into(),
         chime: false,
         mcp_listen: String::new(), // never the operator's port from a test
-        dictation_flag: t("rt/dictation"),
+        nerd_dictation_flag: t("rt/dictation"),
         ..GhostdSettings::default()
     };
     let cache = t("cache").to_string_lossy().into_owned();

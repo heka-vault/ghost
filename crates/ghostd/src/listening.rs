@@ -88,6 +88,9 @@ impl Daemon {
             return Ok(view);
         }
         info!("listening: off; the microphone closes");
+        // ADR 0077: a dictation recording or being read is dropped with it.
+        self.end_dictation(ghost_api::dictation::DictationReason::ListeningTurnedOff)
+            .await;
         if let Some(session) = self.session()
             && *lock(&self.origin) != Some(ghost_api::models::SessionOrigin::Phone)
         {

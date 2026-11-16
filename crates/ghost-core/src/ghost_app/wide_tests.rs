@@ -994,6 +994,22 @@ async fn no_tool_turns_listening_on_or_off() {
     }
 }
 
+#[tokio::test]
+async fn no_tool_starts_dictation_or_reaches_the_clipboard() {
+    // ADR 0077: dictation is the operator's own act, from the control API's routes and
+    // `ghostd dictate`. No agent, run or outside client (served a part of these same tools,
+    // ADR 0048) starts or stops it, reads what it wrote, or touches the clipboard or a paste:
+    // a model told by an app's text to "start dictating" would have an open microphone, and
+    // one told to "paste" a way to type into the operator's windows.
+    let w = world().await;
+    for t in w.server.tools() {
+        let said = format!("{} {}", t.name, t.description.as_deref().unwrap_or("")).to_lowercase();
+        for word in ["dictat", "clipboard", "paste", "keystroke", "type into"] {
+            assert!(!said.contains(word), "{} mentions {word}", t.name);
+        }
+    }
+}
+
 // --- 6. outputs --------------------------------------------------------------------------
 
 #[tokio::test]

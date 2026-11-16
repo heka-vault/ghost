@@ -26,6 +26,7 @@ pub mod mcp;
 pub mod meter;
 pub mod microphone;
 pub mod model_check;
+pub mod nerd_dictation;
 pub mod outside;
 pub mod passwords;
 pub mod phone;
@@ -44,5 +45,6 @@ pub mod uninstall;
 pub mod wake;
 pub mod wake_detectors;
 pub mod wake_takes;
+pub mod wind_down;
 
 pub use config::GhostdSettings;

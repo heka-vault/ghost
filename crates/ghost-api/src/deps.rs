@@ -496,6 +496,8 @@ pub struct Deps {
     pub meter: Option<Arc<dyn crate::live::MeterPort>>,
     /// `ghostd check`, run for Developer's Run Ghost's checks.
     pub checks: Option<Arc<dyn crate::developer::ChecksPort>>,
+    /// Dictation (ADR 0077): the operator's start and stop; never the words.
+    pub dictation: Option<Arc<dyn crate::dictation::DictationPort>>,
 }
 
 impl Deps {
@@ -557,6 +559,7 @@ impl Deps {
             diagnose: None,
             meter: None,
             checks: None,
+            dictation: None,
         }
     }
 

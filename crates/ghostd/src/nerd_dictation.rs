@@ -1,4 +1,7 @@
-//! Pause wake detection while nerd-dictation (F9) is active.
+//! Pause wake detection while nerd-dictation (F9) is active: the operator's own outside
+//! dictation tool, which types through `ydotool`. Not Ghost's own dictation (ADR 0077,
+//! `ghostd::dictation`), which takes the microphone from the passive loop itself; this only
+//! notices the other tool so its words never wake Ghost.
 
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -6,7 +9,7 @@ use std::process::{Command, Stdio};
 use ghost_core::redact::child_env;
 
 /// The toggle script's flag file, or a `nerd-dictation begin` process.
-pub fn is_dictating(flag: &Path) -> bool {
+pub fn running(flag: &Path) -> bool {
     if flag.exists() {
         return true;
     }
@@ -30,11 +33,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn dictation_flag() {
+    fn nerd_dictation_flag() {
         let dir = tempfile::tempdir().unwrap();
         let flag = dir.path().join("dictation-audio-duck.state");
-        assert!(!is_dictating(&flag));
+        assert!(!running(&flag));
         std::fs::write(&flag, "sink\tno\n").unwrap();
-        assert!(is_dictating(&flag));
+        assert!(running(&flag));
     }
 }
