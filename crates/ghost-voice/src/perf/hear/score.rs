@@ -81,6 +81,13 @@ pub fn normalize(text: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut i = 0;
     while i < raw.len() {
+        // "4 oh 3", "4 o 3": a zero between digits, as inside a run of number words
+        if is_oh(&raw[i]) && out.last().is_some_and(|w| is_digits(w)) && zero_follows(&raw[i + 1..])
+        {
+            push_digits(&mut out, "0".into());
+            i += 1;
+            continue;
+        }
         if let Some((digits, used)) = number_run(&raw[i..]) {
             push_digits(&mut out, digits);
             i += used;
@@ -100,9 +107,26 @@ pub fn normalize(text: &str) -> Vec<String> {
 /// Digits join the digits before them: "4" "03" and "four oh three" score alike.
 fn push_digits(out: &mut Vec<String>, digits: String) {
     match out.last_mut() {
-        Some(last) if last.chars().all(|c| c.is_ascii_digit()) => last.push_str(&digits),
+        Some(last) if is_digits(last) => last.push_str(&digits),
         _ => out.push(digits),
     }
+}
+
+fn is_digits(w: &str) -> bool {
+    !w.is_empty() && w.chars().all(|c| c.is_ascii_digit())
+}
+
+/// A zero said as a letter. Parakeet writes it "oh" or, at full precision about as
+/// often, the letter "o" (#167); both are a zero only inside a number.
+fn is_oh(w: &str) -> bool {
+    w == "oh" || w == "o"
+}
+
+/// Whether the words after an "oh" go on with the number ("oh three", "oh 3", "oh oh
+/// one"), so a trailing "four, oh" or "60, oh, and" keeps its "oh".
+fn zero_follows(ws: &[String]) -> bool {
+    ws.first()
+        .is_some_and(|w| is_oh(w) || is_digits(w) || group(ws).is_some())
 }
 
 /// One group of number words from the front of `ws`: its value and how many words it took.
@@ -166,13 +190,13 @@ fn group(ws: &[String]) -> Option<(u64, usize)> {
 }
 
 /// A run of number groups said one after another, as digits: "one forty two" is 1 then
-/// 42, so `142`; "four oh three" is 4, 0, 3; "twenty twenty six" is `2026`. "oh" is a
-/// zero only after a group has started, so "oh, close it" keeps its "oh".
+/// 42, so `142`; "four oh three" (or "four o three", the letter) is 4, 0, 3; "twenty twenty six" is
+/// `2026`. "oh" is a zero only after a group has started, so "oh, close it" keeps its "oh".
 fn number_run(ws: &[String]) -> Option<(String, usize)> {
     let mut digits = String::new();
     let mut i = 0;
     loop {
-        if i > 0 && ws.get(i).is_some_and(|w| w == "oh") {
+        if i > 0 && ws.get(i).is_some_and(|w| is_oh(w)) && zero_follows(&ws[i + 1..]) {
             digits.push('0');
             i += 1;
             continue;
@@ -576,6 +600,23 @@ mod tests {
     fn oh_is_a_zero_only_inside_a_number() {
         assert_eq!(n("Oh, close it."), w("oh close it"));
         assert_eq!(n("four oh nine"), w("409"));
+        assert_eq!(n("O, close it."), w("o close it"));
+        assert_eq!(n("issue four, oh"), w("issue 4 oh"));
+        assert_eq!(
+            n("close 60, oh, and leave it"),
+            w("close 60 oh and leave it")
+        );
+        assert_eq!(n("one oh oh one"), w("1001"));
+    }
+
+    #[test]
+    fn a_zero_written_as_the_letter_o_is_a_zero() {
+        // #167: the full-precision model often writes a spoken zero as the letter
+        for heard in ["seven o one", "Seven-O-one", "7 o 1", "7 oh 1", "7-0-1"] {
+            assert_eq!(n(heard), w("701"), "{heard:?}");
+        }
+        let s = score("Close issue seven oh one.", "Close issue seven o one.", &[]);
+        assert_eq!(s.errors(), 0);
     }
 
     #[test]

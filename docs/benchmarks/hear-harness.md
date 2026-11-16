@@ -34,7 +34,8 @@ The takes come from one of two places:
 
 Both sides are normalized the same way (`perf::hear::score::normalize`): lowercase,
 punctuation gone, "sign-off" as two words, fillers (um, uh, er, hmm) left out of every
-count, and spoken numbers as digits ("four oh three", "403" and "4 0 3" are all `403`;
+count, and spoken numbers as digits ("four oh three", "four o three", "403" and "4 0 3"
+are all `403`; a zero as "oh" or the letter "o" only between digits;
 "one forty two" and "one hundred forty two" are `142`). The words are aligned with the
 fewest edits, ties going to the alignment a person would draw (most words matched, a
 number substituted for a number).

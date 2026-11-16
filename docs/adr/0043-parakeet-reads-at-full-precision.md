@@ -51,6 +51,16 @@ alongside): a one-word reply 0.21 s → 0.34 s, nine words 0.30 s → 0.46 s, tw
 loading it about ten seconds. Numbers read as digits got worse on the session (4 → 7 of
 16 wrong) and are still to be looked at.
 
+*Amended 2026-11-15 ([#167](https://github.com/heka-vault/ghost/issues/167)):* the 4 → 7
+is the live read's pieces, not the model's numbers. All three new errors are a fragment at
+a VAD cut read as a number of its own, in front of the number that follows (int8 had read
+two of those pieces as nothing); the whole-turn read the model gets (ADR 0044) has none of
+them. On that read the full-precision model writes a spoken zero as the letter "o", which
+the hear harness's scorer counted as three errors a time: once it reads the letter as a
+zero between digits, the session's `turn` read has 2 of 16 numbers wrong (was 6), both one
+tens word heard as another, and its word error rate is 2.1% (was 4.2%); the live read is
+unchanged at 7 of 16.
+
 A whole turn (`make perf RUNS=2 ARGS=--no-jev`, the same afternoon, both under the same
 load): the `stt` stage p50 0.11 s → 0.17 s and p95 0.17 s → 0.25 s; the turn's `hear` p50
 1.45 s both ways, since the 1.2 s hold after the words dominates it, and the reply p50
