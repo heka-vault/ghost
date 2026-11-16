@@ -1886,7 +1886,8 @@
           "stopping",
           "no_display",
           "clipboard_failed",
-          "too_long"
+          "too_long",
+          "failed"
         ],
         "type": "string"
       },

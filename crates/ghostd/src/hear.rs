@@ -268,7 +268,11 @@ impl HearDesk {
     }
 
     /// A session's input, its channel taken alone when it names one.
-    async fn open_input(spec: ghost_audio::InputSpec) -> Result<Capture, String> {
+    /// Each counted in the live-capture registry from before its open (ADR 0077).
+    async fn open_input(
+        spec: ghost_audio::InputSpec,
+        token: ghost_audio::live::CaptureToken,
+    ) -> Result<Capture, String> {
         tokio::task::spawn_blocking(move || {
             Capture::open(CaptureConfig {
                 ring_seconds: 2.0,
@@ -276,13 +280,18 @@ impl HearDesk {
                 description: "Ghost (Hearing test)".into(),
                 ..CaptureConfig::for_spec(&spec)
             })
+            .map(|c| c.with_token(token))
             .map_err(|e| e.to_string())
         })
         .await
         .map_err(|e| e.to_string())?
     }
 
-    async fn open_capture(node: String, channels: u16) -> Result<Capture, String> {
+    async fn open_capture(
+        node: String,
+        channels: u16,
+        token: ghost_audio::live::CaptureToken,
+    ) -> Result<Capture, String> {
         tokio::task::spawn_blocking(move || {
             Capture::open(CaptureConfig {
                 node: Some(node),
@@ -292,6 +301,7 @@ impl HearDesk {
                 description: "Ghost (Hearing test)".into(),
                 ..CaptureConfig::default()
             })
+            .map(|c| c.with_token(token))
             .map_err(|e| e.to_string())
         })
         .await
@@ -1186,12 +1196,13 @@ impl HearDesk {
         // What a session hears (ADR 0064): `ghost.mic`, or a device's channel taken alone.
         let spec = d.mic_plan().session;
         let node = spec.to_string();
-        let aec = Self::open_input(spec)
+        let hearing = || d.captures.take(ghost_audio::live::Holder::Hearing);
+        let aec = Self::open_input(spec, hearing())
             .await
             .map_err(|e| HearError::Unavailable(format!("{node} could not be opened: {e}")))?;
         let raw_node = self.raw_node();
         let raw = match &raw_node {
-            Some(n) => match Self::open_capture(n.clone(), RAW_CHANNELS).await {
+            Some(n) => match Self::open_capture(n.clone(), RAW_CHANNELS, hearing()).await {
                 Ok(c) => Some(c),
                 Err(e) => {
                     warn!(

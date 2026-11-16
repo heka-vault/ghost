@@ -30,6 +30,7 @@ use ghost_api::models::{SessionOrigin, TurnVia};
 use ghost_api::server::default_socket_path;
 use ghost_api::{DaemonState, Deps, DevicesPort, Phase};
 use ghost_audio::AudioSettings;
+use ghost_audio::live::{Holder, Registry};
 use ghost_core::apps::{APPS_FILE, Apps, Environ, GHOST_APP, load_apps};
 use ghost_core::catalog::Catalog;
 use ghost_core::confirmation::{ConfirmationClassifier, RegexClassifier};
@@ -556,6 +557,10 @@ pub struct Daemon {
     mic_plan: Mutex<Option<(Instant, crate::microphone::Plan)>>,
     /// Dictation asking the passive loop for the microphone (ADR 0077).
     pub(crate) dictation_mic: Arc<crate::dictation::Leases>,
+    /// Every desk capture alive or opening, by who holds it (ADR 0077).
+    pub captures: Arc<Registry>,
+    /// Dictation's capture has not closed: the waiting list says so (ADR 0077).
+    pub(crate) dictation_note: Mutex<Option<String>>,
 }
 
 /// How long a read of the sound devices is trusted.
@@ -641,6 +646,8 @@ impl Daemon {
             wake_level: Arc::new(Mutex::new(None)),
             mic_plan: Mutex::new(None),
             dictation_mic: Arc::new(crate::dictation::Leases::default()),
+            captures: Registry::new(),
+            dictation_note: Mutex::new(None),
         }
     }
 
@@ -1295,6 +1302,8 @@ impl Daemon {
                     .unwrap_or_default()
             }))
         });
+        // ADR 0077: each passive capture counted from before its open until it is gone.
+        let inner = crate::wake::counted(inner, self.captures.clone(), Holder::Wake);
         let health = self.mic_health.clone();
         crate::wake::metered(
             inner,
@@ -1612,7 +1621,7 @@ impl Daemon {
             .ok()
             .and_then(|c| crate::hear::capture_target(&c))
             .filter(|node| voice.input_device.as_deref() != Some(node.as_str()))
-            .map(crate::wake_takes::ArrayTape::new);
+            .map(|node| crate::wake_takes::ArrayTape::new(node, Some(self.captures.clone())));
         let spec = DetectorSpec {
             scorer: Arc::new(Mutex::new(scorer)),
             recognize: ghost_voice::stt::recognize_fn(&models.stt),
@@ -1985,6 +1994,10 @@ impl Daemon {
                         // ADR 0064: the microphone stopped hearing well, shown, never said.
                         if let Some(note) = d.mic_note() {
                             out.push((crate::microphone::NOTE_KEY.to_string(), note));
+                        }
+                        // ADR 0077: dictation's microphone did not close; the wake is off.
+                        if let Some(note) = lock(&d.dictation_note).clone() {
+                            out.push((DICTATION_NOTE_KEY.to_string(), note));
                         }
                         // ADR 0074: debug mode is on, and until when.
                         if let Some(note) = d.late.debug_audio.get().and_then(|x| x.note()) {
@@ -2673,7 +2686,7 @@ impl Daemon {
                         let _ = task.await;
                     }
                 }
-                wake.stop().await; // releases the mic, and the kept takes' array tape
+                wake.stop().await; // releases the mic
             }
             if phone.is_none() {
                 phone = d.take_phone(); // accepted in the same tick
@@ -2716,14 +2729,13 @@ impl Daemon {
                 }
             }
             if let Some(lease) = dictate.take() {
-                // Dictation (ADR 0077): the wake listener stopped above, its capture closed and
-                // its pipeline and the array's tape dropped; dropping the lease (a wake or a
-                // phone in the same tick came first) tells dictation so.
-                // Only once nothing of the wake is capturing: its pipeline and the array's tape
-                // have closed (`stop` above waits for both). One that outlived its wait keeps
-                // the lease from being granted, and dictation is told the desk is busy.
-                let quiet = woke.is_none() && d.wake_quiet(&wake).await;
-                if quiet
+                // Dictation (ADR 0077): granted only once no desk capture is alive or opening,
+                // whoever opened it (the wake's pipeline, a stage of it left to finish, the
+                // takes' tape or a retired one of it, a session's, the Hearing test's), as the
+                // live-capture registry counts them. Not within `GRANT_WAIT`: the lease is
+                // dropped and dictation is told the desk is busy; nothing is opened.
+                let clear = woke.is_none() && d.captures_clear().await;
+                if clear
                     && phone.is_none()
                     && raised.is_none()
                     && !d.stop.is_cancelled()
@@ -2805,9 +2817,13 @@ impl Daemon {
             .await;
     }
 
-    /// While dictation has the microphone (ADR 0077): until its capture closes. A phone call
-    /// or a typed turn or Call (a session opening) cancels it first, as do listening turned
-    /// off and Ghost stopping; the wake listener is not running meanwhile.
+    /// While dictation has the microphone (ADR 0077): until it has given the microphone back
+    /// and its capture has released its token in the live-capture registry (after the
+    /// capture's thread is joined). A phone call, a typed turn or Call (a session opening),
+    /// listening turned off and Ghost stopping cancel it first; the session or the wake opens
+    /// only after that same wait. Exclusivity is never traded for time: the wait has no limit
+    /// but Ghost stopping. Once dictation is over and its capture has not closed within
+    /// `CLOSE_NOTE_AFTER`, the waiting list says so until it does.
     async fn dictating(self: &Arc<Self>, release: oneshot::Receiver<()>) -> Dictating {
         use ghost_api::dictation::DictationReason as Why;
         let d = self;
@@ -2824,63 +2840,94 @@ impl Daemon {
         tokio::pin!(release);
         tokio::pin!(called);
         let mut released = false;
-        let out = loop {
+        let mut out: Option<Dictating> = None;
+        let mut over_since: Option<Instant> = None;
+        let mut noted = false;
+        loop {
+            if released && d.captures.alive_for(Holder::Dictation) == 0 {
+                break;
+            }
             tokio::select! {
-                _ = &mut release => {
-                    released = true;
-                    break Dictating::Done;
-                }
+                _ = &mut release, if !released => released = true,
                 _ = d.stop.cancelled() => {
                     d.end_dictation(Why::Stopping).await;
-                    break Dictating::Stop;
+                    d.set_dictation_note(None);
+                    return Dictating::Stop;
                 }
-                _ = mic.changed() => {
+                _ = mic.changed(), if out.is_none() => {
                     if d.mic.is_off() {
                         d.end_dictation(Why::ListeningTurnedOff).await;
-                        break Dictating::Done;
                     }
                 }
-                p = d.next_phone() => {
+                p = d.next_phone(), if out.is_none() => {
                     d.end_dictation(Why::SessionOpened).await;
-                    break Dictating::Phone(p);
+                    out = Some(Dictating::Phone(p));
                 }
-                words = &mut called => {
+                words = &mut called, if out.is_none() => {
                     d.end_dictation(Why::SessionOpened).await;
-                    break Dictating::Called(words);
+                    out = Some(Dictating::Called(words));
                 }
+                _ = tokio::time::sleep(Duration::from_millis(50)) => {}
             }
-        };
-        // Dictation's capture is closed once its hold is dropped, which a cancel waits for.
-        // Wait for it with no time limit, so nothing (a session's input, the wake) ever opens
-        // beside it; Ghost stopping is the only way out.
-        if !released && !matches!(out, Dictating::Stop) {
-            let mut said = false;
-            loop {
-                tokio::select! {
-                    _ = &mut release => break,
-                    _ = tokio::time::sleep(Duration::from_secs(2)), if !said => {
-                        warn!("passive: still waiting for dictation's microphone to close");
-                        said = true;
-                    }
-                    _ = d.stop.cancelled() => break,
-                }
+            let over = d
+                .late
+                .dictation
+                .get()
+                .is_none_or(|x| x.state() == ghost_api::dictation::DictationState::Idle);
+            if !over {
+                over_since = None;
+                continue;
             }
+            let since = *over_since.get_or_insert_with(Instant::now);
+            if !noted && since.elapsed() >= CLOSE_NOTE_AFTER {
+                warn!("passive: dictation's microphone has not closed; Ghost is not listening");
+                d.set_dictation_note(Some(
+                    "Dictation's microphone didn't close, so Ghost isn't listening for its name. \
+                     It will listen again once it does; restarting Ghost also clears it."
+                        .into(),
+                ));
+                noted = true;
+            }
+        }
+        if noted {
+            d.set_dictation_note(None);
         }
         info!("passive: dictation gave the microphone back");
-        out
+        out.unwrap_or(Dictating::Done)
     }
 
-    /// The wake has nothing capturing: waited for a moment, since `stop` already waited on
-    /// it; false when it is still capturing after that.
-    async fn wake_quiet(&self, wake: &Arc<dyn WakeDetector>) -> bool {
-        for _ in 0..50 {
-            if wake.quiet() {
-                return true;
-            }
-            tokio::time::sleep(Duration::from_millis(20)).await;
+    /// No desk capture is alive or opening (the live-capture registry), waited for up to
+    /// `GRANT_WAIT`; only the dictation grant waits on this.
+    async fn captures_clear(&self) -> bool {
+        if self.captures.alive() == 0 {
+            return true;
         }
-        warn!("passive: the wake is still capturing; dictation is not given the microphone");
-        false
+        let clear = tokio::select! {
+            c = self.captures.until(GRANT_WAIT, |c| c.total() == 0) => c,
+            _ = self.stop.cancelled() => false,
+        };
+        if !clear {
+            warn!(
+                "passive: a desk capture is still open ({:?}); dictation is not given the \
+                 microphone",
+                self.captures.counts()
+            );
+        }
+        clear
+    }
+
+    /// The waiting list's note while dictation's capture has not closed.
+    pub(crate) fn set_dictation_note(&self, note: Option<String>) {
+        let changed = {
+            let mut n = lock(&self.dictation_note);
+            let changed = *n != note;
+            *n = note;
+            changed
+        };
+        if changed {
+            self.refresh_waiting_now();
+            self.set_waiting_count();
+        }
     }
 
     /// A typed turn with no session open (2026-11-13): a typed session, which opens no
@@ -3262,6 +3309,13 @@ impl Daemon {
         }
     }
 }
+
+/// How long the dictation grant waits for every desk capture to be gone (ADR 0077).
+pub const GRANT_WAIT: Duration = Duration::from_secs(3);
+/// How long after a dictation its capture may take to close before the waiting list says so.
+pub const CLOSE_NOTE_AFTER: Duration = Duration::from_secs(2);
+/// The waiting list's key for that note.
+pub const DICTATION_NOTE_KEY: &str = "dictation:microphone";
 
 /// How the passive loop's wait beside a dictation ended.
 pub(crate) enum Dictating {

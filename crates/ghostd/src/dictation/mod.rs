@@ -29,11 +29,9 @@ use ghost_api::dictation::{
     DictationOutcome, DictationPort, DictationReason, DictationResult, DictationState,
     DictationView,
 };
-use ghost_voice::frames::Audio;
 use ghost_voice::stt::{SharedRecognizer, TRAILING_SECS, dithered};
 use ghost_voice::transport::MediaIn;
 use tokio::sync::{Notify, oneshot, watch};
-use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 use zeroize::Zeroizing;
@@ -242,13 +240,27 @@ struct Captured {
     end: End,
 }
 
-/// A start between the request and the first frame: the microphone being taken from the
-/// passive loop and opened. Cancelling it waits on `settled`, whose sender the start holds
-/// until everything it opened is closed and the microphone given back.
+/// What a start holds once the first frame is in. Fields drop in this order: the capture,
+/// then the lease (the passive loop is told only after the capture is gone), then the first
+/// frame, wiped.
+struct Opened {
+    media: Box<dyn MediaIn>,
+    _hold: MicHold,
+    first: Zeroizing<Vec<i16>>,
+}
+
+/// Close what a start or a recording held, off the runtime: dropping a capture joins its
+/// thread, which may take a while. The live-capture registry, not this, is what says when
+/// it is gone.
+fn close_off(mut o: Opened) {
+    o.media.close();
+    drop(tokio::task::spawn_blocking(move || drop(o)));
+}
+
+/// A start between the request and the first frame.
 struct Starting {
     generation: u64,
     cancel: CancellationToken,
-    settled: watch::Receiver<()>,
 }
 
 struct Recording {
@@ -256,14 +268,34 @@ struct Recording {
     since: Instant,
     first_frame_ms: u64,
     stop: CancellationToken,
-    task: JoinHandle<Captured>,
+    /// What was recorded, sent by the recording task as it stops; dropped unread (and wiped)
+    /// when the dictation is cancelled.
+    captured: oneshot::Receiver<Captured>,
 }
 
 enum Stage {
     Idle,
     Starting(Starting),
     Recording(Recording),
-    Reading { generation: u64 },
+    Reading {
+        generation: u64,
+    },
+    /// Read and committed; the clipboard is being set. A cancel waits for it (bounded by the
+    /// clipboard's own bounds): it is too late to keep the text off the clipboard.
+    Writing {
+        generation: u64,
+    },
+}
+
+impl Stage {
+    fn generation(&self) -> Option<u64> {
+        match self {
+            Stage::Idle => None,
+            Stage::Starting(s) => Some(s.generation),
+            Stage::Recording(r) => Some(r.generation),
+            Stage::Reading { generation } | Stage::Writing { generation } => Some(*generation),
+        }
+    }
 }
 
 struct Inner {
@@ -278,13 +310,39 @@ enum Unstarted {
     Cancelled,
 }
 
-/// What a start holds once the first frame is in.
-struct Opened {
-    hold: MicHold,
-    media: Box<dyn MediaIn>,
-    first: Audio,
-    leased: Duration,
-    opened: Duration,
+/// The longest a cancel waits for a clipboard write already under way.
+const WRITING_WAIT: Duration = Duration::from_secs(6);
+
+/// One operation's settling, whatever way it ends: dropped while armed (an early return
+/// that forgot, or a panic unwinding), it puts the stage back to idle if the stage is still
+/// this operation's, with the result `Cancelled (Failed)`.
+struct Settle {
+    me: Weak<Dictation>,
+    generation: u64,
+    armed: bool,
+}
+
+impl Settle {
+    fn new(me: &Weak<Dictation>, generation: u64) -> Self {
+        Self {
+            me: me.clone(),
+            generation,
+            armed: true,
+        }
+    }
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for Settle {
+    fn drop(&mut self) {
+        if self.armed
+            && let Some(d) = self.me.upgrade()
+        {
+            d.failed(self.generation);
+        }
+    }
 }
 
 pub struct Dictation {
@@ -292,7 +350,8 @@ pub struct Dictation {
     clipboard: Arc<dyn Clipboard>,
     notes: Arc<dyn Notifier>,
     limit: Duration,
-    /// Each change of stage, one at a time. Never held across a wait for a capture.
+    /// Each change of stage, one at a time. Never held across a capture's open or close, a
+    /// read, or the clipboard.
     ops: tokio::sync::Mutex<()>,
     inner: Mutex<Inner>,
     /// Each dictation's result as it is decided, by generation.
@@ -328,7 +387,7 @@ impl Dictation {
             Stage::Idle => DictationState::Idle,
             Stage::Starting(_) => DictationState::Starting,
             Stage::Recording(_) => DictationState::Recording,
-            Stage::Reading { .. } => DictationState::Reading,
+            Stage::Reading { .. } | Stage::Writing { .. } => DictationState::Reading,
         }
     }
 
@@ -367,6 +426,33 @@ impl Dictation {
             .map(|(_, r)| r)
     }
 
+    /// Decide `generation`'s result: remembered, sent to whoever waits, shown.
+    fn decide(&self, generation: u64, r: DictationResult) {
+        lock(&self.inner).last = Some(r);
+        self.done.send_replace(Some((generation, r)));
+        self.notes.show(Note::Ended(r));
+    }
+
+    /// An operation of `generation` failed (a panic, or an exit that did not settle): the
+    /// stage goes back to idle if it is still that operation's.
+    fn failed(&self, generation: u64) {
+        let ours = {
+            let mut inner = lock(&self.inner);
+            let ours = inner.phase.generation() == Some(generation);
+            if ours {
+                inner.phase = Stage::Idle;
+            }
+            ours
+        };
+        if ours {
+            warn!("dictation: an operation failed; nothing was kept");
+            self.decide(
+                generation,
+                DictationResult::cancelled(DictationReason::Failed),
+            );
+        }
+    }
+
     /// A refusal: said and answered.
     fn refuse(&self, reason: DictationReason) -> DictationView {
         let r = DictationResult::refused(reason);
@@ -375,10 +461,10 @@ impl Dictation {
         self.view_with(Some(r))
     }
 
-    /// Open the microphone and record. The start is a stage of its own from its first step,
-    /// so listening off, a session opening and Ghost stopping cancel it like a recording.
+    /// Open the microphone and record. The dictation is the coordinator's from here: the
+    /// start runs as its own task, so dropping this request (a client gone) changes nothing.
     pub async fn start(&self) -> DictationView {
-        let (generation, cancel, settled) = {
+        let (generation, cancel) = {
             let _op = self.ops.lock().await;
             match self.state() {
                 DictationState::Idle => {}
@@ -393,119 +479,130 @@ impl Dictation {
             if self.host.recognizer().is_none() {
                 return self.refuse(DictationReason::NoSpeechModel);
             }
-            let (settled_tx, settled_rx) = watch::channel(());
             let cancel = CancellationToken::new();
             let mut inner = lock(&self.inner);
             inner.generation += 1;
             inner.phase = Stage::Starting(Starting {
                 generation: inner.generation,
                 cancel: cancel.clone(),
-                settled: settled_rx,
             });
-            (inner.generation, cancel, settled_tx)
+            (inner.generation, cancel)
         };
+        let Some(me) = self.me.upgrade() else {
+            return self.view();
+        };
+        match tokio::spawn(me.run_start(generation, cancel)).await {
+            Ok(v) => v,
+            Err(_) => self.view_with(self.result_of(generation)),
+        }
+    }
+
+    async fn run_start(
+        self: Arc<Self>,
+        generation: u64,
+        cancel: CancellationToken,
+    ) -> DictationView {
+        let mut settle = Settle::new(&self.me, generation);
         let t0 = Instant::now();
-        let opened = self.acquire(&cancel, t0).await;
-        // The commit: still this start, not cancelled, and still allowed.
+        let acquired = self.acquire(&cancel, t0).await;
         let _op = self.ops.lock().await;
         let current = matches!(&lock(&self.inner).phase,
             Stage::Starting(s) if s.generation == generation)
             && !cancel.is_cancelled();
-        let opened = match opened {
-            Ok(o) if current => match self.host.still_allowed() {
-                None => o,
-                Some(why) => {
-                    close(o);
-                    return self.unstarted(generation, Unstarted::Refused(why), settled);
-                }
-            },
-            Ok(o) => {
-                close(o);
-                return self.unstarted(generation, Unstarted::Cancelled, settled);
+        let (opened, leased, open_ms) = match acquired {
+            Ok(a) if current => a,
+            Ok((o, _, _)) => {
+                close_off(o);
+                settle.disarm();
+                return self.view_with(self.result_of(generation));
             }
-            Err(why) => return self.unstarted(generation, why, settled),
+            Err(why) => {
+                settle.disarm();
+                return self.unstarted(generation, why);
+            }
         };
-        let Opened {
-            hold,
-            media,
-            first,
-            leased,
-            opened,
-        } = opened;
+        // Asked again just before recording: listening may have gone off meanwhile.
+        if let Some(why) = self.host.still_allowed() {
+            close_off(opened);
+            settle.disarm();
+            return self.unstarted(generation, Unstarted::Refused(why));
+        }
         let first_frame_ms = t0.elapsed().as_millis() as u64;
         info!(
             "dictation: recording; first frame {first_frame_ms} ms after the start (the \
              microphone handed over in {} ms, the capture open in {} ms)",
             leased.as_millis(),
-            (opened - leased).as_millis()
+            open_ms.as_millis()
         );
         let stop = CancellationToken::new();
-        let task = tokio::spawn(record(
-            media,
-            first,
+        let (captured_tx, captured_rx) = oneshot::channel();
+        tokio::spawn(record(
+            opened,
             stop.clone(),
             self.limit,
-            hold,
             self.me.clone(),
             generation,
+            captured_tx,
         ));
         lock(&self.inner).phase = Stage::Recording(Recording {
             generation,
             since: t0,
             first_frame_ms,
             stop,
-            task,
+            captured: captured_rx,
         });
-        drop(settled);
+        settle.disarm();
         self.notes.show(Note::Recording);
         self.view_with(None)
     }
 
     /// The microphone from the passive loop, the capture, and its first frame. A cancel
-    /// interrupts the wait for the loop and for the first frame; an open in flight is let
-    /// finish and then closed, so nothing opens after the cancel returns.
-    async fn acquire(&self, cancel: &CancellationToken, t0: Instant) -> Result<Opened, Unstarted> {
+    /// interrupts the wait for the loop and for the first frame; an open in flight is not
+    /// interrupted, and what it opens is closed as soon as it returns. Whatever this gives up
+    /// is closed off the runtime (`close_off`); the registry says when it is gone.
+    async fn acquire(
+        &self,
+        cancel: &CancellationToken,
+        t0: Instant,
+    ) -> Result<(Opened, Duration, Duration), Unstarted> {
         let hold = tokio::select! {
             h = self.host.take_mic() => h.map_err(Unstarted::Refused)?,
             _ = cancel.cancelled() => return Err(Unstarted::Cancelled),
         };
         let leased = t0.elapsed();
-        let mut media = self.host.open().await.map_err(Unstarted::Refused)?;
-        let opened = t0.elapsed();
+        let media = self.host.open().await.map_err(Unstarted::Refused)?;
+        let open_ms = t0.elapsed() - leased;
+        let mut opened = Opened {
+            media,
+            _hold: hold,
+            first: Zeroizing::new(Vec::new()),
+        };
         if cancel.is_cancelled() {
-            media.close();
+            close_off(opened);
             return Err(Unstarted::Cancelled);
         }
         let first = tokio::select! {
-            f = tokio::time::timeout(FIRST_FRAME_WAIT, media.next_frame()) => match f {
-                Ok(Some(f)) => f,
-                _ => {
-                    media.close();
-                    return Err(Unstarted::Refused(DictationReason::MicrophoneFailed));
-                }
-            },
+            f = tokio::time::timeout(FIRST_FRAME_WAIT, opened.media.next_frame()) => f,
             _ = cancel.cancelled() => {
-                media.close();
+                close_off(opened);
                 return Err(Unstarted::Cancelled);
             }
         };
-        Ok(Opened {
-            hold,
-            media,
-            first,
-            leased,
-            opened,
-        })
+        match first {
+            Ok(Some(f)) => {
+                opened.first = Zeroizing::new(f.samples);
+                Ok((opened, leased, open_ms))
+            }
+            _ => {
+                close_off(opened);
+                Err(Unstarted::Refused(DictationReason::MicrophoneFailed))
+            }
+        }
     }
 
-    /// A start that did not record: everything it opened is closed by now (the caller holds
-    /// `ops`), `settled` goes, and the answer is the refusal or the cancel's own result.
-    fn unstarted(
-        &self,
-        generation: u64,
-        why: Unstarted,
-        settled: watch::Sender<()>,
-    ) -> DictationView {
+    /// A start that did not record (the caller holds `ops`): the answer is the refusal, or
+    /// the cancel's own result.
+    fn unstarted(&self, generation: u64, why: Unstarted) -> DictationView {
         let ours = {
             let mut inner = lock(&self.inner);
             let ours = matches!(&inner.phase, Stage::Starting(s) if s.generation == generation);
@@ -514,26 +611,30 @@ impl Dictation {
             }
             ours
         };
-        drop(settled);
         match why {
             Unstarted::Refused(r) if ours => {
-                let result = DictationResult::refused(r);
-                lock(&self.inner).last = Some(result);
-                self.done.send_replace(Some((generation, result)));
-                self.refuse(r)
+                info!("dictation: refused ({r:?})");
+                self.decide(generation, DictationResult::refused(r));
+                self.view_with(Some(DictationResult::refused(r)))
             }
-            // Cancelled: the canceller decided the result and says it.
             _ => self.view_with(self.result_of(generation)),
         }
     }
 
-    /// Stop recording and read; the answer comes once the text is on the clipboard. A stop
-    /// while the microphone is still opening cancels the start.
+    /// Stop recording and read; the answer comes once the text is on the clipboard. Runs as
+    /// the coordinator's own task, like a start. A stop while the microphone is still opening
+    /// cancels the start.
     pub async fn stop(&self) -> DictationView {
-        self.finish(None).await
+        let Some(me) = self.me.upgrade() else {
+            return self.view();
+        };
+        match tokio::spawn(me.finish(None)).await {
+            Ok(v) => v,
+            Err(_) => self.view(),
+        }
     }
 
-    /// Start when idle, stop when recording, refuse while reading.
+    /// Start when idle, stop when starting or recording, refuse while reading.
     pub async fn toggle(&self) -> DictationView {
         match self.state() {
             DictationState::Idle => self.start().await,
@@ -542,7 +643,7 @@ impl Dictation {
         }
     }
 
-    async fn finish(&self, only: Option<u64>) -> DictationView {
+    async fn finish(self: Arc<Self>, only: Option<u64>) -> DictationView {
         enum Next {
             NotDictating,
             Unchanged,
@@ -565,9 +666,10 @@ impl Dictation {
                         Next::CancelStart
                     }
                 }
-                Stage::Reading { generation } => {
-                    inner.phase = Stage::Reading { generation };
-                    Next::Wait(generation)
+                stage @ (Stage::Reading { .. } | Stage::Writing { .. }) => {
+                    let g = stage.generation().unwrap_or(0);
+                    inner.phase = stage;
+                    Next::Wait(g)
                 }
                 Stage::Recording(r) if only.is_some_and(|g| g != r.generation) => {
                     inner.phase = Stage::Recording(r);
@@ -601,9 +703,12 @@ impl Dictation {
             Next::Read(rec) => rec,
         };
         let generation = rec.generation;
+        let mut settle = Settle::new(&self.me, generation);
         rec.stop.cancel();
-        // Awaited: the capture is closed and the passive loop has the microphone back.
-        let captured = rec.task.await.unwrap_or(Captured {
+        // What was recorded: the capture closes on its own (the registry tracks it).
+        let captured = rec.captured.await.ok();
+        let failed = captured.is_none();
+        let captured = captured.unwrap_or(Captured {
             samples: Zeroizing::new(Vec::new()),
             end: End::Stopped,
         });
@@ -618,6 +723,7 @@ impl Dictation {
             End::MicrophoneEnded => Some(DictationReason::MicrophoneEnded),
             End::Stopped => None,
         };
+        let mut read_failed = failed;
         let text = match self.host.recognizer() {
             Some(model) => {
                 let samples = captured.samples;
@@ -633,18 +739,32 @@ impl Dictation {
                         result.read_ms = Some(took.as_millis() as u64);
                         text
                     }
-                    Err(_) => Zeroizing::new(String::new()),
+                    Err(_) => {
+                        read_failed = true;
+                        Zeroizing::new(String::new())
+                    }
                 }
             }
             None => Zeroizing::new(String::new()),
         };
-        // The commit: only while this dictation is still the one being read.
-        let _op = self.ops.lock().await;
-        let current =
-            matches!(lock(&self.inner).phase, Stage::Reading { generation: g } if g == generation);
-        if !current {
-            drop(text); // wiped; a cancelled read does nothing
+        if read_failed {
+            drop(text);
+            settle.disarm();
+            self.failed(generation);
             return self.view_with(self.result_of(generation));
+        }
+        // The commit: only while this dictation is still the one being read. `ops` is not
+        // held while the clipboard is set; the stage says Writing meanwhile.
+        {
+            let _op = self.ops.lock().await;
+            let mut inner = lock(&self.inner);
+            if !matches!(inner.phase, Stage::Reading { generation: g } if g == generation) {
+                drop(inner);
+                drop(text); // wiped; a cancelled read does nothing
+                settle.disarm();
+                return self.view_with(self.result_of(generation));
+            }
+            inner.phase = Stage::Writing { generation };
         }
         if !text.is_empty() {
             result.chars = text.chars().count();
@@ -677,49 +797,67 @@ impl Dictation {
         );
         {
             let mut inner = lock(&self.inner);
-            inner.phase = Stage::Idle;
-            inner.last = Some(result);
+            if matches!(inner.phase, Stage::Writing { generation: g } if g == generation) {
+                inner.phase = Stage::Idle;
+            }
         }
-        self.done.send_replace(Some((generation, result)));
-        self.notes.show(Note::Ended(result));
+        settle.disarm();
+        self.decide(generation, result);
         self.view_with(Some(result))
     }
 
     /// Drop the dictation, starting, recording or being read: nothing reaches the
-    /// clipboard. Returns once whatever it had open is closed and the passive loop has the
-    /// microphone back.
+    /// clipboard. Returns at once: what it had open closes on its own, and the passive loop
+    /// waits for that through the live-capture registry. A dictation already writing to the
+    /// clipboard is too late to stop: the cancel waits for it (bounded) and says how it ended.
     pub async fn cancel(&self, why: DictationReason) -> DictationView {
-        let (rec, starting) = {
+        let mut done = self.done.subscribe();
+        let writing = {
             let _op = self.ops.lock().await;
-            let was = std::mem::replace(&mut lock(&self.inner).phase, Stage::Idle);
-            let (generation, rec, starting) = match was {
+            let mut inner = lock(&self.inner);
+            match std::mem::replace(&mut inner.phase, Stage::Idle) {
                 Stage::Idle => {
+                    drop(inner);
                     return self.view_with(Some(DictationResult::refused(
                         DictationReason::NotDictating,
                     )));
                 }
-                Stage::Starting(s) => (s.generation, None, Some(s)),
-                Stage::Recording(r) => (r.generation, Some(r), None),
-                Stage::Reading { generation } => (generation, None, None),
-            };
-            let r = DictationResult::cancelled(why);
-            lock(&self.inner).last = Some(r);
-            self.done.send_replace(Some((generation, r)));
-            (rec, starting)
+                Stage::Writing { generation } => {
+                    inner.phase = Stage::Writing { generation };
+                    Some(generation)
+                }
+                stage => {
+                    let generation = stage.generation().unwrap_or(0);
+                    match stage {
+                        Stage::Starting(s) => s.cancel.cancel(),
+                        Stage::Recording(r) => r.stop.cancel(), // its samples are dropped unread
+                        _ => {}
+                    }
+                    drop(inner);
+                    let r = DictationResult::cancelled(why);
+                    info!("dictation: cancelled ({why:?})");
+                    self.decide(generation, r);
+                    None
+                }
+            }
         };
-        // Outside `ops`: the start being cancelled takes it to close what it opened.
-        if let Some(mut s) = starting {
-            s.cancel.cancel();
-            while s.settled.changed().await.is_ok() {}
+        match writing {
+            Some(generation) => {
+                let r = tokio::time::timeout(
+                    WRITING_WAIT,
+                    done.wait_for(|d| d.is_some_and(|(g, _)| g >= generation)),
+                )
+                .await
+                .ok()
+                .and_then(|d| d.ok().and_then(|d| *d))
+                .map(|(_, r)| r);
+                self.view_with(r)
+            }
+            None => {
+                let last = lock(&self.inner).last;
+                self.view_with(last)
+            }
         }
-        if let Some(rec) = rec {
-            rec.stop.cancel();
-            let _ = rec.task.await; // the samples are wiped as they drop
-        }
-        let r = DictationResult::cancelled(why);
-        info!("dictation: cancelled ({why:?})");
-        self.notes.show(Note::Ended(r));
-        self.view_with(Some(r))
     }
 
     /// Cancel if anything is going on, a start included; nothing to say otherwise.
@@ -730,36 +868,30 @@ impl Dictation {
     }
 }
 
-/// Close a start's capture and give the microphone back.
-fn close(mut o: Opened) {
-    o.media.close();
-    drop(o.media);
-    drop(o.hold);
-    let _ = Zeroizing::new(o.first.samples);
-}
-
 /// Record until stopped, the limit (in samples, or in time for a capture that stalls), or
-/// the microphone going away; then close the capture, give the microphone back, and if it
-/// ended by itself, finish the dictation. The buffer is the whole limit from the start, so
-/// it never grows and leaves no copy behind; it is wiped when dropped.
+/// the microphone going away; send what was recorded, then close the capture and give the
+/// microphone back, and if it ended by itself, finish the dictation. The buffer is the whole
+/// limit from the start, so it never grows and leaves no copy behind; it is wiped when
+/// dropped. A panic here settles the stage (`Settle`), and unwinding drops the capture
+/// before the lease.
 async fn record(
-    mut media: Box<dyn MediaIn>,
-    first: Audio,
+    mut opened: Opened,
     stop: CancellationToken,
     limit: Duration,
-    hold: MicHold,
     me: Weak<Dictation>,
     generation: u64,
-) -> Captured {
+    captured: oneshot::Sender<Captured>,
+) {
+    let mut settle = Settle::new(&me, generation);
     let max = (limit.as_secs_f64() * f64::from(RATE)) as usize;
     let deadline = tokio::time::Instant::now() + limit;
     let mut samples: Zeroizing<Vec<i16>> = Zeroizing::new(Vec::with_capacity(max));
-    let take = |frame: Vec<i16>, samples: &mut Vec<i16>| {
-        let frame = Zeroizing::new(frame);
+    let take = |frame: &[i16], samples: &mut Vec<i16>| {
         let room = max - samples.len();
         samples.extend_from_slice(&frame[..frame.len().min(room)]);
     };
-    take(first.samples, &mut samples);
+    take(&opened.first, &mut samples);
+    opened.first = Zeroizing::new(Vec::new()); // the old one is wiped as it drops
     let mut end = End::Stopped;
     loop {
         if samples.len() >= max {
@@ -773,8 +905,11 @@ async fn record(
                 end = End::Limit;
                 break;
             }
-            f = media.next_frame() => match f {
-                Some(f) => take(f.samples, &mut samples),
+            f = opened.media.next_frame() => match f {
+                Some(f) => {
+                    let f = Zeroizing::new(f.samples);
+                    take(&f, &mut samples);
+                }
                 None => {
                     end = End::MicrophoneEnded;
                     break;
@@ -782,20 +917,18 @@ async fn record(
             },
         }
     }
-    media.close();
-    drop(media);
-    drop(hold);
+    // A cancelled dictation dropped the receiver: the samples go, wiped.
+    let _ = captured.send(Captured { samples, end });
+    close_off(opened);
+    settle.disarm();
     if end != End::Stopped {
         if end == End::MicrophoneEnded {
             warn!("dictation: the microphone went away; reading what was said");
         }
         if let Some(d) = me.upgrade() {
-            tokio::spawn(async move {
-                d.finish(Some(generation)).await;
-            });
+            tokio::spawn(d.finish(Some(generation)));
         }
     }
-    Captured { samples, end }
 }
 
 /// One whole read on the shared Parakeet, as `ghost_voice::stt::recognize` makes it (the
@@ -981,21 +1114,27 @@ impl Host for DaemonHost {
 
     async fn open(&self) -> Result<Box<dyn MediaIn>, DictationReason> {
         let d = self.d.upgrade().ok_or(DictationReason::Stopping)?;
-        if let Some(f) = d.ports.dictation_media.clone() {
-            return f().map_err(|_| DictationReason::MicrophoneFailed);
-        }
+        // Counted from before the open starts until after the capture is gone (ADR 0077):
+        // the passive loop listens again only when this token is released.
+        let token = d.captures.take(ghost_audio::live::Holder::Dictation);
+        let port = d.ports.dictation_media.clone();
         // What a session hears (ADR 0064): the plan's session input.
         let spec = d.mic_plan().session;
-        let opened = tokio::task::spawn_blocking(move || {
+        let opened = tokio::task::spawn_blocking(move || -> Result<Box<dyn MediaIn>, String> {
+            if let Some(f) = port {
+                return f();
+            }
             ghost_audio::Capture::open(ghost_audio::CaptureConfig {
                 name: "ghost-dictation-capture".into(),
                 description: "Ghost (dictation)".into(),
                 ..ghost_audio::CaptureConfig::for_spec(&spec)
             })
+            .map(|c| Box::new(crate::wake::CaptureIn(c)) as Box<dyn MediaIn>)
+            .map_err(|e| e.to_string())
         })
         .await;
         match opened {
-            Ok(Ok(c)) => Ok(Box::new(crate::wake::CaptureIn(c)) as Box<dyn MediaIn>),
+            Ok(Ok(media)) => Ok(Box::new(crate::wake::CountedIn::new(media, token))),
             Ok(Err(e)) => {
                 warn!("dictation: the microphone did not open: {e}");
                 Err(DictationReason::MicrophoneFailed)

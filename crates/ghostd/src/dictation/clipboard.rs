@@ -64,7 +64,11 @@ impl Clipboard for NoClipboard {
 /// hundred characters; one X request holds this many and more, so the incremental transfer
 /// is never needed. A longer text is refused, never cut.
 pub const MAX_BYTES: usize = 16 * 1024;
-/// How long the owner has to connect, set up, and say it owns the selection.
+/// How long the owner has to connect to the display's socket.
+pub const CONNECT_WAIT: Duration = Duration::from_secs(2);
+/// How long x11rb's lookup of the cookie may take.
+pub const AUTH_WAIT: Duration = Duration::from_secs(1);
+/// How long the owner has to set up and say it owns the selection, once connected.
 pub const OWN_WAIT: Duration = Duration::from_secs(3);
 /// The longest wait for one reply while answering a paste.
 pub const REPLY_WAIT: Duration = Duration::from_secs(2);
@@ -91,29 +95,45 @@ enum Place {
     },
 }
 
-/// One owner thread and what interrupts it.
+/// One owner thread and what interrupts it: a flag it checks before every wait and before
+/// it takes the clipboard, and its socket, which it publishes as soon as it has connected so
+/// a cancel can shut it down under any wait.
 struct Owner {
+    id: u64,
     cancel: Arc<AtomicBool>,
-    interrupt: UnixStream,
+    socket: Arc<Mutex<Option<UnixStream>>>,
     thread: JoinHandle<()>,
 }
 
 impl Owner {
     /// Interrupt it and wait for it: its copy of the text is wiped and its socket closed.
+    /// Every step of the owner is bounded or interruptible, so the join is too.
     fn end(self) {
         self.cancel.store(true, Ordering::SeqCst);
-        let _ = self.interrupt.shutdown(std::net::Shutdown::Both);
+        if let Some(s) = lock(&self.socket).as_ref() {
+            let _ = s.shutdown(std::net::Shutdown::Both);
+        }
         let _ = self.thread.join();
     }
+}
+
+/// The clipboard's whole lifecycle, under one lock: nothing can be installed that `close`
+/// does not see, and whatever `close` takes it joins.
+enum State {
+    Empty,
+    /// Setting up: connecting, looking up the cookie, taking the selection.
+    Pending(Owner),
+    /// Holding CLIPBOARD, answering pastes.
+    Established(Owner),
+    /// Ghost is stopping: nothing more is set.
+    Closed,
 }
 
 /// The X11 clipboard, through XWayland on a Wayland desktop.
 pub struct XClipboard {
     place: Place,
-    /// The owner holding the clipboard now.
-    owner: Mutex<Option<Owner>>,
-    /// An owner still setting up: what `close` interrupts while `set` waits for it.
-    pending: Mutex<Option<(Arc<AtomicBool>, UnixStream)>>,
+    state: Mutex<State>,
+    next: std::sync::atomic::AtomicU64,
 }
 
 impl Default for XClipboard {
@@ -144,14 +164,17 @@ impl XClipboard {
     fn with_place(place: Place) -> Self {
         Self {
             place,
-            owner: Mutex::new(None),
-            pending: Mutex::new(None),
+            state: Mutex::new(State::Empty),
+            next: std::sync::atomic::AtomicU64::new(1),
         }
     }
 
     /// An owner thread is running (holding the clipboard, or setting up to).
     pub fn holding(&self) -> bool {
-        lock(&self.owner).is_some() || lock(&self.pending).is_some()
+        matches!(
+            *lock(&self.state),
+            State::Pending(_) | State::Established(_)
+        )
     }
 
     /// The local socket, the display's number, and whose cookie to show.
@@ -185,62 +208,72 @@ impl Clipboard for XClipboard {
         if text.len() > MAX_BYTES {
             return Err(DictationReason::TooLong);
         }
-        // The old owner first, joined: one owner at a time.
-        if let Some(old) = lock(&self.owner).take() {
-            old.end();
-        }
-        let (socket, display, auth) = self.endpoint()?;
-        let stream = UnixStream::connect(&socket).map_err(|_| DictationReason::NoDisplay)?;
-        let failed = |_| DictationReason::ClipboardFailed;
-        let interrupt = stream.try_clone().map_err(failed)?;
+        let (socket_path, display, auth) = self.endpoint()?;
+        let id = self.next.fetch_add(1, Ordering::SeqCst);
         let cancel = Arc::new(AtomicBool::new(false));
-        *lock(&self.pending) = Some((cancel.clone(), interrupt.try_clone().map_err(failed)?));
+        let socket: Arc<Mutex<Option<UnixStream>>> = Arc::new(Mutex::new(None));
         let (tx, rx) = mpsc::channel();
-        let thread = {
-            let cancel = cancel.clone();
-            std::thread::Builder::new()
-                .name("ghost-clipboard".into())
-                .spawn(move || own(stream, display, auth, text, &cancel, &tx))
-        };
-        let owner = match thread {
-            Ok(thread) => Owner {
-                cancel,
-                interrupt,
-                thread,
-            },
-            Err(_) => {
-                lock(&self.pending).take();
+        // Installed as pending under the state's lock, the previous owner taken out with it:
+        // `close` either sees this one or this one sees `Closed`.
+        let previous = {
+            let mut state = lock(&self.state);
+            if matches!(*state, State::Closed) {
                 return Err(DictationReason::ClipboardFailed);
             }
+            let thread = {
+                let (cancel, socket) = (cancel.clone(), socket.clone());
+                std::thread::Builder::new()
+                    .name("ghost-clipboard".into())
+                    .spawn(move || own(socket_path, display, auth, text, &cancel, &socket, &tx))
+            };
+            let Ok(thread) = thread else {
+                return Err(DictationReason::ClipboardFailed);
+            };
+            std::mem::replace(
+                &mut *state,
+                State::Pending(Owner {
+                    id,
+                    cancel,
+                    socket,
+                    thread,
+                }),
+            )
         };
-        // The owner bounds its own setup by OWN_WAIT; this only bounds a thread that died.
-        let owned = rx
-            .recv_timeout(OWN_WAIT + Duration::from_secs(1))
-            .unwrap_or(Err(DictationReason::ClipboardFailed));
-        lock(&self.pending).take();
-        match owned {
-            Ok(()) if !owner.cancel.load(Ordering::SeqCst) => {
-                *lock(&self.owner) = Some(owner);
-                Ok(())
-            }
-            Ok(()) => {
-                owner.end();
-                Err(DictationReason::ClipboardFailed)
-            }
-            Err(why) => {
-                owner.end(); // joined: nothing is left holding the text
-                Err(why)
-            }
+        // The previous owner, joined: one owner at a time.
+        if let State::Pending(o) | State::Established(o) = previous {
+            o.end();
         }
+        // The owner bounds each of its steps; this only bounds a thread that died.
+        let owned = rx
+            .recv_timeout(CONNECT_WAIT + AUTH_WAIT + OWN_WAIT + Duration::from_secs(1))
+            .unwrap_or(Err(DictationReason::ClipboardFailed));
+        let failed = {
+            let mut state = lock(&self.state);
+            match std::mem::replace(&mut *state, State::Empty) {
+                State::Pending(o) if o.id == id => {
+                    if owned.is_ok() && !o.cancel.load(Ordering::SeqCst) {
+                        *state = State::Established(o);
+                        return Ok(());
+                    }
+                    Some(o)
+                }
+                // Closed or replaced meanwhile: whoever did it joins this owner.
+                other => {
+                    *state = other;
+                    None
+                }
+            }
+        };
+        if let Some(o) = failed {
+            o.end(); // joined: nothing is left holding the text
+        }
+        Err(owned.err().unwrap_or(DictationReason::ClipboardFailed))
     }
 
     fn close(&self) {
-        if let Some((cancel, interrupt)) = lock(&self.pending).as_ref() {
-            cancel.store(true, Ordering::SeqCst);
-            let _ = interrupt.shutdown(std::net::Shutdown::Both);
-        }
-        if let Some(owner) = lock(&self.owner).take() {
-            owner.end();
+        let previous = std::mem::replace(&mut *lock(&self.state), State::Closed);
+        if let State::Pending(o) | State::Established(o) = previous {
+            o.end();
         }
     }
 }
@@ -345,13 +378,37 @@ type Conn = RustConnection<Bounded>;
 /// Connect, own CLIPBOARD, say so on `owned`, then answer requests until another owner
 /// takes it or `cancel` is set. The text is wiped when this returns.
 fn own(
-    stream: UnixStream,
+    socket_path: PathBuf,
     display: u16,
     auth: Auth,
     mut text: Zeroizing<String>,
     cancel: &Arc<AtomicBool>,
+    socket: &Arc<Mutex<Option<UnixStream>>>,
     owned: &mpsc::Sender<Result<(), DictationReason>>,
 ) {
+    let stream = match connect_within(&socket_path, cancel, Instant::now() + CONNECT_WAIT) {
+        Ok(s) => s,
+        Err(why) => {
+            text.zeroize();
+            let _ = owned.send(Err(why));
+            return;
+        }
+    };
+    // Published for a cancel to shut down, then the flag looked at: a cancel that came
+    // before this either sees the socket or is seen here.
+    match stream.try_clone() {
+        Ok(c) => *lock(socket) = Some(c),
+        Err(_) => {
+            text.zeroize();
+            let _ = owned.send(Err(DictationReason::ClipboardFailed));
+            return;
+        }
+    }
+    if cancel.load(Ordering::SeqCst) {
+        text.zeroize();
+        let _ = owned.send(Err(DictationReason::ClipboardFailed));
+        return;
+    }
     let deadline = Arc::new(Mutex::new(Some(Instant::now() + OWN_WAIT)));
     let (conn, window, atoms) = match set_up(stream, display, auth, &text, cancel, &deadline) {
         Ok(r) => r,
@@ -384,6 +441,62 @@ fn own(
     let _ = conn.flush();
 }
 
+/// Connect to the display's socket without waiting longer than `until` (a display whose
+/// queue is full would block a plain connect for ever), and stop at a cancel.
+fn connect_within(
+    path: &std::path::Path,
+    cancel: &AtomicBool,
+    until: Instant,
+) -> Result<UnixStream, DictationReason> {
+    use rustix::net::{AddressFamily, SocketAddrUnix, SocketFlags, SocketType};
+    let addr = SocketAddrUnix::new(path).map_err(|_| DictationReason::NoDisplay)?;
+    let fd = rustix::net::socket_with(
+        AddressFamily::UNIX,
+        SocketType::STREAM,
+        SocketFlags::NONBLOCK | SocketFlags::CLOEXEC,
+        None,
+    )
+    .map_err(|_| DictationReason::ClipboardFailed)?;
+    loop {
+        if cancel.load(Ordering::SeqCst) {
+            return Err(DictationReason::ClipboardFailed);
+        }
+        match rustix::net::connect(&fd, &addr) {
+            Ok(()) => return Ok(UnixStream::from(fd)),
+            Err(rustix::io::Errno::AGAIN | rustix::io::Errno::INTR) => {}
+            Err(_) => return Err(DictationReason::NoDisplay),
+        }
+        if Instant::now() >= until {
+            return Err(DictationReason::NoDisplay);
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// x11rb's lookup of the cookie, on a thread of its own: a home folder that stalls (a network
+/// mount) costs at most `wait`, after which the display is tried with no cookie and the
+/// lookup is left to end by itself, holding no text.
+fn cookie_within(
+    peer: (x11rb_protocol::xauth::Family, Vec<u8>),
+    display: u16,
+    wait: Duration,
+) -> (Vec<u8>, Vec<u8>) {
+    let (tx, rx) = mpsc::channel();
+    let looked = std::thread::Builder::new()
+        .name("ghost-clipboard-auth".into())
+        .spawn(move || {
+            let _ = tx.send(
+                x11rb_protocol::xauth::get_auth(peer.0, &peer.1, display)
+                    .ok()
+                    .flatten(),
+            );
+        });
+    if looked.is_err() {
+        return (Vec::new(), Vec::new());
+    }
+    rx.recv_timeout(wait).ok().flatten().unwrap_or_default()
+}
+
 fn set_up(
     stream: UnixStream,
     display: u16,
@@ -396,10 +509,7 @@ fn set_up(
     let (inner, peer) = DefaultStream::from_unix_stream(stream).map_err(failed)?;
     let (name, data) = match auth {
         // x11rb reads the Xauthority file; Ghost never does.
-        Auth::FromEnvironment => x11rb_protocol::xauth::get_auth(peer.0, &peer.1, display)
-            .ok()
-            .flatten()
-            .unwrap_or_default(),
+        Auth::FromEnvironment => cookie_within(peer, display, AUTH_WAIT),
         Auth::None => (Vec::new(), Vec::new()),
     };
     let bounded = Bounded {

@@ -270,6 +270,9 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
                     d.ports.players.pause_playing().await;
                 }
             }
+            // ADR 0077: the session's microphone counted with every desk capture, from before
+            // its open until after it is gone. Counting only: nothing here waits on it.
+            let token = mic.then(|| d.captures.take(ghost_audio::live::Holder::Session));
             let opened = (d.ports.desk_media)(DeskMediaRequest {
                 audio: d.audio_settings(false), // ducked here, not by the devices
                 thinking_sound: voice.thinking_sound,
@@ -279,6 +282,12 @@ pub async fn conversation(d: &Arc<Daemon>, start: SessionStart) {
                 mic,
             })
             .await;
+            let opened = opened.map(|mut m| {
+                if let Some(token) = token {
+                    m.input = Box::new(crate::wake::CountedIn::new(m.input, token));
+                }
+                m
+            });
             match opened {
                 Ok(m) => (m, None),
                 Err(e) => {

@@ -91,6 +91,8 @@ pub enum DictationReason {
     ClipboardFailed,
     /// More text than Ghost puts on the clipboard at once.
     TooLong,
+    /// Something in Ghost failed while dictating (a fault in the recording or the read).
+    Failed,
 }
 
 /// What a dictation, or a request, ended with: kinds and numbers, never words.
@@ -168,6 +170,9 @@ impl DictationResult {
             }
             (O::Cancelled, Some(R::Stopping)) => {
                 "Dictation stopped: Ghost is stopping. Nothing was kept.".into()
+            }
+            (O::Cancelled, Some(R::Failed)) => {
+                "Dictation stopped: something went wrong in Ghost. Nothing was kept.".into()
             }
             (O::Cancelled, _) => "Dictation cancelled. Nothing was kept.".into(),
             (O::Refused, Some(r)) => refusal_sentence(r).into(),
@@ -291,7 +296,7 @@ mod tests {
         DictationOutcome::Cancelled,
         DictationOutcome::Refused,
     ];
-    const REASONS: [DictationReason; 18] = [
+    const REASONS: [DictationReason; 19] = [
         DictationReason::NotListening,
         DictationReason::Busy,
         DictationReason::HearingTest,
@@ -310,6 +315,7 @@ mod tests {
         DictationReason::NoDisplay,
         DictationReason::ClipboardFailed,
         DictationReason::TooLong,
+        DictationReason::Failed,
     ];
 
     fn kinds() -> Vec<String> {

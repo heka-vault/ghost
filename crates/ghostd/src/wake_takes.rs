@@ -19,6 +19,7 @@ use ghost_api::wake_takes::{
     WakeTakeLabel, WakeTakeOutcome, WakeTakeView, WakeTakesChoice, WakeTakesError, WakeTakesPort,
     WakeTakesResult, WakeTakesView,
 };
+use ghost_audio::live::{Holder, Registry};
 use ghost_audio::{Capture, CaptureConfig};
 use ghost_core::time::iso;
 use ghost_core::wake_takes::{
@@ -97,15 +98,22 @@ pub struct ArrayTape {
     ring: Arc<Mutex<Ring>>,
     task: Mutex<Option<Running>>,
     opener: TapeOpener,
+    /// Counts the tape's captures with every other desk capture (ADR 0077); None in a test
+    /// that does not look.
+    captures: Option<Arc<Registry>>,
 }
 
 impl ArrayTape {
-    pub fn new(node: String) -> Arc<Self> {
-        Self::with_opener(node, live_opener())
+    pub fn new(node: String, captures: Option<Arc<Registry>>) -> Arc<Self> {
+        Self::with_opener(node, live_opener(), captures)
     }
 
     /// The same tape over another opener (a test's).
-    pub fn with_opener(node: String, opener: TapeOpener) -> Arc<Self> {
+    pub fn with_opener(
+        node: String,
+        opener: TapeOpener,
+        captures: Option<Arc<Registry>>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             node,
             ring: Arc::new(Mutex::new(Ring {
@@ -116,6 +124,7 @@ impl ArrayTape {
             })),
             task: Mutex::new(None),
             opener,
+            captures,
         })
     }
 
@@ -125,8 +134,10 @@ impl ArrayTape {
 
     /// Open the capture, unless it is open. A tape that starts holds nothing from before:
     /// the ring is cleared and moves to a new epoch, so a capture told to stop that still
-    /// had a frame in hand cannot add it. The capture opens off the runtime; the task owns
-    /// it and closes it (dropping it joins its thread) before it ends.
+    /// had a frame in hand cannot add it. The capture opens off the runtime and is counted
+    /// in the live-capture registry from before its open until after it is closed: the token
+    /// goes into the blocking open and comes back with the capture, so even a task that was
+    /// retired while it opened is counted until what it opened is gone.
     pub fn start(self: &Arc<Self>) {
         let mut task = lock(&self.task);
         if task
@@ -137,22 +148,22 @@ impl ArrayTape {
         }
         let epoch = lock(&self.ring).turn();
         let stop = tokio_util::sync::CancellationToken::new();
-        let (node, ring, opener, token) = (
+        let (node, ring, opener, cancel) = (
             self.node.clone(),
             self.ring.clone(),
             self.opener.clone(),
             stop.clone(),
         );
-        // A stopping capture left in the slot is not waited on here: its writes are already
-        // refused, and `stop` is what dictation waits on (it joins the newest).
+        let token = self.captures.as_ref().map(|r| r.take(Holder::Tape));
+        // A retired task left running is not waited on (as before ADR 0077): its writes are
+        // refused by the epoch, and the registry counts its capture until it is gone.
         *task = Some(Running {
             stop,
             task: tokio::spawn(async move {
-                // Never dropped mid-open: a cancel waits for the open, then closes what opened.
-                let opened = tokio::task::spawn_blocking(move || opener(&node)).await;
-                let mut cap = match opened {
-                    Ok(Ok(c)) => c,
-                    Ok(Err(e)) => {
+                let opened = tokio::task::spawn_blocking(move || (opener(&node), token)).await;
+                let (mut cap, _token) = match opened {
+                    Ok((Ok(c), t)) => (c, t),
+                    Ok((Err(e), _)) => {
                         warn!("wake takes: the array's stream did not open: {e}");
                         return;
                     }
@@ -161,7 +172,7 @@ impl ArrayTape {
                 loop {
                     let frame = tokio::select! {
                         biased;
-                        _ = token.cancelled() => break,
+                        _ = cancel.cancelled() => break,
                         f = cap.next_frame() => f,
                     };
                     let Some(frame) = frame else { break };
@@ -172,13 +183,13 @@ impl ArrayTape {
                     r.add(&frame.samples, Instant::now());
                 }
                 cap.close();
-                drop(cap); // the capture's thread is joined here
+                drop(cap); // the capture's thread is joined here; the token goes after it
             }),
         });
     }
 
     /// Refuse the running capture's writes and forget what the tape held, at once, and tell
-    /// the capture to close; it stays in its slot for `stop` to wait on.
+    /// the capture to close.
     fn halt(&self) {
         lock(&self.ring).turn();
         if let Some(running) = lock(&self.task).as_ref() {
@@ -186,30 +197,18 @@ impl ArrayTape {
         }
     }
 
-    /// Close the capture and forget what it held, and return only once the capture is
-    /// closed: an open in flight is waited for and closed too. The passive loop awaits this
-    /// before it gives the microphone to dictation (ADR 0077).
-    pub async fn stop(&self) {
+    /// Close the capture and forget what it held, without waiting for it, as before ADR
+    /// 0077: the capture closes in its own time, and whoever must know when it is gone (the
+    /// dictation grant) asks the live-capture registry.
+    pub fn stop(&self) {
         self.halt();
-        let running = lock(&self.task).take();
-        if let Some(running) = running {
-            let _ = running.task.await;
-        }
+        lock(&self.task).take();
     }
 
-    /// The same without waiting: shutdown, where nothing can wait.
-    pub fn stop_now(&self) {
-        self.halt();
-        if let Some(running) = lock(&self.task).take() {
-            running.task.abort();
-        }
-    }
-
-    /// No capture of the tape's is open or opening.
-    pub fn idle(&self) -> bool {
-        lock(&self.task)
-            .as_ref()
-            .is_none_or(|t| t.task.is_finished())
+    /// The ring's lock, held by a test to catch a frame in hand.
+    #[cfg(test)]
+    fn ring_for_test(&self) -> std::sync::MutexGuard<'_, Ring> {
+        lock(&self.ring)
     }
 
     /// `push` for tests: as the capture loop does.
@@ -295,13 +294,13 @@ impl TapedWake {
     }
 }
 
-/// A wait dropped mid-way (the passive loop chose something else): the tape's writes are
-/// refused at once; `stop`, which the loop always awaits next, waits for its capture.
+/// A wait dropped mid-way (the passive loop chose something else): the tape stops, its
+/// writes refused at once.
 struct StopOnDrop(Arc<ArrayTape>);
 
 impl Drop for StopOnDrop {
     fn drop(&mut self) {
-        self.0.halt();
+        self.0.stop();
     }
 }
 
@@ -318,16 +317,12 @@ impl WakeDetector for TapedWake {
     }
 
     async fn stop(&self) {
+        self.tape.stop();
         self.inner.stop().await;
-        self.tape.stop().await;
-    }
-
-    fn quiet(&self) -> bool {
-        self.inner.quiet() && self.tape.idle()
     }
 
     fn close(&self) {
-        self.tape.stop_now();
+        self.tape.stop();
         self.inner.close();
     }
 }
@@ -511,7 +506,7 @@ mod tests {
     async fn the_keeper_names_the_input_and_takes_the_array_beside_it() {
         let tmp = tempfile::tempdir().unwrap();
         let takes = Arc::new(Takes::new(tmp.path()));
-        let tape = ArrayTape::new("alsa_input.array".into());
+        let tape = ArrayTape::new("alsa_input.array".into(), None);
         // 3 s of the array, the newest just now
         tape.push(&vec![5i16; 3 * 16_000 * 2], Instant::now());
         let k = Keeper::new(takes.clone(), "ghost.mic".into(), Some(tape));
@@ -550,7 +545,7 @@ mod tests {
     fn the_tape_holds_a_whole_accepted_take_written_after_a_long_request() {
         // 12 s before the hit and 1.5 s after, written when the operator finishes up to
         // 12 s after the hit: the array's copy is as long as the detector's.
-        let tape = ArrayTape::new("n".into());
+        let tape = ArrayTape::new("n".into(), None);
         tape.push(
             &vec![3i16; 40 * 16_000 * 2],
             Instant::now() + Duration::from_secs(5),
@@ -561,7 +556,7 @@ mod tests {
 
     #[test]
     fn the_tape_slices_back_from_the_take_end() {
-        let tape = ArrayTape::new("n".into());
+        let tape = ArrayTape::new("n".into(), None);
         let mut pcm = vec![0i16; 4 * 16_000 * 2];
         // the last second is 9s
         for s in pcm[3 * 16_000 * 2..].iter_mut() {
@@ -576,21 +571,22 @@ mod tests {
         // the take ended a second before the newest sample: the second before that
         let (_, before) = tape.slice(1.0, 1.0).unwrap();
         assert!(before.iter().all(|&s| s == 0));
-        tape.stop_now();
+        tape.stop();
         assert!(tape.slice(1.0, 0.0).is_none());
     }
 
-    /// A tape capture for tests: a frame of `value` every 5 ms, slow to open and to close,
-    /// counting how many are open.
+    /// A tape capture for tests: a frame of `value` every 5 ms, slow to close, saying when
+    /// it has a frame in hand.
     struct SlowMic {
-        open: Arc<std::sync::atomic::AtomicIsize>,
         value: i16,
+        handed: Arc<std::sync::atomic::AtomicBool>,
     }
 
     #[async_trait]
     impl ghost_voice::transport::MediaIn for SlowMic {
         async fn next_frame(&mut self) -> Option<ghost_voice::frames::Audio> {
             tokio::time::sleep(Duration::from_millis(5)).await;
+            self.handed.store(true, std::sync::atomic::Ordering::SeqCst);
             Some(ghost_voice::frames::Audio::new(vec![self.value; 160], RATE))
         }
     }
@@ -598,94 +594,95 @@ mod tests {
     impl Drop for SlowMic {
         fn drop(&mut self) {
             std::thread::sleep(Duration::from_millis(50)); // as a capture joins its thread
-            self.open.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
         }
     }
 
     fn slow_tape(
-        open: Arc<std::sync::atomic::AtomicIsize>,
-        opens: Arc<AtomicUsize>,
+        open_ms: u64,
+        handed: Arc<std::sync::atomic::AtomicBool>,
+        captures: Option<Arc<Registry>>,
     ) -> Arc<ArrayTape> {
         ArrayTape::with_opener(
             "n".into(),
             Arc::new(move |_node: &str| {
-                opens.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                std::thread::sleep(Duration::from_millis(150)); // a slow open
-                open.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                // An open finished: counted down from the opens begun.
-                opens.fetch_add(1 << 16, std::sync::atomic::Ordering::SeqCst);
+                std::thread::sleep(Duration::from_millis(open_ms)); // a slow open
                 Ok(Box::new(SlowMic {
-                    open: open.clone(),
                     value: 7,
+                    handed: handed.clone(),
                 })
                     as Box<dyn ghost_voice::transport::MediaIn>)
             }),
+            captures,
         )
     }
 
-    use std::sync::atomic::AtomicUsize;
-
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn stopping_the_tape_waits_for_an_open_in_flight_and_its_close() {
-        // Finding 2: the passive loop hands the microphone over only after this returns, so
-        // when it returns no capture of the tape's is open or about to open.
-        let open = Arc::new(std::sync::atomic::AtomicIsize::new(0));
-        let opens = Arc::new(AtomicUsize::new(0));
-        let tape = slow_tape(open.clone(), opens.clone());
+    async fn a_frame_held_across_a_stop_is_refused_by_the_generation() {
+        // The writer has a frame in hand and is about to take the ring when the stop comes:
+        // the generation it started with no longer matches, so the frame is not added.
+        let handed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let tape = slow_tape(0, handed.clone(), None);
         tape.start();
-        tokio::time::sleep(Duration::from_millis(30)).await; // the open is in flight
-        assert_eq!(
-            opens.load(std::sync::atomic::Ordering::SeqCst),
-            1,
-            "begun, not finished"
+        tokio::time::sleep(Duration::from_millis(50)).await; // it records
+        {
+            let mut ring = tape.ring_for_test();
+            ring.buf.clear();
+            handed.store(false, std::sync::atomic::Ordering::SeqCst);
+        }
+        {
+            // Hold the ring so the writer blocks with its next frame in hand.
+            let mut ring = tape.ring_for_test();
+            while !handed.load(std::sync::atomic::Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            std::thread::sleep(Duration::from_millis(20)); // it is waiting on the ring
+            // What `stop` does, while the writer waits: a new generation, and the cancel.
+            ring.turn();
+        }
+        if let Some(r) = lock(&tape.task).as_ref() {
+            r.stop.cancel();
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(
+            tape.ring_for_test().buf.is_empty(),
+            "a frame held across the stop was added"
         );
-        tape.stop().await;
-        assert_eq!(
-            opens.load(std::sync::atomic::Ordering::SeqCst),
-            1 + (1 << 16),
-            "stop returned with an open still in flight"
-        );
-        assert_eq!(
-            open.load(std::sync::atomic::Ordering::SeqCst),
-            0,
-            "a capture is open"
-        );
-        assert!(tape.idle());
-        tokio::time::sleep(Duration::from_millis(300)).await;
-        assert_eq!(
-            open.load(std::sync::atomic::Ordering::SeqCst),
-            0,
-            "one opened after"
-        );
-        assert!(tape.slice(1.0, 0.0).is_none(), "the tape kept something");
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn a_running_tape_stops_with_its_capture_closed_and_nothing_written_after() {
-        let open = Arc::new(std::sync::atomic::AtomicIsize::new(0));
-        let tape = slow_tape(open.clone(), Arc::new(AtomicUsize::new(0)));
-        tape.start();
-        for _ in 0..100 {
-            if tape.slice(0.01, 0.0).is_some() {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        assert!(tape.slice(0.01, 0.0).is_some(), "the tape records");
-        tape.stop().await;
-        assert_eq!(open.load(std::sync::atomic::Ordering::SeqCst), 0);
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        assert!(
-            tape.slice(1.0, 0.0).is_none(),
-            "a frame was written after the stop"
+    async fn the_tapes_captures_are_counted_until_gone_a_retired_one_too() {
+        // ADR 0077: counted from before the open (an open in flight counts) until after the
+        // capture is closed; a tape stopped and started again while its predecessor is still
+        // opening counts both; `stop` itself waits for nothing.
+        let captures = Registry::new();
+        let tape = slow_tape(
+            150,
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            Some(captures.clone()),
         );
-        // a stop told while a wait is dropped refuses writes at once, before the join
         tape.start();
+        assert_eq!(
+            captures.alive_for(Holder::Tape),
+            1,
+            "the open in flight counts"
+        );
+        let began = Instant::now();
+        tape.stop();
+        assert!(began.elapsed() < Duration::from_millis(20), "stop waited");
+        tape.start(); // the predecessor is still opening
+        assert_eq!(captures.alive_for(Holder::Tape), 2);
         tokio::time::sleep(Duration::from_millis(250)).await;
-        tape.halt();
-        tokio::time::sleep(Duration::from_millis(40)).await;
-        assert!(tape.slice(1.0, 0.0).is_none(), "written after the halt");
-        tape.stop().await;
-        assert_eq!(open.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert!(
+            captures.alive_for(Holder::Tape) >= 1,
+            "the running one counts"
+        );
+        tape.stop();
+        assert!(
+            captures
+                .until(Duration::from_secs(2), |c| c.of(Holder::Tape) == 0)
+                .await,
+            "a tape capture outlived its count"
+        );
+        assert!(tape.slice(1.0, 0.0).is_none(), "the tape kept something");
     }
 }

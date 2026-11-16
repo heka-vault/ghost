@@ -98,6 +98,8 @@ fn closing_while_the_owner_sets_up_interrupts_it() {
         "{:?}",
         began.elapsed()
     );
+    assert!(!c.holding()); // Closed for good: nothing more is set, nothing more connects.
+    assert_eq!(c.set(text("Later.")), Err(DictationReason::ClipboardFailed));
     assert!(!c.holding());
 }
 
@@ -238,4 +240,43 @@ fn on_a_real_display_the_text_is_pasted_replaced_and_given_up() {
     );
     assert!(!c.holding());
     assert_eq!(paste(x.number), None, "nobody owns it after Ghost stopped");
+}
+
+#[test]
+fn a_display_whose_queue_is_full_is_given_up_within_the_bound() {
+    // A listener that never accepts, its queue filled: a blocking connect would wait for ever.
+    use rustix::net::{AddressFamily, SocketAddrUnix, SocketFlags, SocketType};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("X0");
+    let addr = SocketAddrUnix::new(&path).unwrap();
+    let _listener = rustix::net::socket(AddressFamily::UNIX, SocketType::STREAM, None).unwrap();
+    rustix::net::bind(&_listener, &addr).unwrap();
+    rustix::net::listen(&_listener, 1).unwrap(); // a queue of one
+    let mut queued = Vec::new();
+    for _ in 0..4096 {
+        let fd = rustix::net::socket_with(
+            AddressFamily::UNIX,
+            SocketType::STREAM,
+            SocketFlags::NONBLOCK | SocketFlags::CLOEXEC,
+            None,
+        )
+        .unwrap();
+        if rustix::net::connect(&fd, &addr).is_err() {
+            break; // the queue is full
+        }
+        queued.push(fd);
+    }
+    let c = Arc::new(XClipboard::at(&path, 0, Auth::None));
+    let (tx, rx) = std::sync::mpsc::channel();
+    {
+        let c = c.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(c.set(text("Pick up milk.")));
+        });
+    }
+    let r = rx
+        .recv_timeout(OWN_WAIT + Duration::from_secs(3))
+        .expect("set is still waiting on a full queue");
+    assert!(r.is_err());
+    assert!(!c.holding());
 }

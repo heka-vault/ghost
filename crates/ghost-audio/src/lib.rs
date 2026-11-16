@@ -23,6 +23,7 @@ pub mod duck;
 pub mod frame;
 pub mod health;
 pub mod input;
+pub mod live;
 pub mod mixer;
 pub mod playback;
 pub mod pw;

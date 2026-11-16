@@ -158,15 +158,42 @@ fn pcm_marks() -> Vec<Vec<u8>> {
     vec![i16s, f32s]
 }
 
+/// The sound as Parakeet is given it: float, with the −72 dBFS dither added, so not to the
+/// bit. Three samples of the pattern in a row, each within the dither's reach, at any byte
+/// offset, little-endian.
+fn has_dithered_floats(bytes: &[u8]) -> bool {
+    let want: Vec<f32> = PCM.iter().map(|&s| f32::from(s) / 32768.0).collect();
+    let reach = 10f32.powf(ghost_voice::stt::DITHER_DBFS / 20.0) * 2.0;
+    for offset in 0..4.min(bytes.len()) {
+        let floats: Vec<f32> = bytes[offset..]
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|c| f32::from_le_bytes(*c))
+            .collect();
+        for w in floats.windows(3) {
+            for start in 0..PCM.len() {
+                if (0..3).all(|k| (w[k] - want[(start + k) % PCM.len()]).abs() <= reach) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
 fn has_mark(bytes: &[u8]) -> Option<String> {
     let text = String::from_utf8_lossy(bytes).to_lowercase();
     if let Some(m) = MARKS.iter().find(|m| text.contains(*m)) {
         return Some((*m).to_string());
     }
-    pcm_marks()
+    if let Some(p) = pcm_marks()
         .iter()
         .find(|p| bytes.windows(p.len()).any(|w| w == p.as_slice()))
-        .map(|p| format!("the audio ({} bytes)", p.len()))
+    {
+        return Some(format!("the audio ({} bytes)", p.len()));
+    }
+    has_dithered_floats(bytes).then(|| "the audio, as dithered floats".to_string())
 }
 
 /// Every file under `dir`, with the mark if it holds it.
@@ -322,6 +349,21 @@ async fn dictated_words_reach_only_the_clipboard() {
         .collect();
     assert!(has_mark(&frame).is_some(), "the audio search is blind");
     assert!(has_mark(b"nothing here").is_none());
+    // and it finds the floats Parakeet is given, dither and all, at any byte offset
+    let floats: Vec<f32> = PCM
+        .iter()
+        .copied()
+        .cycle()
+        .take(64)
+        .map(|s| f32::from(s) / 32768.0)
+        .collect();
+    let mut shifted = vec![7u8];
+    shifted.extend(
+        ghost_voice::stt::dithered(&floats)
+            .iter()
+            .flat_map(|f| f.to_le_bytes()),
+    );
+    assert!(has_mark(&shifted).is_some(), "the dithered search is blind");
     let lines = Lines::default();
     let mirror = LogMirror::new();
     let capture = ghostd::debug_audio::Capture::new();
@@ -551,7 +593,11 @@ async fn dictated_words_reach_only_the_clipboard() {
     client.debug_audio(Some(false)).await.unwrap();
     tokio::time::sleep(Duration::from_millis(200)).await;
     daemon.stop.cancel();
-    let _ = tokio::time::timeout(Duration::from_secs(20), run).await;
+    let ran = tokio::time::timeout(Duration::from_secs(20), run).await;
+    assert!(
+        matches!(ran, Ok(Ok(Ok(())))),
+        "the daemon did not wind down cleanly in time: {ran:?}"
+    );
     collecting.abort();
     files_with_mark(tmp.path(), &mut found, &mut seen);
     if display.is_some() {

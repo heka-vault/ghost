@@ -6,6 +6,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use ghost_voice::stt::Recognizer;
 
+use ghost_voice::frames::Audio;
+
 use super::*;
 
 /// Frames of `value`, 20 ms each; `fast` gives them as quickly as they are asked for.
@@ -15,12 +17,20 @@ struct Mic {
     frames: Option<usize>,
     /// Gives this many frames, then nothing ever again (a capture that stalls).
     stall_after: Option<usize>,
+    /// Gives this many frames, then panics (a fault in the recording).
+    panic_after: Option<usize>,
     open: Arc<AtomicUsize>,
 }
 
 #[async_trait]
 impl MediaIn for Mic {
     async fn next_frame(&mut self) -> Option<Audio> {
+        if let Some(n) = self.panic_after.as_mut() {
+            if *n == 0 {
+                panic!("a fault in the capture");
+            }
+            *n -= 1;
+        }
         if let Some(n) = self.stall_after.as_mut() {
             if *n == 0 {
                 std::future::pending::<()>().await;
@@ -98,6 +108,7 @@ struct Fake {
     fast: bool,
     frames: Option<usize>,
     stall_after: Option<usize>,
+    panic_after: Option<usize>,
     /// While set, `open` waits for it to be let go (a capture slow to open).
     open_gate: Option<Arc<AtomicBool>>,
     /// Opens begun.
@@ -139,6 +150,7 @@ impl Host for Fake {
             fast: self.fast,
             frames: self.frames,
             stall_after: self.stall_after,
+            panic_after: self.panic_after,
             open: self.open.clone(),
         }))
     }
@@ -170,6 +182,7 @@ fn world_with(text: &str, gated: bool, fast: bool, limit: Duration, board: Board
         fast,
         frames: None,
         stall_after: None,
+        panic_after: None,
         open_gate: None,
         opening: Arc::new(AtomicUsize::new(0)),
         open: Arc::new(AtomicUsize::new(0)),
@@ -339,7 +352,7 @@ async fn cancelling_a_recording_closes_the_microphone_and_keeps_nothing() {
             Some(DictationReason::ListeningTurnedOff)
         )
     );
-    assert_eq!(w.host.open.load(Ordering::SeqCst), 0);
+    settle(|| w.host.open.load(Ordering::SeqCst) == 0).await;
     settle(|| w.host.held.load(Ordering::SeqCst) == 0).await;
     assert_eq!(w.reads.load(Ordering::SeqCst), 0, "nothing was read");
     assert!(w.board.set.lock().unwrap().is_empty());
@@ -383,6 +396,7 @@ async fn the_microphone_going_away_ends_it_and_reads_what_there_is() {
         fast: false,
         frames: Some(3),
         stall_after: None,
+        panic_after: None,
         open_gate: None,
         opening: Arc::new(AtomicUsize::new(0)),
         open: Arc::new(AtomicUsize::new(0)),
@@ -556,6 +570,7 @@ fn host_with(model: SharedRecognizer, tweak: impl FnOnce(&mut Fake)) -> Arc<Fake
         fast: false,
         frames: None,
         stall_after: None,
+        panic_after: None,
         open_gate: None,
         opening: Arc::new(AtomicUsize::new(0)),
         open: Arc::new(AtomicUsize::new(0)),
@@ -567,10 +582,11 @@ fn host_with(model: SharedRecognizer, tweak: impl FnOnce(&mut Fake)) -> Arc<Fake
 
 #[tokio::test]
 async fn listening_off_or_a_session_while_the_microphone_opens_cancels_the_start() {
-    // Finding 1: a start between asking for the microphone and its first frame is a
-    // dictation too. Ending it (listening off, a session, Ghost stopping) waits until the
-    // capture it was opening is closed and the microphone given back, and the start never
-    // turns into a recording.
+    // A start between asking for the microphone and its first frame is a dictation too.
+    // Ending it (listening off, a session, Ghost stopping) returns at once and the start
+    // never turns into a recording; the open under way is let finish and what it opened is
+    // closed, then the microphone given back. (Who waits for that closing is the passive
+    // loop, through the live-capture registry: `barrier_tests`.)
     for why in [
         DictationReason::ListeningTurnedOff,
         DictationReason::SessionOpened,
@@ -594,14 +610,14 @@ async fn listening_off_or_a_session_while_the_microphone_opens_cancels_the_start
             let d = d.clone();
             async move { d.end(why).await }
         });
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        assert!(
-            !ending.is_finished(),
-            "the end waits for the open to finish"
-        );
+        tokio::time::timeout(Duration::from_secs(1), ending)
+            .await
+            .expect("an end does not wait for an open")
+            .unwrap();
+        assert_eq!(d.state(), DictationState::Idle);
+        assert_eq!(host.held.load(Ordering::SeqCst), 1, "still opening: held");
         gate.store(true, Ordering::SeqCst); // the open completes after the cancel
-        ending.await.unwrap();
-        assert_eq!(host.open.load(Ordering::SeqCst), 0, "the capture is closed");
+        settle(|| host.open.load(Ordering::SeqCst) == 0).await; // and is closed
         settle(|| host.held.load(Ordering::SeqCst) == 0).await;
         let v = starting.await.unwrap();
         assert_eq!(v.state, DictationState::Idle);
@@ -654,4 +670,51 @@ async fn a_capture_that_stalls_still_ends_at_the_limit() {
     let r = d.view().result.unwrap();
     assert_eq!(r.reason, Some(DictationReason::Limit));
     assert_eq!(host.open.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_start_request_dropped_mid_open_changes_nothing() {
+    // The re-check, design 4: the coordinator owns a dictation, not the request. A request
+    // dropped while the microphone opens (the CLI killed, the HTTP client gone) leaves the
+    // start to finish or settle by itself; the stage never stays Starting.
+    let w = world("Hello.");
+    let gate = Arc::new(AtomicBool::new(false));
+    let host = host_with(w.host.model.clone(), |f| f.open_gate = Some(gate.clone()));
+    let d = Dictation::new(host.clone(), w.board.clone(), w.notes.clone(), LIMIT);
+    let request = tokio::spawn({
+        let d = d.clone();
+        async move { d.start().await }
+    });
+    settle(|| host.opening.load(Ordering::SeqCst) == 1).await;
+    request.abort();
+    let _ = request.await;
+    gate.store(true, Ordering::SeqCst);
+    settle(|| d.state() == DictationState::Recording).await;
+    // the dictation goes on as if the request were there, and ends normally
+    let v = d.stop().await;
+    assert_eq!(outcome(&v).0, DictationOutcome::OnClipboard);
+    settle(|| host.held.load(Ordering::SeqCst) == 0 && host.open.load(Ordering::SeqCst) == 0).await;
+    assert_eq!(
+        d.start().await.state,
+        DictationState::Recording,
+        "a later start works"
+    );
+    d.cancel(DictationReason::Operator).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_panic_in_the_recording_settles_the_stage_and_returns_the_lease() {
+    let w = world("Never.");
+    let host = host_with(w.host.model.clone(), |f| f.panic_after = Some(3));
+    let d = Dictation::new(host.clone(), w.board.clone(), w.notes.clone(), LIMIT);
+    d.start().await;
+    settle(|| d.state() == DictationState::Idle).await;
+    settle(|| host.held.load(Ordering::SeqCst) == 0).await;
+    assert_eq!(host.open.load(Ordering::SeqCst), 0, "the capture is closed");
+    let r = d.view().result.unwrap();
+    assert_eq!(
+        (r.outcome, r.reason),
+        (DictationOutcome::Cancelled, Some(DictationReason::Failed))
+    );
+    assert!(w.board.set.lock().unwrap().is_empty());
 }
