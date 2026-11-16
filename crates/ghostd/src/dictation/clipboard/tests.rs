@@ -147,14 +147,28 @@ fn xvfb() -> Option<Xvfb> {
             .spawn()
             .ok()?;
         let x = Xvfb { child, number };
-        for _ in 0..100 {
-            if socket.exists() {
+        // The socket's file is there before the server answers on it (a loaded CI runner
+        // showed seconds between the two): wait for a plain client's setup to go through,
+        // so what the test then measures is Ghost's client and not Xvfb's start.
+        for _ in 0..200 {
+            if socket.exists() && answers(number) {
                 return Some(x);
             }
             std::thread::sleep(Duration::from_millis(50));
         }
+        eprintln!("Xvfb :{number} never answered: the real-display test is skipped");
+        return None;
     }
     None
+}
+
+/// Whether a plain blocking client gets through the display's setup.
+fn answers(number: u16) -> bool {
+    UnixStream::connect(format!("/tmp/.X11-unix/X{number}"))
+        .ok()
+        .and_then(|s| DefaultStream::from_unix_stream(s).ok())
+        .and_then(|(stream, _)| RustConnection::connect_to_stream(stream, 0).ok())
+        .is_some()
 }
 
 /// What another program pasting would get: CLIPBOARD as UTF8_STRING, or None.
