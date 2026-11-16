@@ -1,7 +1,7 @@
 {
   "name": "heka-ghost",
   "private": true,
-  "version": "2026.11.3",
+  "version": "2026.11.4",
   "description": "Ghost: voice assistant daemon (Python) with TypeScript desktop and mobile apps",
   "packageManager": "pnpm@11.10.0",
   "engines": {
