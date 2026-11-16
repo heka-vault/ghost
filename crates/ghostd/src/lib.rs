@@ -45,5 +45,6 @@ pub mod uninstall;
 pub mod wake;
 pub mod wake_detectors;
 pub mod wake_takes;
+pub mod wind_down;
 
 pub use config::GhostdSettings;

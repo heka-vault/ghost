@@ -265,8 +265,14 @@ fn log_settings_file(path: &std::path::Path, s: &ghost_core::environment::Settin
 /// `ghostd run`: the vault first (ADR 0036), since Ghost's settings read its passwords
 /// from the daemon's environment; then the daemon, until SIGTERM, SIGINT or the parent
 /// going away.
-#[tokio::main]
-async fn run(mirror: LogMirror, capture: ghostd::debug_audio::Capture) -> anyhow::Result<()> {
+fn run(mirror: LogMirror, capture: ghostd::debug_audio::Capture) -> anyhow::Result<()> {
+    ghostd::wind_down::block_on(run_daemon(mirror, capture), ghostd::wind_down::LIMIT)
+}
+
+async fn run_daemon(
+    mirror: LogMirror,
+    capture: ghostd::debug_audio::Capture,
+) -> anyhow::Result<()> {
     let base = GhostdSettings::load()?;
     // ADR 0067: error reports first, so a panic anywhere after this is spooled. Redaction
     // reads the vault's values as they are loaded.

@@ -85,10 +85,15 @@ has given the lease back and its own capture has released its token. That wait h
 limit, because the privacy line is not traded for time: if dictation's capture does not
 close, the wake stays off, and once the dictation is over and 2 s have passed the waiting list
 says so (`dictation:microphone`, shown, never said) until it closes; Ghost stopping ends the
-wait at once. The kept takes' tape is not waited on by the wake or a session, as before: its
+wait at once, and the process itself then goes: a capture's close runs in a blocking task,
+which a runtime waits for when it is dropped, so the daemon's runtime gives what is left
+after its own wind-down 5 s and exits without it (`ghostd::wind_down`,
+`a_blocking_task_that_never_ends_does_not_hold_the_exit`; that holds for every such task,
+not dictation's alone). The kept takes' tape is not waited on by the wake or a session, as before: its
 `stop` returns at once, each start and stop moves its ring to a new generation so a frame a
 stopping capture had in hand is refused, and the registry counts its captures until they are
-gone. Held by `dictation_never_reaches_the_wake_or_a_kept_take` (every read of the room
+gone (the capture and its token are one value with the capture first, so a panic while it
+reads still closes the capture before the count falls). Held by `dictation_never_reaches_the_wake_or_a_kept_take` (every read of the room
 numbered, the first and last of dictation's frames included; any overlap of the tape's
 capture with dictation's a failure),
 `dictation_waits_for_a_tape_still_opening_when_the_wake_stopped`,

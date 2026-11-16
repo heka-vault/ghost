@@ -161,8 +161,14 @@ impl ArrayTape {
             stop,
             task: tokio::spawn(async move {
                 let opened = tokio::task::spawn_blocking(move || (opener(&node), token)).await;
-                let (mut cap, _token) = match opened {
-                    Ok((Ok(c), t)) => (c, t),
+                // One value, the capture declared first: on any exit, a panic's unwinding
+                // included, the capture is dropped (its thread joined) before the token.
+                struct Held<C, T> {
+                    cap: C,
+                    _token: T,
+                }
+                let mut held = match opened {
+                    Ok((Ok(cap), _token)) => Held { cap, _token },
                     Ok((Err(e), _)) => {
                         warn!("wake takes: the array's stream did not open: {e}");
                         return;
@@ -173,7 +179,7 @@ impl ArrayTape {
                     let frame = tokio::select! {
                         biased;
                         _ = cancel.cancelled() => break,
-                        f = cap.next_frame() => f,
+                        f = held.cap.next_frame() => f,
                     };
                     let Some(frame) = frame else { break };
                     let mut r = lock(&ring);
@@ -182,8 +188,8 @@ impl ArrayTape {
                     }
                     r.add(&frame.samples, Instant::now());
                 }
-                cap.close();
-                drop(cap); // the capture's thread is joined here; the token goes after it
+                held.cap.close();
+                drop(held); // the capture's thread is joined here; the token goes after it
             }),
         });
     }
