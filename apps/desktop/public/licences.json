@@ -1068,6 +1068,11 @@
    "license": "MIT"
   },
   {
+   "name": "gethostname",
+   "version": "1.1.0",
+   "license": "Apache-2.0"
+  },
+  {
    "name": "getrandom",
    "version": "0.2.17",
    "license": "MIT OR Apache-2.0"
@@ -3666,6 +3671,16 @@
    "name": "x11-dl",
    "version": "2.21.0",
    "license": "MIT"
+  },
+  {
+   "name": "x11rb",
+   "version": "0.14.0",
+   "license": "MIT OR Apache-2.0"
+  },
+  {
+   "name": "x11rb-protocol",
+   "version": "0.14.0",
+   "license": "MIT OR Apache-2.0"
   },
   {
    "name": "x509-parser",
