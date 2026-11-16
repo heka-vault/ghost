@@ -629,15 +629,22 @@ mod tests {
             ring.buf.clear();
             handed.store(false, std::sync::atomic::Ordering::SeqCst);
         }
-        {
-            // Hold the ring so the writer blocks with its next frame in hand.
-            let mut ring = tape.ring_for_test();
-            while !handed.load(std::sync::atomic::Ordering::SeqCst) {
-                std::thread::sleep(Duration::from_millis(1));
-            }
-            std::thread::sleep(Duration::from_millis(20)); // it is waiting on the ring
-            // What `stop` does, while the writer waits: a new generation, and the cancel.
-            ring.turn();
+        // Hold the ring so the writer blocks with its next frame in hand, on a thread of its
+        // own: the runtime's workers stay free for the writer.
+        let held = {
+            let (tape, handed) = (tape.clone(), handed.clone());
+            std::thread::spawn(move || {
+                let mut ring = tape.ring_for_test();
+                while !handed.load(std::sync::atomic::Ordering::SeqCst) {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                std::thread::sleep(Duration::from_millis(20)); // it is waiting on the ring
+                // What `stop` does, while the writer waits: a new generation, and the cancel.
+                ring.turn();
+            })
+        };
+        while !held.is_finished() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
         }
         if let Some(r) = lock(&tape.task).as_ref() {
             r.stop.cancel();
