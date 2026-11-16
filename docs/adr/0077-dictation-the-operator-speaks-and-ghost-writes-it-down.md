@@ -20,18 +20,27 @@ which ends at the clipboard.
 microphone a session hears (`microphone::Plan::session`), records until stopped, reads the
 whole of it once with the Parakeet it already has (the trailing silence and the dither a
 segment gets, waiting its turn behind a read in flight), cleans the text up, and puts it on
-the clipboard. `ghostd::dictation` is the one coordinator: each change of stage goes one at a
-time, each dictation has a generation, a second start while one starts, records or is read is
-refused, stop and cancel with nothing going on say so and change nothing, and a read that
-finishes after its dictation was cancelled does nothing. A start is a stage of its own
-(*starting*) from its first step, taking the microphone from the passive loop, opening the
-capture and waiting for its first frame: listening off, a session opening and Ghost stopping
-cancel it as they cancel a recording, and the cancel returns only once whatever it was opening
-is closed and the microphone given back; an open already under way is let finish and then
-closed, never left to finish after. Just before it records, a start asks again whether
-listening is on. Every mode has a hard limit on the recording, counted in samples and in time
-(a capture that stalls still ends): 30 seconds in this slice (one whole read, no pieces); at
-the limit it stops by itself and what was said is read.
+the clipboard. `ghostd::dictation` is the one coordinator, and a dictation is its own, not a
+request's: a start and a stop each run as the coordinator's task, so a client that goes away
+(the CLI killed, the HTTP connection dropped) changes nothing; the request only asks and
+waits for the answer. Each change of stage goes one at a time (`ops`, never held across a
+capture's open or close, the read or the clipboard); each dictation has a generation; a
+second start while one starts, records or is read is refused; stop and cancel with nothing
+going on say so and change nothing; a read that finishes after its dictation was cancelled
+does nothing. Every operation has one guard that, on any exit that did not settle the stage
+(a panic in the start, the recording or the read included), puts it back to idle with the
+result *cancelled, something went wrong*, and the unwinding drops the capture before the
+lease and wipes what it held. A start is a stage of its own (*starting*) from its first step:
+taking the microphone from the passive loop, opening the capture, waiting for its first
+frame. Listening off, a session opening and Ghost stopping cancel it as they cancel a
+recording; a cancel returns at once, and what the start or the recording had open closes on
+its own, off the runtime (the passive loop waits for that, below). An open already under way
+is not interrupted: what it opens is closed as soon as it returns. Just before it records, a
+start asks again whether listening is on. Every mode has a hard limit on the recording,
+counted in samples and in time (a capture that stalls still ends): 30 seconds in this slice
+(one whole read, no pieces); at the limit it stops by itself and what was said is read. A
+cancel that arrives while the text is being put on the clipboard is too late: it waits for
+that (within the clipboard's own bounds, about 7 s at most) and says how it ended.
 
 **It starts only from the operator's routes.** `GET /dictation` and `POST
 /dictation/start|stop|toggle|cancel` on the control API, and `ghostd dictate
@@ -56,25 +65,36 @@ seconds. **It is cancelled**, closing the capture and dropping what was recorded
 read, when listening is turned off, when a session opens (a wake, a typed turn, Call, the
 phone), and when Ghost stops.
 
-**The audio barrier.** Dictation takes the microphone from the passive loop with a lease, as
-the Hearing test does. Before the loop grants it, it stops the wake listener and waits until
-its captures are closed: the listener's pipeline (the VAD, the detector's window, Parakeet's
-wake check, any pre-roll) has ended, which is when its capture is dropped, and the kept takes'
-array tape (ADR 0065), which runs its own raw capture, has closed it, an open still in flight
-included, and cleared its 30 s ring. Each start and stop of the tape moves its ring to a new
-generation, so a frame a stopping capture had in hand is refused. A listener that did not stop
-in time keeps the lease from being granted, and dictation is told the desk is busy. While
-dictation records nothing of the passive listener runs, and no session runs, so no dictated
-frame reaches the wake detector, the passive VAD, Parakeet's wake check, a session's
-speech-to-text or the realtime uplink (ADR 0063). The loop listens again only once dictation's
-own capture has closed; it waits for that with no time limit (a session or a phone call that
-cancelled the dictation waits too), with a fresh pipeline and a tape that starts empty, so a
-take kept right after a dictation holds none of it. Held by
-`dictation_never_reaches_the_wake_or_a_kept_take` (a room whose every sample says when it was
-heard, the tape's own task over a capture slow to open and to close, and any overlap of the
-tape's capture with dictation's counted as a failure),
-`stopping_the_tape_waits_for_an_open_in_flight_and_its_close` and
-`the_listener_is_quiet_only_once_its_capture_is_closed`.
+**The audio barrier: every desk capture counted where it lives.** `ghost_audio::live` is a
+registry of the desk captures alive, by who holds them (the wake's pipeline, the kept takes'
+array tape, a session, the Hearing test, dictation). Each takes a token *before* it starts
+opening, so an open in flight counts, and keeps it with the capture until the capture is
+gone: `ghost_audio`'s capture holds it as its last field (released after its thread is
+joined), and anything else holding a capture keeps the token beside it, dropped after it. So
+"is any desk capture alive" has one answer whoever opened it, including a capture whose
+owner stopped waiting for it: a pipeline stage left to finish after the pipeline's five-second
+wait, or a tape task retired while it was still opening or closing. Dictation takes the
+microphone from the passive loop with a lease, as the Hearing test does. The loop stops the
+wake as it always has, and then grants the lease only when the registry counts no desk
+capture at all; if that does not happen within 3 s, the lease is dropped, dictation is
+refused as busy, and nothing is opened. While dictation records nothing of the passive
+listener runs and no session runs, so no dictated frame reaches the wake detector, the passive
+VAD, Parakeet's wake check, a session's speech-to-text or the realtime uplink (ADR 0063). The
+loop listens again, or opens the session that cancelled the dictation, only once dictation
+has given the lease back and its own capture has released its token. That wait has no time
+limit, because the privacy line is not traded for time: if dictation's capture does not
+close, the wake stays off, and once the dictation is over and 2 s have passed the waiting list
+says so (`dictation:microphone`, shown, never said) until it closes; Ghost stopping ends the
+wait at once. The kept takes' tape is not waited on by the wake or a session, as before: its
+`stop` returns at once, each start and stop moves its ring to a new generation so a frame a
+stopping capture had in hand is refused, and the registry counts its captures until they are
+gone. Held by `dictation_never_reaches_the_wake_or_a_kept_take` (every read of the room
+numbered, the first and last of dictation's frames included; any overlap of the tape's
+capture with dictation's a failure),
+`dictation_waits_for_a_tape_still_opening_when_the_wake_stopped`,
+`a_start_dropped_mid_open_settles_and_the_wake_waits_for_its_capture`,
+`a_capture_that_will_not_close_keeps_the_wake_off_says_so_and_shutdown_still_ends` and
+`a_frame_held_across_a_stop_is_refused_by_the_generation`.
 
 **Cleanup is deterministic, no model, dictated text only.** Fillers out (um, uh, er, hmm and
 their spellings; all-capital words are kept, since "ER" is a word), a word said three or more
@@ -92,18 +112,24 @@ read by a Wayland client, mutter's clipboard manager read it at once, and the te
 there after the owner went away). On X11 it is how every program copies. `ghostd` owns
 CLIPBOARD from an input-only window, never shown or focused, through x11rb's pure-Rust
 connection (no Xlib, which would end the whole daemon on an X I/O error, and no libxcb);
-x11rb finds the display and reads the Xauthority file, Ghost never does. Every wait on the
-display's socket is bounded (the setup and the selection within 3 s, each reply while
-answering a paste within 2 s, each write within 2 s), and a cancel interrupts it at once by
-shutting the socket down. One owner thread at a time: it answers pastes until something else
-is copied, the next dictation replaces it, or Ghost stops (the daemon closes it as it winds
-down); a replaced, failed or closed owner is joined, never left holding the text. A property
-the display refused is answered as a refusal, never as success. A text over 16 KiB (thirty
-seconds of speech is a few hundred characters) is refused with its own sentence, so one
-request always carries it and the incremental transfer is never needed. Only CLIPBOARD, never
-PRIMARY; nothing restores what was on the clipboard before in this slice: dictating replaces
-it. Where it cannot be set (no `DISPLAY`, no XWayland) the outcome says so and the words are
-gone.
+x11rb finds the display and reads the Xauthority file, Ghost never does. The clipboard's
+lifecycle is one state under one lock (empty, setting up, holding, closed): a new owner is
+installed while setting up and the previous one is taken out in the same step, so a close
+either finds it or makes it fail, and whatever a close or a replacement takes it interrupts
+and joins. Setting up is bounded, step by step: connecting to the display's socket within
+2 s (a display whose queue is full would block a plain connect for ever), x11rb's lookup of
+the cookie within 1 s on a thread of its own (a lookup that stalls is left to end by itself;
+it holds the cookie it finds, never the text), the setup and the selection within 3 s, each
+write within 2 s; the request that sets the clipboard waits about 7 s at most. Once it holds
+the clipboard the owner waits for pastes with no deadline, which is what holding a clipboard
+is, but every wait checks a cancel flag and a cancel shuts its socket down, so a close always
+ends it; answering one paste is bounded (2 s per reply). A property the display refused is
+answered as a refusal, never as success. A text over 16 KiB (thirty seconds of speech is a
+few hundred characters) is refused with its own sentence, so one request always carries it
+and the incremental transfer is never needed. The daemon closes the clipboard as it winds
+down. Only CLIPBOARD, never PRIMARY; nothing restores what was on the clipboard before in
+this slice: dictating replaces it. Where it cannot be set (no `DISPLAY`, no XWayland) the
+outcome says so and the words are gone.
 
 **Ghost keeps nothing, and the words go nowhere but the clipboard.** Not the transcript
 store, the event bus, the audit, `latency.jsonl`, a log line at any level, `debug::audio()`
@@ -112,14 +138,18 @@ panic report, a diagnostic report, the phone, an outside client, a tool or a mod
 
 **What is wiped from memory, and what is not.** Ghost's own buffers are zeroed when dropped:
 the recording (sized once for the whole limit, so it never grows and leaves a copy behind),
-each captured frame once it is copied in, the float and the dithered copies given to Parakeet,
-the string Parakeet returned and its trimmed copy, every string and token the cleanup makes
-(each sized once with room to spare, compared without lowercase copies), and the clipboard
-owner's copy of the text and its Latin-1 form. Not wiped, because they are not Ghost's to
-wipe: Parakeet's and ONNX Runtime's own buffers inside the model, the capture's ring inside
-`ghost_audio` and PipeWire's buffers, x11rb's request buffers that carry the text to the
-display, the display's own copies (XWayland, mutter's clipboard manager), and the X cookie,
-which x11rb reads and holds in its setup request.
+each captured frame once it is copied in, the first frame a start holds (wiped when an
+abandoned or refused start drops it, as when a recording takes it), the samples of a cancelled
+recording (dropped unread by the recording task), the float and the dithered copies given to
+Parakeet, the string Parakeet returned and its trimmed copy, every string and token the
+cleanup makes (each sized once with room to spare, compared without lowercase copies), a
+cancelled read's text, and the clipboard owner's copy of the text and its Latin-1 form. A
+panic unwinds through the same drops. Not wiped, because they are not Ghost's to wipe:
+Parakeet's and ONNX Runtime's own buffers inside the model, the capture's ring inside
+`ghost_audio` and PipeWire's buffers (an abandoned start's capture included), x11rb's request
+buffers that carry the text to the display, the display's own copies (XWayland, mutter's
+clipboard manager), and the X cookie, which x11rb reads and holds in its setup request (and
+in a lookup thread left to finish, above).
 
 The API answers with a state, an outcome and
 its reason from closed lists, and numbers (seconds recorded, characters, the delay to the
@@ -150,7 +180,9 @@ own. It goes once Ghost's dictation has the key.
 
 - At idle: nothing running. The passive loop waits on one more lease beside the Hearing
   test's; no thread, no capture, no timer until a dictation starts. A turn: nothing; no tool
-  schema, no stage.
+  schema, no stage. Every desk capture takes and drops a token in the registry (a counter
+  under a lock), and nothing but the dictation grant waits on it: the wake, the tape and a
+  session behave as they did before this ADR.
 - While dictating: one capture stream into memory (about 1 MB for 30 s), and the wake paused.
   After: one whole Parakeet read (about 30 to 50 ms per second of audio, ADR 0044), and one
   thread owning the clipboard, asleep on its socket with no timer, until something else is

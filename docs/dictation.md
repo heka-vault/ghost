@@ -51,7 +51,7 @@ On Hyprland or Sway, bind the same command in your compositor's config, for exam
 | Ghost says | Why |
 |---|---|
 | Ghost isn't listening. Turn listening on to dictate. | You turned listening off. Dictation keeps that promise: no microphone. |
-| Ghost is in a conversation. Dictate when it ends. | A conversation, a phone call, or a typed reply is going on. |
+| Ghost is in a conversation. Dictate when it ends. | A conversation, a phone call, or a typed reply is going on, or a microphone Ghost had open is still closing (it waits up to 3 seconds). |
 | The Hearing test has the microphone. Finish it first. | |
 | Dictation needs Ghost's speech model, which isn't ready yet. | The speech model is still downloading or loading. |
 | Ghost can't find a microphone. / Ghost couldn't open the microphone. | Check Settings › Sound. |
@@ -60,6 +60,10 @@ On Hyprland or Sway, bind the same command in your compositor's config, for exam
 
 Turning listening off, starting a conversation, or quitting Ghost while you dictate cancels
 the dictation, and nothing reaches the clipboard.
+
+Ghost listens for its name again only once dictation's microphone has closed. If it ever
+doesn't, the waiting list says "Dictation's microphone didn't close" until it does, and
+quitting Ghost always works.
 
 ## Where your words go
 
