@@ -56,8 +56,13 @@ What the vendors say (checked 2026-11-15; the PR that made this ADR has the link
    it gets neither Ghost's client nor the row's parameters. Without this an app at
    `evil.example` naming `github.com/login/oauth` as its server would have Ghost run GitHub's
    device flow as Ghost and hand it the token (the review of 2026-11-15). Ghost ships no
-   secret: anything in the binary is public. No row has a client ID until the maker registers
-   one; adding it is one line and the table's test.
+   secret: anything in the binary is public. A row has a client ID only once the maker has
+   registered one; adding it is one line and the table's test. GitHub's is registered
+   (2026-11-15): an OAuth App named Ghost with the device flow on, expiring tokens, and no
+   secret ever generated. Tried that day with a token of no scope: GitHub's endpoint took it
+   and listed its tools, and the refresh token was exchanged with the client ID alone for one
+   the endpoint took as well. Not learned from it: whether an account without Copilot is let
+   in. Google's and Slack's rows have none.
 3. **Dynamic registration**, where the server offers it, as before. It comes before the
    document because it is what works today for Notion, Linear, Atlassian and Sentry, which
    advertise both, and no live service has been tried with the document yet.
@@ -71,8 +76,8 @@ What the vendors say (checked 2026-11-15; the PR that made this ADR has the link
 
 **When none is possible, the sign-in says so in words** (`AppError::NeedsClient`, the app's
 state `needs_client`): which service, that it lets in only apps registered with it, and what to
-do ("GitHub only lets in apps registered with it, and Ghost isn't yet. Register one of your own
-with GitHub, then give Ghost its client ID and secret on GitHub's page and sign in again."). A
+do ("Google only lets in apps registered with it, and Ghost isn't yet. Register one of your own
+with Google, then give Ghost its client ID and secret on Gmail's page and sign in again."). A
 registration the server refused reads the same way. The sentence has no address in it; the
 app's page links the vendor's page from the table. The desktop, the waiting list
 (`app:<name>:client`) and `ghostd check` say it. The desktop shows the client ID field only

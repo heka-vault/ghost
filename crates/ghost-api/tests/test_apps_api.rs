@@ -266,8 +266,11 @@ async fn the_catalog_lists_first_party_apps_and_searches() {
     assert!(gmail["publisher"].is_null());
     let gh = &page["entries"][0];
     assert_eq!(gh["suggested_name"], "github-2"); // github is taken
-    assert_eq!(gh["options"][0]["kind"], "key");
-    assert_eq!(gh["options"][0]["settings"][0]["secret"], true);
+    // Ghost is registered with GitHub (ADR 0076): the sign-in leads, the token is the other way
+    assert_eq!(gh["options"][0]["kind"], "sign_in");
+    assert_eq!(gh["options"][0]["id"], "remote-0-sign-in");
+    assert_eq!(gh["options"][1]["kind"], "key");
+    assert_eq!(gh["options"][1]["settings"][0]["secret"], true);
     assert_eq!(c.get("/catalog?search=projects").await["total"], 1);
     let entry = c.get("/catalog/app.linear/linear").await;
     assert_eq!(entry["options"][0]["label"], "Sign in");
