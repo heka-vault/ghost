@@ -172,7 +172,9 @@ pub fn installed_target(appimage: Option<&Path>, exe: Option<&Path>) -> Option<P
 
 /// This process's `installed_target`.
 pub fn installed_target_now() -> Option<PathBuf> {
-    let appimage = std::env::var_os("APPIMAGE").map(PathBuf::from);
+    // Ghost's own AppImage only: a shell inside another program's AppImage hands ghostd that
+    // program's `$APPIMAGE`, and the link once followed an editor.
+    let appimage = ghost_core::appimage::file();
     installed_target(appimage.as_deref(), std::env::current_exe().ok().as_deref())
 }
 

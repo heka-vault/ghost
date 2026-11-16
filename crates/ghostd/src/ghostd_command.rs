@@ -12,7 +12,8 @@ use ghost_core::ghostd_command::{self, State};
 /// What the command line reads from the process.
 pub struct Env {
     pub home: Option<PathBuf>,
-    /// `$APPIMAGE`: the AppImage's own file, set by its runtime.
+    /// The AppImage this `ghostd` runs from (`ghost_core::appimage::file`), never one a
+    /// parent program left in the environment.
     pub appimage: Option<PathBuf>,
     pub path: Option<std::ffi::OsString>,
 }
@@ -21,9 +22,7 @@ impl Env {
     pub fn process() -> Self {
         Self {
             home: std::env::var_os("HOME").map(PathBuf::from),
-            appimage: std::env::var_os("APPIMAGE")
-                .filter(|v| !v.is_empty())
-                .map(PathBuf::from),
+            appimage: ghost_core::appimage::file(),
             path: std::env::var_os("PATH"),
         }
     }

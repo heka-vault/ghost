@@ -90,3 +90,16 @@ copy without the espeak-ng data, on its first run, is said and reported with `pa
 - What a container cannot show waits for a real machine: floating through XWayland on Hyprland,
   the tray in Waybar, Start at login, the keyring, screen-share detection, the AppImage's own
   update. `docs/omarchy-checklist.md` is the list.
+- Amended 2026-11-16: whether Ghost runs from an AppImage is asked of one function,
+  `ghost_core::appimage`, and the answer is yes only when the running binary is inside
+  `$APPDIR`. The runtime's `APPIMAGE` and `APPDIR` are inherited by everything an AppImage
+  starts, and a person's editor or terminal can be one (Cursor, T3 Code): a .deb's or a
+  checkout's `ghostd` run from its shell, as a coding agent following the setup guide runs it,
+  took the editor's file for Ghost's. `ghostd uninstall` ended with `rm` of the editor,
+  `ghostd echo-cancel on` pointed the canceller's `installed` link at it, `ghostd mcp add
+  --command` refused the bridge, and an error report said `appimage`. The copy of `ghostd` the
+  app runs from the runtime folder to remove Ghost is outside the mount, so the app names its
+  AppImage to it (`ghostd uninstall --after <pid> --appimage <file>`, refused without
+  `--after`). `ghost_reports` keeps the same rule in its own words, held to the core's by
+  `crates/ghostd/tests/appimage.rs`, and a test lists every source file that names either
+  variable.

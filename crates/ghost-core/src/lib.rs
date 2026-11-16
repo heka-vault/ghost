@@ -6,6 +6,7 @@
 //! either the change happens now (`announce`/`quiet`) or it waits for a spoken yes
 //! observed in the pipeline's own transcript (`confirm`) -> the steps, the audit log.
 
+pub mod appimage;
 pub mod apps;
 pub mod catalog;
 pub mod codec;

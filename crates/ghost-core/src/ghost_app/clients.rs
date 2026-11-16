@@ -477,7 +477,8 @@ These connect by address instead. To give a tool a command, install the ghostd c
 (Settings › General, or `ghostd command install` from the AppImage), then connect it again.";
 
 /// Whether this process runs from an AppImage (`APPIMAGE` or `APPDIR` set by its
-/// runtime), whose `ghostd` is on a temporary mount.
+/// runtime), whose `ghostd` is on a temporary mount. The process's `var` is
+/// `crate::appimage::var`, which leaves out the two when they are another program's.
 pub fn in_appimage(var: impl Fn(&str) -> Option<String>) -> bool {
     ["APPIMAGE", "APPDIR"]
         .iter()

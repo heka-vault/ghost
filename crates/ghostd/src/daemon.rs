@@ -3181,7 +3181,7 @@ impl Daemon {
             clients: Some(p.clients),
             clients_listening: p.clients_listening,
             questions: self.questions(),
-            in_appimage: ghost_core::ghost_app::clients::in_appimage(|k| std::env::var(k).ok()),
+            in_appimage: ghost_core::ghost_app::clients::in_appimage(ghost_core::appimage::var),
             other_tools: Some(Arc::new(ghost_api::deps::LiveOtherTools {
                 started_env: self.started_env.clone(),
             })),

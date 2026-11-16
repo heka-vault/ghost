@@ -352,11 +352,15 @@ impl Context {
             os_version: ver,
             session_type: session_type(std::env::var("XDG_SESSION_TYPE").ok().as_deref()),
             arch: std::env::consts::ARCH.to_string(),
-            installed_as: installed_as(
-                std::env::var_os("APPIMAGE").is_some(),
-                std::env::current_exe().ok().as_deref(),
-            )
-            .to_string(),
+            installed_as: {
+                let exe = std::env::current_exe().ok();
+                let appimage = runs_from_appimage(
+                    std::env::var_os("APPIMAGE").as_deref(),
+                    std::env::var_os("APPDIR").as_deref(),
+                    exe.as_deref(),
+                );
+                installed_as(appimage, exe.as_deref()).to_string()
+            },
             page_chunks: None,
         }
     }
@@ -393,8 +397,31 @@ pub fn session_type(v: Option<&str>) -> String {
     }
 }
 
-/// How this copy was installed: an AppImage says so in `$APPIMAGE`; the .deb puts the
-/// binaries under `/usr`; anything else is a checkout's build.
+/// Whether the binary at `exe` runs from its own AppImage: `$APPIMAGE` is set and the binary
+/// is inside `$APPDIR`. A shell inside another program's AppImage (an editor's terminal)
+/// hands both to everything it starts, and a .deb's or a checkout's Ghost run from it is not
+/// an AppImage. The rule is `ghost_core::appimage::own`'s, kept here because this crate does
+/// not use that one; `crates/ghostd/tests/appimage.rs` holds the two together.
+pub fn runs_from_appimage(
+    appimage: Option<&std::ffi::OsStr>,
+    appdir: Option<&std::ffi::OsStr>,
+    exe: Option<&std::path::Path>,
+) -> bool {
+    let (Some(_), Some(dir), Some(exe)) = (
+        appimage.filter(|a| !a.is_empty()),
+        appdir.filter(|d| !d.is_empty()),
+        exe,
+    ) else {
+        return false;
+    };
+    let real = |p: &std::path::Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let dir = real(std::path::Path::new(dir));
+    dir.is_absolute() && dir.parent().is_some() && real(exe).starts_with(&dir)
+}
+
+/// How this copy was installed: an AppImage is one its binary runs from
+/// ([`runs_from_appimage`]); the .deb puts the binaries under `/usr`; anything else is a
+/// checkout's build.
 pub fn installed_as(appimage: bool, exe: Option<&std::path::Path>) -> &'static str {
     if appimage {
         "appimage"
@@ -947,6 +974,38 @@ mod tests {
             "deb"
         );
         assert_eq!(installed_as(true, None), "appimage");
+        // The AppImage is this copy's own only when its binary runs from the mount: an
+        // editor that is an AppImage hands its two variables to a .deb's ghostd too.
+        use std::ffi::OsStr;
+        use std::path::Path;
+        let editor = (
+            Some(OsStr::new("/home/a/Applications/T3-Code.AppImage")),
+            Some(OsStr::new("/tmp/.mount_T3-CodAbCdEf")),
+        );
+        for exe in ["/usr/bin/ghostd", "/home/a/ghost/target/debug/ghostd"] {
+            assert!(!runs_from_appimage(
+                editor.0,
+                editor.1,
+                Some(Path::new(exe))
+            ));
+        }
+        let ghost = Some(OsStr::new("/tmp/.mount_GhostAb12Cd"));
+        let image = Some(OsStr::new("/home/a/Ghost.AppImage"));
+        let inside = Path::new("/tmp/.mount_GhostAb12Cd/usr/bin/ghostd");
+        assert!(runs_from_appimage(image, ghost, Some(inside)));
+        assert!(!runs_from_appimage(None, ghost, Some(inside)));
+        assert!(!runs_from_appimage(image, None, Some(inside)));
+        assert!(!runs_from_appimage(
+            image,
+            Some(OsStr::new("/")),
+            Some(inside)
+        ));
+        assert!(!runs_from_appimage(
+            image,
+            Some(OsStr::new("/tmp/.mount_Ghost")),
+            Some(inside)
+        ));
+        assert!(!runs_from_appimage(image, ghost, None));
         assert_eq!(
             installed_as(
                 false,
