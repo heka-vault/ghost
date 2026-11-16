@@ -10,8 +10,8 @@ publish = false
 [workspace]
 
 [dependencies]
-ghost-voice = { path = "../../crates/ghost-voice" }
-ghost-infer = { path = "../../crates/ghost-infer" }
+ghost-voice = { path = "../../../../crates/ghost-voice" }
+ghost-infer = { path = "../../../../crates/ghost-infer" }
 transcribe-cpp = { version = "=0.4.2", default-features = false, features = ["serde", "vulkan"] }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }

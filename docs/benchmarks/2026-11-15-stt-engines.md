@@ -2,7 +2,7 @@
 
 Numbers and method only. The question was whether to take three things from the dictation app Handy (MIT,
 commit `aca8985`): a streaming model, inference in a child process, and transcribe.cpp's
-GGUF runtime with its Vulkan backend. The bench is `tools/stt-engines/`: its own Cargo
+GGUF runtime with its Vulkan backend. The bench is `docs/benchmarks/scripts/stt-engines/`: its own Cargo
 workspace, not a member of the repo's and not built by CI. It scores with Ghost's own scorer
 (`ghost_voice::perf::hear::score`) by path dependency.
 
@@ -28,7 +28,7 @@ The Vulkan build needs the Vulkan headers, the loader's link, `glslc` and SPIRV-
 None of these are installed: they come from Ubuntu's `libvulkan-dev`, `glslc`, `libshaderc1`
 and `spirv-headers` packages. The packages were fetched with `apt-get download` and unpacked
 with `dpkg -x` into `~/.cache/ghost-stt-bench/vulkan-sdk/`, with no root
-(`tools/stt-engines/env.sh`).
+(`docs/benchmarks/scripts/stt-engines/env.sh`).
 
 ## Method
 
