@@ -116,8 +116,16 @@ own. It goes once Ghost's dictation has the key.
   After: one whole Parakeet read (about 30 to 50 ms per second of audio, ADR 0044), and one
   thread owning the clipboard, asleep on its socket, until something else is copied.
 - The delay from the start request to the first captured frame is measured on every
-  dictation and logged as numbers (the hand-over, the capture's open, the first frame); the
-  first live figures are in the pull request that builds this.
+  dictation and logged as numbers (the hand-over, the capture's open, the first frame).
+  Measured on 2026-11-15 on this workstation (a debug build, 13 starts, the reSpeaker and a
+  webcam microphone): 27 to 44 ms in 11, 130 and 134 ms in two, where PipeWire took about
+  100 ms to open the stream; the passive loop let go of the microphone in 2 to 5 ms. A word
+  begun within that much of the request is clipped; nothing before the request is heard, by
+  design. That is under the plan's 100 ms line most of the time, so no ring of passive audio
+  is added.
+- One read waited 0 ms for the recognizer in every live run (nothing else reads while
+  dictation holds the microphone); the read took 187 to 249 ms for 3.4 s of audio and
+  1.57 s for 30 s.
 
 ## Considered options
 
