@@ -206,3 +206,38 @@ it. The load time includes reading the file through once.
 - **Repeated timing runs.** Each timing is a single pass on a shared machine.
 - **The large models.** Voxtral 4B and Canary-Qwen 2.5B were skipped as asked, as were the
   other ~60 catalog entries.
+
+## Second review (2026-11-15), and what it changes
+
+A second reviewer read the bench's code and saved numbers. The batch comparison stands
+(same audio, scorer, threads, warm-up left out). These readings do not:
+
+- **The scores here predate a scorer fix** made the same day (a spoken zero the fp32 model
+  writes as the letter "o" counted as three errors). With it Ghost's fp32 reads 4.6% on the
+  whole file and 2.1% on the whole turn, with 4 and 2 of 16 numbers wrong. No candidate has
+  been scored again, so Unified English's 3.9% is no longer the best figure on the page: it
+  is about level with the file read and behind the turn read. Its intervals cannot be
+  shifted by hand.
+- **"Within noise" means not decided.** On 49 takes the intervals admit several points
+  either way. From the paired variance here, telling models 2 points apart takes about 425
+  comparable takes, 1 point about 1,700.
+- **First-word delay left out takes whose first words came only at finalize** (12 of 49 for
+  Unified English at its defaults), so the stream's delays read better than they were.
+- **The interim simulation is a proxy**, not Ghost's schedule: one VAD start, no restarts,
+  no contention, the scorer's words and not the barge-in rule's. It shows no demonstrated
+  gain for barge-in; it does not rule one out.
+- **The close.** The stream's work at the close was measured to the end of the recording
+  plus padding, not to the VAD's stop, and Ghost's whole-turn read already runs inside the
+  turn's grace (ADR 0044). The 0.25 s a stream might save is not an end-to-end figure. A
+  hybrid (a stream for interims and the provisional close, the batch model for the
+  transcript) was not measured.
+- **Isolation.** A worker's start is 1.3 to 5.7 ms; the seconds are the model's load, paid
+  once for a worker kept for the model's life. The numbers give no performance reason
+  against it; deferring it is a call about complexity and the absence of a crash.
+- **Vulkan.** Pipelines compile lazily per shape, so one warm-up take does not prove the
+  timed reads were free of compilation. The slowdown is large enough to decline this UHD 750
+  for now, not GPUs in general.
+- "No finalize changed words on screen" holds only before the last word shown: Unified
+  English at its defaults rewrote at finalize in six takes.
+- Parakeet Unified English can be exported to ONNX (an RNN-T, not TDT, decoder), so it could
+  be measured on Ghost's own runtime; that needs a decoder and parity work.
