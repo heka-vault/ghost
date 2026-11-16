@@ -95,7 +95,12 @@ fn pct(x: f64) -> String {
 }
 
 /// Model seconds per second of audio over the spoken takes, (p50, p95).
-fn rtf(numbers: &Value, results: &Results) -> (Option<f64>, Option<f64>) {
+fn rtf(numbers: &Value, results: &Results, mode: &str) -> (Option<f64>, Option<f64>) {
+    let (read_key, audio_key) = if mode == "turn" {
+        ("turn_read_secs", "turn_audio_secs")
+    } else {
+        ("read_secs", "audio_secs")
+    };
     let spoken: BTreeMap<&str, bool> = results
         .takes
         .iter()
@@ -112,10 +117,10 @@ fn rtf(numbers: &Value, results: &Results) -> (Option<f64>, Option<f64>) {
                 .unwrap_or(false)
         })
         .filter_map(|t| {
-            let secs = t["read_secs"]
+            let secs = t[read_key]
                 .as_f64()
                 .or_else(|| Some(t["feed_secs"].as_f64()? + t["finalize_secs"].as_f64()?))?;
-            Some(secs / t["audio_secs"].as_f64()?)
+            Some(secs / t[audio_key].as_f64()?)
         })
         .collect();
     (quantile(&xs, 0.5), quantile(&xs, 0.95))
@@ -125,7 +130,7 @@ fn f(x: Option<f64>, digits: usize) -> String {
     x.map_or_else(|| "-".into(), |v| format!("{v:.digits$}"))
 }
 
-pub fn compare(baseline: &Path, runs: &Path, bmode: &str) -> anyhow::Result<()> {
+pub fn compare(baseline: &Path, runs: &Path, bmode: &str, cmode: &str) -> anyhow::Result<()> {
     let base = read_results(baseline)?;
     let b = sum(&base, bmode);
     println!(
@@ -148,8 +153,11 @@ pub fn compare(baseline: &Path, runs: &Path, bmode: &str) -> anyhow::Result<()> 
     for d in dirs {
         let r = read_results(&d.join("results.json"))?;
         let n: Value = serde_json::from_str(&std::fs::read_to_string(d.join("numbers.json"))?)?;
-        let s = sum(&r, "file");
-        let delta = paired(&base, bmode, &r, "file").map_or("-".into(), |(dl, lo, hi, v)| {
+        let s = sum(&r, cmode);
+        if s.spoken == 0 {
+            continue; // no such read in this run
+        }
+        let delta = paired(&base, bmode, &r, cmode).map_or("-".into(), |(dl, lo, hi, v)| {
             format!(
                 "{:+.1} pt ({:+.1} to {:+.1}), {v}",
                 dl * 100.0,
@@ -157,7 +165,7 @@ pub fn compare(baseline: &Path, runs: &Path, bmode: &str) -> anyhow::Result<()> 
                 hi * 100.0
             )
         });
-        let (p50, p95) = rtf(&n, &r);
+        let (p50, p95) = rtf(&n, &r, cmode);
         println!(
             "| {} | {} | {} | {}/{} | {}/{} | {}/{} (+{} made up) | {}/{} | {}/{} | {} | {} | {} | {} | {} | {} | {} |",
             d.file_name().unwrap().to_string_lossy(),
@@ -192,77 +200,126 @@ pub fn compare(baseline: &Path, runs: &Path, bmode: &str) -> anyhow::Result<()> 
     Ok(())
 }
 
-/// Arrival times against the clock: when the first one and two words show, after they
-/// were said, and the work left at the close; one line per streaming run.
-pub fn arrivals(clock: &Path, runs: &[&Path]) -> anyhow::Result<()> {
+/// When a take's first one and two words were shown, minus when they were said (the clock).
+/// A stream's take whose words came only at finalize arrives at finalize: the end of the
+/// audio, the backlog, then `finalize`. A take whose read has no words never arrives.
+fn lags(
+    numbers: &Value,
+    results: Option<&Results>,
+    clock: &BTreeMap<String, Value>,
+) -> BTreeMap<String, [Option<(f64, bool)>; 2]> {
+    let words: BTreeMap<&str, usize> = results
+        .map(|r| {
+            r.takes
+                .iter()
+                .filter_map(|t| Some((t.id.as_str(), t.modes.get("file")?.words)))
+                .collect()
+        })
+        .unwrap_or_default();
+    let mut out = BTreeMap::new();
+    for t in numbers["takes"].as_array().into_iter().flatten() {
+        let id = t["id"].as_str().unwrap_or("");
+        let Some(c) = clock.get(id) else { continue };
+        if t.get("spoken").and_then(Value::as_bool) == Some(false) {
+            continue;
+        }
+        let a = &t["arrival"];
+        let at_finalize = || -> Option<f64> {
+            Some(
+                t["audio_secs"].as_f64()?
+                    + t["backlog_secs"].as_f64()?
+                    + t["finalize_secs"].as_f64()?,
+            )
+        };
+        let mut lag = [None, None];
+        for (k, (key, end)) in [("first1", "end1"), ("first2", "end2")].iter().enumerate() {
+            let Some(end) = c[*end].as_f64() else {
+                continue;
+            };
+            lag[k] = match a[*key].as_f64() {
+                Some(at) => Some((at - end, false)),
+                None if words.get(id).copied().unwrap_or(0) > k => {
+                    at_finalize().map(|at| (at - end, true))
+                }
+                None => None,
+            };
+        }
+        out.insert(id.to_string(), lag);
+    }
+    out
+}
+
+fn p50_95(xs: &[f64]) -> String {
+    format!("{} / {}", f(quantile(xs, 0.5), 2), f(quantile(xs, 0.95), 2))
+}
+
+/// Each streaming run's arrival (finalize counted) beside Ghost's interim re-read, on the
+/// takes both have, plus the rest of the stream's measures.
+pub fn arrivals(clock: &Path, interim: &Path, runs: &[&Path]) -> anyhow::Result<()> {
     let clock: BTreeMap<String, Value> = serde_json::from_str(&std::fs::read_to_string(clock)?)?;
+    let iv: Value = serde_json::from_str(&std::fs::read_to_string(interim.join("numbers.json"))?)?;
+    let il = lags(&iv, None, &clock);
     println!(
-        "| run | takes | first word shown after said, p50 / p95 s | two words, p50 / p95 s | first two right | feed s/s p50 / p95 | max frame ms p95 | work left at close p50 / p95 s | updates rewriting shown words | takes with a rewrite | finalize rewrote shown |"
+        "| run | first word: all takes p50 / p95 (n, at finalize) | first word, common takes: stream / Ghost interim p50 (n) | two words: all takes p50 / p95 (n, at finalize) | two words, common takes: stream / Ghost interim p50 (n) | stream later than interim, two words (takes) | finalize changed shown words incl. last / before last |"
     );
-    println!("|---|---|---|---|---|---|---|---|---|---|---|");
+    println!("|---|---|---|---|---|---|---|");
     for run in runs {
         let n: Value = serde_json::from_str(&std::fs::read_to_string(run.join("numbers.json"))?)?;
-        let mut l1 = Vec::new();
-        let mut l2 = Vec::new();
-        let (mut right, mut two) = (0, 0);
-        let (mut feed, mut maxf, mut left) = (Vec::new(), Vec::new(), Vec::new());
-        let (mut rw, mut changes, mut takes_rw, mut fin_rw, mut spoken) = (0u64, 0u64, 0, 0, 0);
+        let r = read_results(&run.join("results.json"))?;
+        let sl = lags(&n, Some(&r), &clock);
+        let mut cells = Vec::new();
+        let mut later = 0;
+        for k in 0..2 {
+            let all: Vec<f64> = sl.values().filter_map(|l| l[k].map(|x| x.0)).collect();
+            let fin = sl.values().filter(|l| l[k].is_some_and(|x| x.1)).count();
+            let (mut a, mut b) = (Vec::new(), Vec::new());
+            for (id, l) in &sl {
+                if let (Some(x), Some(y)) = (l[k], il.get(id).and_then(|l| l[k])) {
+                    a.push(x.0);
+                    b.push(y.0);
+                    if k == 1 && x.0 > y.0 {
+                        later += 1;
+                    }
+                }
+            }
+            cells.push(format!(
+                "{} (n {}, {} at finalize)",
+                p50_95(&all),
+                all.len(),
+                fin
+            ));
+            cells.push(format!(
+                "{} / {} (n {})",
+                f(quantile(&a, 0.5), 2),
+                f(quantile(&b, 0.5), 2),
+                a.len()
+            ));
+        }
+        let (mut strict, mut loose) = (0, 0);
         for t in n["takes"].as_array().into_iter().flatten() {
-            let id = t["id"].as_str().unwrap_or("");
-            let Some(c) = clock.get(id) else { continue }; // silent takes have no clock
-            if t.get("spoken").and_then(Value::as_bool) == Some(false) {
-                continue;
-            }
-            spoken += 1;
-            let a = &t["arrival"];
-            if let (Some(at), Some(end)) = (a["first1"].as_f64(), c["end1"].as_f64()) {
-                l1.push(at - end);
-            }
-            if let (Some(at), Some(end)) = (a["first2"].as_f64(), c["end2"].as_f64()) {
-                l2.push(at - end);
-            }
-            if let Some(r) = a["first2_right"].as_bool() {
-                two += 1;
-                right += usize::from(r);
-            }
-            if let (Some(fs), Some(au)) = (t["feed_secs"].as_f64(), t["audio_secs"].as_f64()) {
-                feed.push(fs / au);
-            }
-            if let Some(m) = t["max_frame_secs"].as_f64() {
-                maxf.push(m * 1e3);
-            }
-            if let (Some(b), Some(fz)) = (t["backlog_secs"].as_f64(), t["finalize_secs"].as_f64()) {
-                left.push(b + fz);
-            }
-            rw += t["rewrites"].as_u64().unwrap_or(0);
-            changes += t["changes"].as_u64().unwrap_or(0);
-            takes_rw += usize::from(t["rewrites"].as_u64().unwrap_or(0) > 0);
-            fin_rw += usize::from(t["final_rewrote_shown"].as_bool().unwrap_or(false));
+            strict += usize::from(t["final_rewrote_shown_strict"].as_bool().unwrap_or(false));
+            loose += usize::from(t["final_rewrote_shown"].as_bool().unwrap_or(false));
         }
         println!(
-            "| {} | {} | {} / {} (n {}) | {} / {} (n {}) | {}/{} | {} / {} | {} | {} / {} | {}/{} | {}/{} | {}/{} |",
+            "| {} | {} | {} | {} | {} | {} | {} / {} |",
             run.file_name().unwrap().to_string_lossy(),
-            spoken,
-            f(quantile(&l1, 0.5), 2),
-            f(quantile(&l1, 0.95), 2),
-            l1.len(),
-            f(quantile(&l2, 0.5), 2),
-            f(quantile(&l2, 0.95), 2),
-            l2.len(),
-            right,
-            two,
-            f(quantile(&feed, 0.5), 3),
-            f(quantile(&feed, 0.95), 3),
-            f(quantile(&maxf, 0.95), 0),
-            f(quantile(&left, 0.5), 3),
-            f(quantile(&left, 0.95), 3),
-            rw,
-            changes,
-            takes_rw,
-            spoken,
-            fin_rw,
-            spoken,
+            cells[0],
+            cells[1],
+            cells[2],
+            cells[3],
+            later,
+            strict,
+            loose
         );
     }
+    let all1: Vec<f64> = il.values().filter_map(|l| l[0].map(|x| x.0)).collect();
+    let all2: Vec<f64> = il.values().filter_map(|l| l[1].map(|x| x.0)).collect();
+    println!(
+        "\nGhost interim, all takes: first word {} (n {}), two words {} (n {})",
+        p50_95(&all1),
+        all1.len(),
+        p50_95(&all2),
+        all2.len()
+    );
     Ok(())
 }

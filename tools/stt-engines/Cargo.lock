@@ -2940,6 +2940,7 @@ dependencies = [
  "libc",
  "serde",
  "serde_json",
+ "tokio",
  "transcribe-cpp",
 ]
 

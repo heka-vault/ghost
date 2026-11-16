@@ -2,18 +2,20 @@
 //! recorded Hearing session (docs/benchmarks/2026-11-15-stt-engines.md).
 //!
 //! The takes are the operator's voice: nothing here writes or prints what a read heard.
-//! Every output file holds numbers only.
+//! Every output file holds numbers only. With `STT_ENGINES_SPANS=<spans.json>`, `tc` and
+//! `ort` also read each take's turn span (the harness's `turn` read).
 //!
 //! ```text
 //! stt-engines tc      <label> <model.gguf> <cpu|vulkan> <threads> <session> <out>
 //! stt-engines stream  <label> <model.gguf> <cpu|vulkan> <threads> <session> <out> [rc=N|lcr=L,C,R]
 //! stt-engines ort     <label> <fp32|int8> <session> <out>
 //! stt-engines interim <label> <fp32|int8> <interim secs> <session> <out>
+//! stt-engines spans   <session> <spans.json>
 //! stt-engines clock   <tdt-v3.gguf> <session> <clock.json>
 //! stt-engines pipe    <reps> <out>
 //! stt-engines spawn   <reps> <tdt-v3.gguf> <session> <out>
-//! stt-engines compare <baseline results.json> <runs dir> [stage|turn|file]
-//! stt-engines arrivals <clock.json> <run dir>...
+//! stt-engines compare <baseline results.json> <runs dir> [baseline read] [candidate read]
+//! stt-engines arrivals <clock.json> <interim dir> <stream run dir>...
 //! stt-engines devices
 //! ```
 
@@ -21,6 +23,7 @@ mod common;
 mod compare;
 mod engines;
 mod pipe;
+mod span;
 
 use std::path::{Path, PathBuf};
 
@@ -76,6 +79,7 @@ fn main() -> anyhow::Result<()> {
                 &p(5)?.join(a(1)?),
             )
         }
+        "spans" => span::spans(&common::takes(&p(1)?)?, &p(2)?),
         "clock" => engines::clock(&p(1)?, &common::takes(&p(2)?)?, &p(3)?),
         "pipe" => pipe::round_trip(a(1)?.parse()?, &p(2)?),
         "spawn" => {
@@ -99,11 +103,16 @@ fn main() -> anyhow::Result<()> {
             pipe::spawn_load(&what, &audio, a(1)?.parse()?, &p(4)?)
         }
         "worker" => pipe::worker(),
-        "compare" => compare::compare(&p(1)?, &p(2)?, args.get(3).map_or("file", String::as_str)),
+        "compare" => compare::compare(
+            &p(1)?,
+            &p(2)?,
+            args.get(3).map_or("file", String::as_str),
+            args.get(4).map_or("file", String::as_str),
+        ),
         "arrivals" => {
-            let runs: Vec<PathBuf> = args[2..].iter().map(PathBuf::from).collect();
+            let runs: Vec<PathBuf> = args[3..].iter().map(PathBuf::from).collect();
             let refs: Vec<&Path> = runs.iter().map(PathBuf::as_path).collect();
-            compare::arrivals(&p(1)?, &refs)
+            compare::arrivals(&p(1)?, &p(2)?, &refs)
         }
         "devices" => engines::devices(),
         other => anyhow::bail!("unknown command {other}; see the module doc"),

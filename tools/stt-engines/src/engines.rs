@@ -100,6 +100,68 @@ fn meta(label: &str, what: &str) -> BTreeMap<String, Value> {
     m
 }
 
+/// Each take read whole (`file`), and with `STT_ENGINES_SPANS` naming a spans file
+/// (`stt-engines spans`), its turn span too (`turn`), as the harness reads them.
+fn read_takes(
+    items: &[Item],
+    mut read: impl FnMut(&[f32]) -> String,
+) -> anyhow::Result<(Vec<ghost_voice::perf::hear::TakeResult>, Vec<Value>)> {
+    let spans = match std::env::var_os("STT_ENGINES_SPANS") {
+        Some(p) => Some(crate::span::read(Path::new(&p))?),
+        None => None,
+    };
+    let mut takes = Vec::new();
+    let mut per_take = Vec::new();
+    for item in items {
+        let audio = common::audio(item);
+        let t = Instant::now();
+        let text = read(&audio);
+        let secs = t.elapsed().as_secs_f64();
+        let mut r = common::scored(item, &text);
+        r.close_secs = Some(secs);
+        r.read_secs = secs;
+        let mut modes = vec![("file", r)];
+        let mut row =
+            json!({"id": item.id, "audio_secs": audio.len() as f64 / SR as f64, "read_secs": secs});
+        if let Some(spans) = &spans {
+            let span = spans
+                .get(&item.id)
+                .ok_or_else(|| anyhow::anyhow!("no span for {}", item.id))?;
+            let (text, secs) = match span {
+                Some(sp) => {
+                    let a = crate::span::turn_audio(item, *sp);
+                    row["turn_audio_secs"] = json!(a.len() as f64 / SR as f64);
+                    let t = Instant::now();
+                    let text = read(&a);
+                    let secs = t.elapsed().as_secs_f64();
+                    row["turn_read_secs"] = json!(secs);
+                    (text, Some(secs))
+                }
+                None => (String::new(), None),
+            };
+            let mut r = common::scored(item, &text);
+            r.close_secs = secs;
+            r.read_secs = secs.unwrap_or(0.0);
+            r.segments = usize::from(span.is_some());
+            modes.push(("turn", r));
+        }
+        eprintln!(
+            "  {} {:>5.1}s audio  read {:.3}s  errors {}",
+            item.id,
+            item.seconds(),
+            secs,
+            modes
+                .iter()
+                .map(|(m, r)| format!("{m} {}", r.errors()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        per_take.push(row);
+        takes.push(common::take_result(item, modes));
+    }
+    Ok((takes, per_take))
+}
+
 /// Every take read whole, once, after one warm-up read.
 pub fn tc_batch(
     label: &str,
@@ -124,34 +186,13 @@ pub fn tc_batch(
     let t = Instant::now();
     l.session.run(&common::audio(first), &opts)?;
     let warmup = t.elapsed().as_secs_f64();
-    let mut takes = Vec::new();
-    let mut per_take = Vec::new();
-    for item in items {
-        let audio = common::audio(item);
-        let t = Instant::now();
-        let text = match l.session.run(&audio, &opts) {
-            Ok(tr) => tr.text,
-            Err(e) => {
-                eprintln!("  {} failed: {e}", item.id);
-                String::new()
-            }
-        };
-        let secs = t.elapsed().as_secs_f64();
-        let mut r = common::scored(item, &text);
-        r.close_secs = Some(secs);
-        r.read_secs = secs;
-        eprintln!(
-            "  {} {:>5.1}s audio  read {:.3}s  errors {}",
-            item.id,
-            item.seconds(),
-            secs,
-            r.errors()
-        );
-        per_take.push(
-            json!({"id": item.id, "audio_secs": audio.len() as f64 / SR as f64, "read_secs": secs}),
-        );
-        takes.push(common::take_result(item, vec![("file", r)]));
-    }
+    let (takes, per_take) = read_takes(items, |a| match l.session.run(a, &opts) {
+        Ok(tr) => tr.text,
+        Err(e) => {
+            eprintln!("  a read failed: {e}");
+            String::new()
+        }
+    })?;
     let (rss_after, hwm) = common::memory_mb();
     let numbers = json!({
         "label": label, "engine": "transcribe-cpp 0.4.2", "model": model_path.file_name().unwrap().to_string_lossy(),
@@ -405,28 +446,9 @@ pub fn ort_batch(label: &str, quant: &str, items: &[Item], out: &Path) -> anyhow
     let t = Instant::now();
     m.transcribe(&common::audio(first))?;
     let warmup = t.elapsed().as_secs_f64();
-    let mut takes = Vec::new();
-    let mut per_take = Vec::new();
-    for item in items {
-        let audio = common::audio(item);
-        let t = Instant::now();
-        let text = m.transcribe(&audio).unwrap_or_default();
-        let secs = t.elapsed().as_secs_f64();
-        let mut r = common::scored(item, text.trim());
-        r.close_secs = Some(secs);
-        r.read_secs = secs;
-        eprintln!(
-            "  {} {:>5.1}s audio  read {:.3}s  errors {}",
-            item.id,
-            item.seconds(),
-            secs,
-            r.errors()
-        );
-        per_take.push(
-            json!({"id": item.id, "audio_secs": audio.len() as f64 / SR as f64, "read_secs": secs}),
-        );
-        takes.push(common::take_result(item, vec![("file", r)]));
-    }
+    let (takes, per_take) = read_takes(items, |a| {
+        m.transcribe(a).unwrap_or_default().trim().to_string()
+    })?;
     let (rss_after, hwm) = common::memory_mb();
     let numbers = json!({
         "label": label, "engine": "ort 1.24.4 (ghost_infer::Parakeet)", "model": format!("parakeet-tdt-0.6b-v3 {quant}"),
