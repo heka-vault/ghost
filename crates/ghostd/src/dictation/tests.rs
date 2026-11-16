@@ -239,7 +239,7 @@ async fn a_dictation_reads_once_cleans_up_and_lands_on_the_clipboard() {
     assert!(r.seconds > 0.05, "{}", r.seconds);
     assert!(r.read_ms.is_some() && r.queue_ms.is_some());
     // the capture is closed and the passive loop has the microphone back
-    assert_eq!(w.host.open.load(Ordering::SeqCst), 0);
+    settle(|| w.host.open.load(Ordering::SeqCst) == 0).await; // closed off the runtime (ADR 0077)
     settle(|| w.host.held.load(Ordering::SeqCst) == 0).await;
     assert_eq!(w.reads.load(Ordering::SeqCst), 1, "one whole read");
     assert_eq!(
@@ -379,7 +379,7 @@ async fn the_limit_stops_it_and_what_was_said_is_read() {
     assert_eq!(r.reason, Some(DictationReason::Limit));
     assert!((r.seconds - 0.5).abs() < 1e-9, "{}", r.seconds);
     assert_eq!(w.d.state(), DictationState::Idle);
-    assert_eq!(w.host.open.load(Ordering::SeqCst), 0);
+    settle(|| w.host.open.load(Ordering::SeqCst) == 0).await; // closed off the runtime (ADR 0077)
     // stopping after the limit has nothing to stop
     assert_eq!(
         outcome(&w.d.stop().await).1,
@@ -424,7 +424,7 @@ async fn a_refusal_opens_nothing_and_says_why() {
         let v = w.d.start().await;
         assert_eq!(v.state, DictationState::Idle);
         assert_eq!(outcome(&v), (DictationOutcome::Refused, Some(why)));
-        assert_eq!(w.host.open.load(Ordering::SeqCst), 0);
+        settle(|| w.host.open.load(Ordering::SeqCst) == 0).await; // closed off the runtime (ADR 0077)
         assert_eq!(w.host.held.load(Ordering::SeqCst), 0);
         assert_eq!(
             *w.notes.0.lock().unwrap(),
@@ -623,7 +623,7 @@ async fn listening_off_or_a_session_while_the_microphone_opens_cancels_the_start
         assert_eq!(v.state, DictationState::Idle);
         assert_eq!(outcome(&v), (DictationOutcome::Cancelled, Some(why)));
         assert_eq!(d.state(), DictationState::Idle);
-        assert_eq!(host.open.load(Ordering::SeqCst), 0);
+        settle(|| host.open.load(Ordering::SeqCst) == 0).await; // closed off the runtime (ADR 0077)
     }
 }
 
@@ -645,7 +645,7 @@ async fn listening_turned_off_during_the_open_is_seen_before_recording() {
     let v = starting.await.unwrap();
     assert_eq!(v.state, DictationState::Idle);
     assert_eq!(outcome(&v).1, Some(DictationReason::NotListening));
-    assert_eq!(host.open.load(Ordering::SeqCst), 0);
+    settle(|| host.open.load(Ordering::SeqCst) == 0).await; // closed off the runtime (ADR 0077)
 }
 
 #[tokio::test]
@@ -669,7 +669,7 @@ async fn a_capture_that_stalls_still_ends_at_the_limit() {
     assert!(ended.is_ok(), "a stalled capture never ended");
     let r = d.view().result.unwrap();
     assert_eq!(r.reason, Some(DictationReason::Limit));
-    assert_eq!(host.open.load(Ordering::SeqCst), 0);
+    settle(|| host.open.load(Ordering::SeqCst) == 0).await; // closed off the runtime (ADR 0077)
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
