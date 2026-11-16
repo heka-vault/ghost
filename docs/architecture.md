@@ -556,13 +556,15 @@ starts and stops it (`ghostd dictate`, `POST /dictation/*`, a desktop shortcut b
 `ghostd dictate toggle`); nothing else can. One coordinator serializes start, stop, toggle
 and cancel, with a generation per dictation so a read cancelled meanwhile does nothing. It
 takes the microphone from the passive loop with a lease, as the Hearing test does: the loop
-stops the wake listener (its capture, pipeline and the kept takes' array tape, which is
-cleared) before granting it, and listens again with a fresh pipeline once dictation's own
-capture on the session's microphone has closed. The recording (30 s at most) is read once
+stops the wake listener and grants it only once the listener's pipeline and the kept takes'
+array tape have closed their captures (the tape's ring cleared, its late writes refused by a
+generation), and listens again with a fresh pipeline once dictation's own capture on the
+session's microphone has closed, with no time limit on that wait. A start is a cancellable
+stage of its own, and the limit is in samples and in time. The recording (30 s at most) is read once
 on the shared Parakeet, cleaned up without a model (`dictation::cleanup`: fillers, a word
-said three times, control characters), and owned as the X11 CLIPBOARD by a thread that
-speaks the protocol to the display directly (XWayland on GNOME, where mutter bridges it to
-Wayland apps; `dictation::clipboard`). The words reach nothing else; the API, the CLI and a
+said three times, control characters), and owned as the X11 CLIPBOARD by one joined thread
+through x11rb's pure-Rust connection, every wait on the socket bounded (XWayland on GNOME,
+where mutter bridges it to Wayland apps; `dictation::clipboard`). The words reach nothing else; the API, the CLI and a
 `notify-send` note get kinds and numbers. Refused while not listening, in a session or the
 Hearing test, without the speech model or a microphone; cancelled by listening off, a
 session opening and Ghost stopping. See [dictation.md](dictation.md).

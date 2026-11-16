@@ -56,6 +56,7 @@ On Hyprland or Sway, bind the same command in your compositor's config, for exam
 | Dictation needs Ghost's speech model, which isn't ready yet. | The speech model is still downloading or loading. |
 | Ghost can't find a microphone. / Ghost couldn't open the microphone. | Check Settings › Sound. |
 | Ghost couldn't reach the clipboard: there is no display. | Ghost runs without a desktop (the headless service with no `DISPLAY`). |
+| Too long for the clipboard in one go. | More than 16 KiB of text, far past 30 seconds of speech. |
 
 Turning listening off, starting a conversation, or quitting Ghost while you dictate cancels
 the dictation, and nothing reaches the clipboard.
