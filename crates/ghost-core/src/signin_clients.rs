@@ -88,7 +88,7 @@ pub struct KnownServer {
     pub issuer: &'static str,
     /// The service as the person knows it: "GitHub".
     pub service: &'static str,
-    /// Ghost's own client there, once one is registered. None until then.
+    /// Ghost's own client there, where one is registered.
     pub ghost_client: Option<GhostClient>,
     /// What the person's own client needs.
     pub own_secret: SecretNeed,
@@ -109,12 +109,18 @@ pub struct KnownServer {
 pub const KNOWN_SERVERS: &[KnownServer] = &[
     // github.com/login/oauth: no dynamic registration. An OAuth App's web flow needs the
     // client secret at the token endpoint, even with PKCE; the device flow does not, and a
-    // device-flow token refreshes without it. So Ghost's own client, once registered, is a
-    // device-flow client.
+    // device-flow token refreshes without it. So Ghost's own client is a device-flow client:
+    // the OAuth App "Ghost" of the heka-vault organisation, with the device flow on, expiring
+    // tokens and no secret ever generated. Tried on 2026-11-15 with a token of no scope:
+    // GitHub's endpoint took it (49 tools listed, a read answered), and its refresh token
+    // was exchanged with the client ID alone for one the endpoint took as well.
     KnownServer {
         issuer: "https://github.com/login/oauth",
         service: "GitHub",
-        ghost_client: None,
+        ghost_client: Some(GhostClient {
+            client_id: "Ov23liceMIaDjEZToyS8",
+            auth: ClientAuth::DeviceFlow,
+        }),
         own_secret: SecretNeed::Required,
         secret_in_body: true,
         make_a_client: "https://github.com/settings/applications/new",
@@ -198,6 +204,15 @@ pub fn serves(server: &KnownServer, app_url: &str) -> bool {
         Some(p) => format!("{host}:{p}"),
     };
     server.resources.iter().any(|r| *r == authority)
+}
+
+/// Whether Ghost has a client of its own for the app at `app_url`: a row serves that
+/// address and has one. The catalog offers a sign-in by it; the sign-in itself still
+/// matches the server the app names against the row ([`server_for_app`]).
+pub fn ghost_signs_in_at(app_url: &str) -> bool {
+    KNOWN_SERVERS
+        .iter()
+        .any(|s| s.ghost_client.is_some() && serves(s, app_url))
 }
 
 /// The row for this app: the server it names, and only when that server serves the app.
@@ -409,6 +424,10 @@ mod tests {
             Choice::Ghost(_)
         ));
         // registration first where both are offered; the document only where it isn't
+        let bare = KnownServer {
+            ghost_client: None,
+            ..KNOWN_SERVERS[0]
+        };
         assert_eq!(choose(None, None, all), Choice::Register);
         assert_eq!(
             choose(
@@ -424,7 +443,7 @@ mod tests {
         assert_eq!(
             choose(
                 None,
-                Some(&KNOWN_SERVERS[0]),
+                Some(&bare),
                 ServerTakes {
                     metadata_document: false,
                     registration: true
@@ -433,7 +452,7 @@ mod tests {
             Choice::Register
         );
         assert_eq!(
-            choose(None, Some(&KNOWN_SERVERS[0]), ServerTakes::default()),
+            choose(None, Some(&bare), ServerTakes::default()),
             Choice::NeedsClient
         );
     }
@@ -458,6 +477,26 @@ mod tests {
             "",
         ] {
             assert!(known_server(not).is_none(), "{not}");
+        }
+    }
+
+    #[test]
+    fn ghost_signs_in_only_where_a_row_with_a_client_serves_the_address() {
+        assert!(ghost_signs_in_at("https://api.githubcopilot.com/mcp/"));
+        assert!(ghost_signs_in_at(
+            "https://api.githubcopilot.com/mcp/readonly"
+        ));
+        for not in [
+            "http://api.githubcopilot.com/mcp/",
+            "https://api.githubcopilot.com.evil.example/mcp/",
+            "https://evil.example/api.githubcopilot.com",
+            "https://x@api.githubcopilot.com/mcp/",
+            "https://api.githubcopilot.com:8443/mcp/",
+            "https://gmailmcp.googleapis.com/mcp/v1", // a row, but no client of Ghost's
+            "https://mcp.slack.com/mcp",
+            "",
+        ] {
+            assert!(!ghost_signs_in_at(not), "{not}");
         }
     }
 

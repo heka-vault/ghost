@@ -47,17 +47,19 @@ registered with them beforehand. Ghost tries, in order:
 1. **Your own client ID** for that app, if you gave one, and only at the service the app
    named when you gave it: if the app later names another, Ghost says so and sends nothing
    there until you give it again;
-2. **Ghost's own** for that service, once Ghost's maker has registered one, and only for
+2. **Ghost's own** for that service, where Ghost's maker has registered one, and only for
    that service's own apps (GitHub's at `api.githubcopilot.com`, Google's three, Slack's), so
-   an app elsewhere can't borrow it;
+   an app elsewhere can't borrow it. GitHub has one: Ghost shows a short code, you type it
+   on GitHub's own page and approve "Ghost", and that is the whole sign-in. Google and Slack
+   have none yet;
 3. **introducing itself** (registering), for a service that allows it;
 4. **Ghost's public description of itself** (`https://heyghost.app/oauth/client.json`),
    for a service that reads one and doesn't take registration, when Ghost signs in on its
    usual port.
 
-When none works, the app says so instead of failing with a code: "GitHub only lets in apps
-registered with it, and Ghost isn't yet. Register one of your own with GitHub, then give
-Ghost its client ID and secret on GitHub's page and sign in again." Its page has a button to
+When none works, the app says so instead of failing with a code: "Google only lets in apps
+registered with it, and Ghost isn't yet. Register one of your own with Google, then give
+Ghost its client ID and secret on Gmail's page and sign in again." Its page has a button to
 the service's own page for making one, and two fields: the client ID, and the client secret
 where the service wants one. The secret is a password: it goes into Ghost's vault and is
 never shown again. Leaving the secret empty when you change the client ID keeps the one
@@ -67,7 +69,7 @@ them.
 
 | Service | Where you make one | What Ghost needs | Notes |
 |---|---|---|---|
-| GitHub | github.com › Settings › Developer settings › OAuth Apps | client ID and secret | callback `http://127.0.0.1:47823/callback` |
+| GitHub | github.com › Settings › Developer settings › OAuth Apps | client ID and secret | only if you'd rather not use Ghost's own; callback `http://127.0.0.1:47823/callback` |
 | Google | Google Cloud console › Google Auth Platform › Clients | client ID and secret | a Web application client, "Use this client for an AI-powered agent" ticked, redirect `http://127.0.0.1:47823/callback`; the Workspace apps are in Google's Developer Preview |
 | Slack | api.slack.com › Your apps | client ID (a secret if your app has one to give) | an internal app or one in the Marketplace, approved by your workspace's admin; redirect `http://127.0.0.1:47823/callback` |
 

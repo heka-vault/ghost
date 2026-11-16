@@ -697,6 +697,28 @@ pub fn parse_entry(raw: &Value) -> Option<CatalogEntry> {
         if url.trim_end_matches('/').ends_with("readonly") {
             label.push_str(" (read only)");
         }
+        // A service Ghost is registered with (ADR 0076) is signed in to even where the
+        // registry's entry asks for a token: the sign-in comes first and the token stays as
+        // the other way. Only when the address needs nothing typed, so the option is whole.
+        if kind == Kind::Key
+            && crate::signin_clients::ghost_signs_in_at(url)
+            && !settings.iter().any(|s| s.place == Where::Url)
+        {
+            options.push(ConnectOption {
+                id: format!("remote-{i}-sign-in"),
+                kind: Kind::SignIn,
+                label: "Sign in".to_string(),
+                settings: Vec::new(),
+                url: Some(url.to_string()),
+                headers: Vec::new(),
+                runner: None,
+                package: None,
+                runtime_args: Vec::new(),
+                package_args: Vec::new(),
+                registry: None,
+                identifier: None,
+            });
+        }
         options.push(ConnectOption {
             id: format!("remote-{i}"),
             kind,
@@ -1817,7 +1839,11 @@ mod tests {
             gh.options.iter().map(|o| (o.id.as_str(), o.kind)).collect();
         assert_eq!(
             kinds,
-            BTreeMap::from([("remote-0", Kind::Key), ("package-0", Kind::Local)])
+            BTreeMap::from([
+                ("remote-0-sign-in", Kind::SignIn),
+                ("remote-0", Kind::Key),
+                ("package-0", Kind::Local)
+            ])
         );
         let linear = parse_entry(&linear()).unwrap();
         let labels: Vec<&str> = linear.options.iter().map(|o| o.label.as_str()).collect();
@@ -1854,6 +1880,32 @@ mod tests {
         assert!(spec.catalog.as_deref() == Some(gh.name.as_str()) && spec.title == "GitHub");
         let why = invalid(connect(&gh, "remote-0", "github", &vals(&[])).unwrap_err());
         assert!(why.contains("needed"), "{why}");
+    }
+
+    #[test]
+    fn a_service_ghost_is_registered_with_is_signed_in_to_first() {
+        let gh = parse_entry(&github()).unwrap();
+        // the sign-in leads, the token is still there, and both go to GitHub's own address
+        let first = &gh.options[0];
+        assert!(first.id == "remote-0-sign-in" && first.kind == Kind::SignIn);
+        assert!(first.label == "Sign in" && first.settings.is_empty());
+        let key = gh.options.iter().find(|o| o.id == "remote-0").unwrap();
+        assert!(key.kind == Kind::Key);
+        let (spec, secrets) = connect(&gh, "remote-0-sign-in", "github", &vals(&[])).unwrap();
+        assert!(spec.sign_in && spec.headers.is_empty() && secrets.is_empty());
+        assert_eq!(
+            spec.url.as_deref(),
+            Some("https://api.githubcopilot.com/mcp/")
+        );
+        assert!(
+            spec.client_id.is_none(),
+            "the client is the table's, never the file's"
+        );
+        // an entry that asks for a token somewhere Ghost has no client keeps only the token
+        let mut other = github();
+        other["server"]["remotes"][0]["url"] = json!("https://example.com/mcp/");
+        let other = parse_entry(&other).unwrap();
+        assert!(other.options.iter().all(|o| !o.id.ends_with("-sign-in")));
     }
 
     #[test]
