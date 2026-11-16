@@ -130,7 +130,7 @@ async fn create_client(
     // runs from an AppImage, whose mount goes away; then the tool connects by address.
     let ghostd = if deps.in_appimage {
         // ADR 0075: the `ghostd` command the person installed for this AppImage, if any.
-        ghost_core::ghost_app::clients::appimage_ghostd(|k| std::env::var(k).ok())
+        ghost_core::ghost_app::clients::appimage_ghostd(ghost_core::appimage::var)
     } else {
         stable_ghostd(|_| None)
     };

@@ -88,10 +88,11 @@ pub fn mcp_cli(
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> i32 {
-    mcp_cli_in(args, cfg, out, err, &|k| std::env::var(k).ok())
+    mcp_cli_in(args, cfg, out, err, &ghost_core::appimage::var)
 }
 
-/// [`mcp_cli`] with the environment it reads `APPIMAGE` and `APPDIR` from.
+/// [`mcp_cli`] with the environment it reads the AppImage's variables from: the process's
+/// through `ghost_core::appimage::var`, which leaves out another program's.
 pub fn mcp_cli_in(
     args: &[String],
     cfg: &GhostdSettings,

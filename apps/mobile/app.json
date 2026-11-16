@@ -3,7 +3,7 @@
     "name": "Ghost",
     "slug": "ghost",
     "scheme": "ghost",
-    "version": "2026.11.3",
+    "version": "2026.11.4",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",

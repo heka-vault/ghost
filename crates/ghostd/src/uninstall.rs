@@ -155,7 +155,7 @@ impl ghost_api::uninstall::UninstallPort for UninstallDesk {
         view(
             &self.places,
             &leftovers::inventory(&self.places, &KeyringLook),
-            &finish_now(),
+            &finish_now(None),
         )
     }
 }
@@ -269,8 +269,8 @@ pub struct Finish {
     pub line: String,
 }
 
-/// From the AppImage's path (`$APPIMAGE`), the running binary, and whether dpkg lists the
-/// package.
+/// From this Ghost's own AppImage (never another program's `$APPIMAGE`), the running binary,
+/// and whether dpkg lists the package.
 pub fn finish(appimage: Option<&Path>, exe: Option<&Path>, package_listed: bool) -> Finish {
     if let Some(a) = appimage {
         return Finish {
@@ -294,8 +294,14 @@ pub fn finish(appimage: Option<&Path>, exe: Option<&Path>, package_listed: bool)
     }
 }
 
-pub fn finish_now() -> Finish {
-    let appimage = std::env::var_os("APPIMAGE").map(PathBuf::from);
+/// This process's [`finish`]. `told` is the AppImage the app named for the copy of `ghostd`
+/// it runs from outside its mount (`--appimage`, with `--after`); otherwise it is the one
+/// this binary runs from (`ghost_core::appimage::file`). A shell inside another program's
+/// AppImage hands ghostd that program's `$APPIMAGE`, and this line once said to `rm` it.
+pub fn finish_now(told: Option<&Path>) -> Finish {
+    let appimage = told
+        .map(Path::to_path_buf)
+        .or_else(ghost_core::appimage::file);
     let exe = std::env::current_exe().ok();
     let listed = Path::new(&format!("/var/lib/dpkg/info/{}.list", leftovers::PACKAGE)).exists();
     finish(appimage.as_deref(), exe.as_deref(), listed)
@@ -602,6 +608,10 @@ pub struct Options {
     pub only: Option<Vec<Category>>,
     /// The app's process, waited for before anything is stopped (`--after <pid>`).
     pub after: Option<i32>,
+    /// The AppImage the app runs from, for the line that finishes (`--appimage <file>`,
+    /// only with `--after`): the app's copy of `ghostd` is outside the mount and cannot
+    /// tell by itself.
+    pub appimage: Option<PathBuf>,
 }
 
 pub fn parse(args: &[String]) -> Result<Options, String> {
@@ -625,6 +635,13 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
                         .map_err(|_| format!("--after: not a process id: {v}"))?,
                 );
             }
+            "--appimage" => {
+                let v = it.next().ok_or("--appimage takes a file")?;
+                if !Path::new(v).is_absolute() {
+                    return Err(format!("--appimage: not a full path: {v}"));
+                }
+                o.appimage = Some(PathBuf::from(v));
+            }
             "-h" | "--help" | "help" => return Err(USAGE.into()),
             other => return Err(format!("unknown option {other}\n{USAGE}")),
         }
@@ -637,6 +654,11 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
     {
         return Err(format!(
             "choose one of --all, --keep-data and --only\n{USAGE}"
+        ));
+    }
+    if o.appimage.is_some() && o.after.is_none() {
+        return Err(format!(
+            "--appimage is the app's own, with --after\n{USAGE}"
         ));
     }
     Ok(o)
@@ -791,13 +813,13 @@ pub fn cli(args: &[String]) -> i32 {
         places,
         look: &KeyringLook,
         hands: &hands,
-        finish: finish_now(),
+        finish: finish_now(o.appimage.as_deref()),
         stop: &stop,
     };
     let stdin = std::io::stdin();
     let code = run(args, &world, &mut stdin.lock(), &mut std::io::stdout());
     if o.after.is_some() {
-        notify(code);
+        notify(code, &world.finish);
         // The app ran a copy of ghostd from a folder of its own (`ghost-uninstall`, under the
         // runtime folder): it goes too.
         if let Some(dir) = std::env::current_exe()
@@ -812,8 +834,7 @@ pub fn cli(args: &[String]) -> i32 {
 }
 
 /// After the app's removal: a desktop notification, when the desktop has `notify-send`.
-fn notify(code: i32) {
-    let finish = finish_now();
+fn notify(code: i32, finish: &Finish) {
     let (title, body) = if code == 0 {
         ("Ghost was removed", format!("To finish: {}", finish.line))
     } else {

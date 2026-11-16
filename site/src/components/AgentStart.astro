@@ -14,10 +14,10 @@
 import prompt from "../agent-prompt.txt?raw";
 
 interface Props {
-  deb: string;
-  appimage: string;
+  /** The latest release's page, where the .deb and the AppImage are. */
+  download: string;
 }
-const { deb, appimage } = Astro.props;
+const { download } = Astro.props;
 const words = prompt.trim();
 ---
 
@@ -45,8 +45,8 @@ const words = prompt.trim();
     handles your keys or passwords: you type those into Ghost.
   </p>
   <p class="agent__none">
-    <b>No agent?</b> Download the <a href={deb}>.deb</a> for Ubuntu 24.04 and 26.04 or the <a href={appimage}>AppImage</a>{" "}
-    for other distributions, then open Ghost: <a href="#install">install</a> has the three steps.
+    <b>No agent?</b> Download the .deb for Ubuntu 24.04 and 26.04 or the AppImage for other distributions from{" "}
+    <a href={download}>the latest release</a>, then open Ghost: <a href="#install">install</a> has the three steps.
   </p>
 </section>
 

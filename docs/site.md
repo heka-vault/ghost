@@ -83,16 +83,17 @@ page links to them.
   `apple-touch-icon.png` and `og.jpg` (the reach: the lit Wisp reaching, a beam to each named
   place, the name and the line; `reachCardSvg`), with the README's header and the
   organisation's avatar (`docs/brand/`).
-- **The version** on the page (the Download button, the file names) is the repository's own,
+- **The version** on the page (the Download button, the install heading) is the repository's own,
   read from the root `package.json` at build time, which `scripts/version.py` keeps with every
-  other copy; the button goes to the latest release. The .deb and AppImage links name the files
-  in `releases/latest/download/` by that version, so between a version bump's merge and its tag
-  being pushed (docs/releasing.md) they point at a file not there yet: push the tag soon after.
+  other copy; every download on the page goes to the latest release's page
+  (`releases/latest`), which lists the .deb and the AppImage. No link names a file: a file's
+  address carries a version, and pointed at one not published yet between a version bump's
+  merge and its tag. Don't add one back.
 - **Give this to your agent** sits straight under the hero (`AgentStart.astro`): the prompt a
   person pastes into the coding agent they already have (`site/src/agent-prompt.txt`, the same
   words as the README's Install, held together by `tools/tests/test_agent_setup.py`), a Copy
   button with no library (it says Copied, and selects the words where the clipboard is
-  refused), and a line for people without an agent that goes to the .deb and the AppImage. The
+  refused), and a line for people without an agent that goes to the latest release. The
   prompt names `/agents.md`, which is `docs/agent-setup.md` served whole as Markdown
   (`src/pages/agents.md.ts`, read at build), and `/llms.txt` says in a few lines what Ghost is
   and points at it. `pnpm --dir site site:verify`, run by the site workflow after the build,

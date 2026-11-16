@@ -36,15 +36,22 @@ pub fn copy_dir() -> PathBuf {
         .join("ghost-uninstall")
 }
 
-/// The command line, from the kinds the window sent: each must be one of `KINDS`.
-pub fn argv(ghostd: &Path, kinds: &[String], pid: u32) -> Result<Vec<String>, String> {
+/// The command line, from the kinds the window sent: each must be one of `KINDS`. `appimage`
+/// is the AppImage this app runs from, if it does: the copy runs from outside the mount, so
+/// it cannot tell which file to name in the line that finishes, and is told.
+pub fn argv(
+    ghostd: &Path,
+    kinds: &[String],
+    pid: u32,
+    appimage: Option<&Path>,
+) -> Result<Vec<String>, String> {
     if kinds.is_empty() {
         return Err("Nothing was chosen.".into());
     }
     if let Some(k) = kinds.iter().find(|k| !KINDS.contains(&k.as_str())) {
         return Err(format!("Not a kind of thing Ghost leaves: {k}"));
     }
-    Ok(vec![
+    let mut args = vec![
         ghostd.display().to_string(),
         "uninstall".into(),
         "--only".into(),
@@ -52,7 +59,11 @@ pub fn argv(ghostd: &Path, kinds: &[String], pid: u32) -> Result<Vec<String>, St
         "--yes".into(),
         "--after".into(),
         pid.to_string(),
-    ])
+    ];
+    if let Some(a) = appimage {
+        args.extend(["--appimage".into(), a.display().to_string()]);
+    }
+    Ok(args)
 }
 
 fn copy_ghostd() -> Result<PathBuf, String> {
@@ -82,7 +93,9 @@ pub fn remove_ghost(
         return Err("Only Ghost's main window removes Ghost.".into());
     }
     let ghostd = copy_ghostd()?;
-    let args = argv(&ghostd, &kinds, std::process::id())?;
+    // This app's own AppImage, never one a parent program left in the environment.
+    let appimage = ghost_api::appimage::file();
+    let args = argv(&ghostd, &kinds, std::process::id(), appimage.as_deref())?;
     let mut cmd = if journal_available() {
         let mut c = Command::new("systemd-cat");
         c.args(["-t", "ghost-uninstall"]).args(&args);
@@ -110,7 +123,7 @@ mod tests {
     #[test]
     fn only_the_known_kinds_are_passed_on() {
         let g = Path::new("/run/user/1000/ghost-uninstall/ghostd");
-        let a = argv(g, &["running".into(), "app-storage".into()], 42).unwrap();
+        let a = argv(g, &["running".into(), "app-storage".into()], 42, None).unwrap();
         assert_eq!(
             a,
             [
@@ -123,8 +136,15 @@ mod tests {
                 "42"
             ]
         );
-        assert!(argv(g, &["running;rm -rf ~".into()], 42).is_err());
-        assert!(argv(g, &[], 42).is_err());
+        assert!(argv(g, &["running;rm -rf ~".into()], 42, None).is_err());
+        assert!(argv(g, &[], 42, None).is_err());
+        // From an AppImage the copy is told the file: it runs from outside the mount.
+        let image = Path::new("/home/p/Apps/Ghost 1.AppImage");
+        let a = argv(g, &["running".into()], 42, Some(image)).unwrap();
+        assert_eq!(
+            a[a.len() - 2..],
+            ["--appimage", "/home/p/Apps/Ghost 1.AppImage"]
+        );
         // The shell's list is the daemon's.
         assert_eq!(KINDS.len(), 6);
     }

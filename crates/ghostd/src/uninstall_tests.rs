@@ -189,6 +189,28 @@ fn the_apps_choice_is_taken_as_given() {
     ));
     assert!(parse(&["--only".into(), "everything".into()]).is_err());
     assert!(parse(&["--all".into(), "--keep-data".into()]).is_err());
+    // The AppImage is named by the app for its copy of ghostd, with `--after`, by full path.
+    let told = parse(&[
+        "--after".into(),
+        "42".into(),
+        "--appimage".into(),
+        "/home/p/Apps/Ghost 1.AppImage".into(),
+    ])
+    .unwrap();
+    assert_eq!(
+        told.appimage.as_deref(),
+        Some(Path::new("/home/p/Apps/Ghost 1.AppImage"))
+    );
+    assert!(parse(&["--appimage".into(), "/home/p/Ghost.AppImage".into()]).is_err());
+    assert!(
+        parse(&[
+            "--after".into(),
+            "42".into(),
+            "--appimage".into(),
+            "Ghost.AppImage".into()
+        ])
+        .is_err()
+    );
 }
 
 #[test]

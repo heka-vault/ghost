@@ -96,7 +96,7 @@ PY
 python3 -I /tmp/stub.py 18765 &
 stub=$!
 : > /tmp/reports.jsonl
-APPIMAGE=/tmp/Ghost.AppImage GHOST_REPORTS_URL=http://127.0.0.1:18765 GHOST_POSTHOG_KEY=${GHOST_POSTHOG_KEY:-phc_container_check} \
+APPIMAGE=/tmp/Ghost.AppImage APPDIR=/tmp/app-no-data GHOST_REPORTS_URL=http://127.0.0.1:18765 GHOST_POSTHOG_KEY=${GHOST_POSTHOG_KEY:-phc_container_check} \
   ANTHROPIC_BASE_URL=http://127.0.0.1:9 /tmp/app-no-data/usr/bin/ghostd run >/tmp/run.log 2>&1 &
 daemon=$!
 for _ in $(seq 1 60); do
