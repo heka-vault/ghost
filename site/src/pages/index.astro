@@ -6,7 +6,8 @@
  * it, each part starts where a place would light up, and Wisp's states (listening, reaching,
  * speaking, waiting for a yes) are the pictures. Every claim is one the README or CLAUDE.md's
  * rules make; when the product changes what it promises, change this page in the same pull
- * request. The version is the repository's (package.json), never typed here.
+ * request. The version is the repository's (package.json), never typed here, and every download
+ * goes to the latest release's page: no link names a file, so none breaks at a release.
  */
 import Base from "../layouts/Base.astro";
 import AgentStart from "../components/AgentStart.astro";
@@ -22,11 +23,9 @@ import session from "../../../docs/screenshots/session.webp?url";
 import watching from "../../../docs/screenshots/watching.webp?url";
 
 const REPO = "https://github.com/heka-vault/ghost";
+// The one download address: GitHub sends it to the newest release, which lists the .deb and
+// the AppImage. Never a file's own address, which carries a version and has to be kept.
 const DOWNLOAD = `${REPO}/releases/latest`;
-// The files themselves, by the repository's version: the release is tagged at that version
-// (docs/releasing.md), so these name the latest release's .deb and AppImage.
-const DEB = `${DOWNLOAD}/download/heka-ghost-desktop_${version}_amd64.deb`;
-const APPIMAGE = `${DOWNLOAD}/download/heka-ghost-desktop_${version}_amd64.AppImage`;
 const doc = (path: string) => `${REPO}/blob/main/${path}`;
 
 const states = [
@@ -120,7 +119,7 @@ const rough = [
     </Hero>
 
     <div class="spine">
-      <AgentStart deb={DEB} appimage={APPIMAGE} />
+      <AgentStart download={DOWNLOAD} />
 
       <section id="float" class="part" aria-labelledby="float-title">
         <p class="kicker"><span class="kicker__dot kicker__dot--cyan"></span>The float</p>
@@ -215,16 +214,19 @@ const rough = [
         </p>
         <p class="install__go">
           <a class="btn btn--go btn--big" href={DOWNLOAD}>Download Ghost {version}</a>
-          <span><a href={DEB}>.deb</a> for Ubuntu 24.04 and 26.04 · <a href={APPIMAGE}>AppImage</a> for the rest · x86-64</span>
+          <span>.deb for Ubuntu 24.04 and 26.04 · AppImage for the rest · x86-64</span>
         </p>
         <ol class="steps">
           <li>
             <h3>Download</h3>
-            <p><code>heka-ghost-desktop_{version}_amd64.deb</code>, or the <code>.AppImage</code> for other distributions (it needs FUSE 2).</p>
+            <p>
+              From <a href={DOWNLOAD}>the latest release</a>: the <code>.deb</code>, or the <code>.AppImage</code> for other
+              distributions (it needs FUSE 2).
+            </p>
           </li>
           <li>
             <h3>Install</h3>
-            <p>Open it with App Center, or <code>sudo apt install ./heka-ghost-desktop_{version}_amd64.deb</code>. apt brings what it needs.</p>
+            <p>Open it with App Center, or <code>sudo apt install ./heka-ghost-desktop_*_amd64.deb</code>. apt brings what it needs.</p>
           </li>
           <li>
             <h3>Open Ghost</h3>
