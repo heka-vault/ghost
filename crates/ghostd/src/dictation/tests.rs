@@ -13,12 +13,20 @@ struct Mic {
     value: i16,
     fast: bool,
     frames: Option<usize>,
+    /// Gives this many frames, then nothing ever again (a capture that stalls).
+    stall_after: Option<usize>,
     open: Arc<AtomicUsize>,
 }
 
 #[async_trait]
 impl MediaIn for Mic {
     async fn next_frame(&mut self) -> Option<Audio> {
+        if let Some(n) = self.stall_after.as_mut() {
+            if *n == 0 {
+                std::future::pending::<()>().await;
+            }
+            *n -= 1;
+        }
         if let Some(n) = self.frames.as_mut() {
             if *n == 0 {
                 return None;
@@ -89,6 +97,11 @@ struct Fake {
     model: SharedRecognizer,
     fast: bool,
     frames: Option<usize>,
+    stall_after: Option<usize>,
+    /// While set, `open` waits for it to be let go (a capture slow to open).
+    open_gate: Option<Arc<AtomicBool>>,
+    /// Opens begun.
+    opening: Arc<AtomicUsize>,
     /// Captures open now.
     open: Arc<AtomicUsize>,
     /// Holds of the passive loop's microphone alive now.
@@ -98,6 +111,9 @@ struct Fake {
 #[async_trait]
 impl Host for Fake {
     fn refusal(&self) -> Option<DictationReason> {
+        *self.refusal.lock().unwrap()
+    }
+    fn still_allowed(&self) -> Option<DictationReason> {
         *self.refusal.lock().unwrap()
     }
     async fn take_mic(&self) -> Result<MicHold, DictationReason> {
@@ -111,11 +127,18 @@ impl Host for Fake {
         Ok(MicHold(Some(tx)))
     }
     async fn open(&self) -> Result<Box<dyn MediaIn>, DictationReason> {
+        self.opening.fetch_add(1, Ordering::SeqCst);
         self.open.fetch_add(1, Ordering::SeqCst);
+        if let Some(g) = &self.open_gate {
+            while !g.load(Ordering::SeqCst) {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        }
         Ok(Box::new(Mic {
             value: 900,
             fast: self.fast,
             frames: self.frames,
+            stall_after: self.stall_after,
             open: self.open.clone(),
         }))
     }
@@ -146,6 +169,9 @@ fn world_with(text: &str, gated: bool, fast: bool, limit: Duration, board: Board
         model,
         fast,
         frames: None,
+        stall_after: None,
+        open_gate: None,
+        opening: Arc::new(AtomicUsize::new(0)),
         open: Arc::new(AtomicUsize::new(0)),
         held: Arc::new(AtomicUsize::new(0)),
     });
@@ -356,6 +382,9 @@ async fn the_microphone_going_away_ends_it_and_reads_what_there_is() {
         model: w.host.model.clone(),
         fast: false,
         frames: Some(3),
+        stall_after: None,
+        open_gate: None,
+        opening: Arc::new(AtomicUsize::new(0)),
         open: Arc::new(AtomicUsize::new(0)),
         held: Arc::new(AtomicUsize::new(0)),
     });
@@ -518,4 +547,111 @@ fn the_command_line_says_kinds_and_numbers() {
             1
         )
     );
+}
+
+fn host_with(model: SharedRecognizer, tweak: impl FnOnce(&mut Fake)) -> Arc<Fake> {
+    let mut f = Fake {
+        refusal: Mutex::new(None),
+        model,
+        fast: false,
+        frames: None,
+        stall_after: None,
+        open_gate: None,
+        opening: Arc::new(AtomicUsize::new(0)),
+        open: Arc::new(AtomicUsize::new(0)),
+        held: Arc::new(AtomicUsize::new(0)),
+    };
+    tweak(&mut f);
+    Arc::new(f)
+}
+
+#[tokio::test]
+async fn listening_off_or_a_session_while_the_microphone_opens_cancels_the_start() {
+    // Finding 1: a start between asking for the microphone and its first frame is a
+    // dictation too. Ending it (listening off, a session, Ghost stopping) waits until the
+    // capture it was opening is closed and the microphone given back, and the start never
+    // turns into a recording.
+    for why in [
+        DictationReason::ListeningTurnedOff,
+        DictationReason::SessionOpened,
+        DictationReason::Stopping,
+    ] {
+        let w = world("Never.");
+        let gate = Arc::new(AtomicBool::new(false));
+        let host = host_with(w.host.model.clone(), |f| f.open_gate = Some(gate.clone()));
+        let d = Dictation::new(host.clone(), w.board.clone(), w.notes.clone(), LIMIT);
+        let starting = tokio::spawn({
+            let d = d.clone();
+            async move { d.start().await }
+        });
+        settle(|| host.opening.load(Ordering::SeqCst) == 1).await;
+        assert_ne!(
+            d.state(),
+            DictationState::Idle,
+            "a start under way is not idle"
+        );
+        let ending = tokio::spawn({
+            let d = d.clone();
+            async move { d.end(why).await }
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(
+            !ending.is_finished(),
+            "the end waits for the open to finish"
+        );
+        gate.store(true, Ordering::SeqCst); // the open completes after the cancel
+        ending.await.unwrap();
+        assert_eq!(host.open.load(Ordering::SeqCst), 0, "the capture is closed");
+        settle(|| host.held.load(Ordering::SeqCst) == 0).await;
+        let v = starting.await.unwrap();
+        assert_eq!(v.state, DictationState::Idle);
+        assert_eq!(outcome(&v), (DictationOutcome::Cancelled, Some(why)));
+        assert_eq!(d.state(), DictationState::Idle);
+        assert_eq!(host.open.load(Ordering::SeqCst), 0);
+    }
+}
+
+#[tokio::test]
+async fn listening_turned_off_during_the_open_is_seen_before_recording() {
+    // Finding 1: the passive loop's wait ends when listening goes off; a start that then
+    // finishes opening must check again and not record.
+    let w = world("Never.");
+    let gate = Arc::new(AtomicBool::new(false));
+    let host = host_with(w.host.model.clone(), |f| f.open_gate = Some(gate.clone()));
+    let d = Dictation::new(host.clone(), w.board.clone(), w.notes.clone(), LIMIT);
+    let starting = tokio::spawn({
+        let d = d.clone();
+        async move { d.start().await }
+    });
+    settle(|| host.opening.load(Ordering::SeqCst) == 1).await;
+    *host.refusal.lock().unwrap() = Some(DictationReason::NotListening);
+    gate.store(true, Ordering::SeqCst);
+    let v = starting.await.unwrap();
+    assert_eq!(v.state, DictationState::Idle);
+    assert_eq!(outcome(&v).1, Some(DictationReason::NotListening));
+    assert_eq!(host.open.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn a_capture_that_stalls_still_ends_at_the_limit() {
+    // Finding 8: the limit is a time as well as a count of samples.
+    let w = world("Short.");
+    let host = host_with(w.host.model.clone(), |f| f.stall_after = Some(2));
+    let d = Dictation::new(
+        host.clone(),
+        w.board.clone(),
+        w.notes.clone(),
+        Duration::from_millis(300),
+    );
+    d.start().await;
+    let ended = tokio::time::timeout(Duration::from_secs(3), async {
+        while d.view().result.is_none() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await;
+    assert!(ended.is_ok(), "a stalled capture never ended");
+    let r = d.view().result.unwrap();
+    assert_eq!(r.reason, Some(DictationReason::Limit));
+    assert_eq!(host.open.load(Ordering::SeqCst), 0);
 }

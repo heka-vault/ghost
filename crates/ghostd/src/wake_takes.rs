@@ -43,6 +43,9 @@ struct Ring {
     buf: VecDeque<i16>,
     channels: u16,
     newest: Option<Instant>,
+    /// Which capture may write: each start and each stop moves it on, so a frame from a
+    /// capture that was told to stop is refused here, under the ring's own lock.
+    epoch: u64,
 }
 
 impl Ring {
@@ -54,24 +57,65 @@ impl Ring {
         self.buf.drain(..over);
         self.newest = Some(at);
     }
+
+    /// Forget everything and refuse the writer of before; the new epoch.
+    fn turn(&mut self) -> u64 {
+        self.buf.clear();
+        self.newest = None;
+        self.epoch += 1;
+        self.epoch
+    }
+}
+
+/// Opens the array's raw stream: the live one through `ghost_audio`, or a test's.
+pub type TapeOpener =
+    Arc<dyn Fn(&str) -> Result<Box<dyn ghost_voice::transport::MediaIn>, String> + Send + Sync>;
+
+/// The live array: every channel of the raw node, into memory.
+fn live_opener() -> TapeOpener {
+    Arc::new(|node: &str| {
+        Capture::open(CaptureConfig {
+            node: Some(node.to_string()),
+            channels: RAW_CHANNELS,
+            ring_seconds: 2.0,
+            name: "ghost-wake-array".into(),
+            description: "Ghost (kept wake takes, the array)".into(),
+            ..CaptureConfig::default()
+        })
+        .map(|c| Box::new(crate::wake::CaptureIn(c)) as Box<dyn ghost_voice::transport::MediaIn>)
+        .map_err(|e| e.to_string())
+    })
+}
+
+struct Running {
+    stop: tokio_util::sync::CancellationToken,
+    task: JoinHandle<()>,
 }
 
 pub struct ArrayTape {
     node: String,
     ring: Arc<Mutex<Ring>>,
-    task: Mutex<Option<JoinHandle<()>>>,
+    task: Mutex<Option<Running>>,
+    opener: TapeOpener,
 }
 
 impl ArrayTape {
     pub fn new(node: String) -> Arc<Self> {
+        Self::with_opener(node, live_opener())
+    }
+
+    /// The same tape over another opener (a test's).
+    pub fn with_opener(node: String, opener: TapeOpener) -> Arc<Self> {
         Arc::new(Self {
             node,
             ring: Arc::new(Mutex::new(Ring {
                 buf: VecDeque::new(),
                 channels: RAW_CHANNELS,
                 newest: None,
+                epoch: 0,
             })),
             task: Mutex::new(None),
+            opener,
         })
     }
 
@@ -79,56 +123,93 @@ impl ArrayTape {
         &self.node
     }
 
-    /// Open the capture, unless it is open. A tape that starts holds nothing from before it
-    /// stopped: a frame a stopping capture added late is dropped here, so nothing from a
-    /// pause in the passive listener (a session, the Hearing test, a dictation, ADR 0077)
-    /// can be in a take.
+    /// Open the capture, unless it is open. A tape that starts holds nothing from before:
+    /// the ring is cleared and moves to a new epoch, so a capture told to stop that still
+    /// had a frame in hand cannot add it. The capture opens off the runtime; the task owns
+    /// it and closes it (dropping it joins its thread) before it ends.
     pub fn start(self: &Arc<Self>) {
         let mut task = lock(&self.task);
-        if task.as_ref().is_some_and(|t| !t.is_finished()) {
+        if task
+            .as_ref()
+            .is_some_and(|t| !t.stop.is_cancelled() && !t.task.is_finished())
+        {
             return;
         }
-        {
-            let mut r = lock(&self.ring);
-            r.buf.clear();
-            r.newest = None;
-        }
-        let node = self.node.clone();
-        let ring = self.ring.clone();
-        *task = Some(tokio::spawn(async move {
-            let opened = tokio::task::spawn_blocking(move || {
-                Capture::open(CaptureConfig {
-                    node: Some(node),
-                    channels: RAW_CHANNELS,
-                    ring_seconds: 2.0,
-                    name: "ghost-wake-array".into(),
-                    description: "Ghost (kept wake takes, the array)".into(),
-                    ..CaptureConfig::default()
-                })
-            })
-            .await;
-            let mut cap = match opened {
-                Ok(Ok(c)) => c,
-                Ok(Err(e)) => {
-                    warn!("wake takes: the array's stream did not open: {e}");
-                    return;
+        let epoch = lock(&self.ring).turn();
+        let stop = tokio_util::sync::CancellationToken::new();
+        let (node, ring, opener, token) = (
+            self.node.clone(),
+            self.ring.clone(),
+            self.opener.clone(),
+            stop.clone(),
+        );
+        // A stopping capture left in the slot is not waited on here: its writes are already
+        // refused, and `stop` is what dictation waits on (it joins the newest).
+        *task = Some(Running {
+            stop,
+            task: tokio::spawn(async move {
+                // Never dropped mid-open: a cancel waits for the open, then closes what opened.
+                let opened = tokio::task::spawn_blocking(move || opener(&node)).await;
+                let mut cap = match opened {
+                    Ok(Ok(c)) => c,
+                    Ok(Err(e)) => {
+                        warn!("wake takes: the array's stream did not open: {e}");
+                        return;
+                    }
+                    Err(_) => return,
+                };
+                loop {
+                    let frame = tokio::select! {
+                        biased;
+                        _ = token.cancelled() => break,
+                        f = cap.next_frame() => f,
+                    };
+                    let Some(frame) = frame else { break };
+                    let mut r = lock(&ring);
+                    if r.epoch != epoch {
+                        break; // told to stop while this frame was in hand
+                    }
+                    r.add(&frame.samples, Instant::now());
                 }
-                Err(_) => return,
-            };
-            while let Some(frame) = cap.next_frame().await {
-                lock(&ring).add(&frame.samples, Instant::now());
-            }
-        }));
+                cap.close();
+                drop(cap); // the capture's thread is joined here
+            }),
+        });
     }
 
-    /// Close the capture and forget what it held.
-    pub fn stop(&self) {
-        if let Some(t) = lock(&self.task).take() {
-            t.abort();
+    /// Refuse the running capture's writes and forget what the tape held, at once, and tell
+    /// the capture to close; it stays in its slot for `stop` to wait on.
+    fn halt(&self) {
+        lock(&self.ring).turn();
+        if let Some(running) = lock(&self.task).as_ref() {
+            running.stop.cancel();
         }
-        let mut r = lock(&self.ring);
-        r.buf.clear();
-        r.newest = None;
+    }
+
+    /// Close the capture and forget what it held, and return only once the capture is
+    /// closed: an open in flight is waited for and closed too. The passive loop awaits this
+    /// before it gives the microphone to dictation (ADR 0077).
+    pub async fn stop(&self) {
+        self.halt();
+        let running = lock(&self.task).take();
+        if let Some(running) = running {
+            let _ = running.task.await;
+        }
+    }
+
+    /// The same without waiting: shutdown, where nothing can wait.
+    pub fn stop_now(&self) {
+        self.halt();
+        if let Some(running) = lock(&self.task).take() {
+            running.task.abort();
+        }
+    }
+
+    /// No capture of the tape's is open or opening.
+    pub fn idle(&self) -> bool {
+        lock(&self.task)
+            .as_ref()
+            .is_none_or(|t| t.task.is_finished())
     }
 
     /// `push` for tests: as the capture loop does.
@@ -214,11 +295,13 @@ impl TapedWake {
     }
 }
 
+/// A wait dropped mid-way (the passive loop chose something else): the tape's writes are
+/// refused at once; `stop`, which the loop always awaits next, waits for its capture.
 struct StopOnDrop(Arc<ArrayTape>);
 
 impl Drop for StopOnDrop {
     fn drop(&mut self) {
-        self.0.stop();
+        self.0.halt();
     }
 }
 
@@ -235,12 +318,16 @@ impl WakeDetector for TapedWake {
     }
 
     async fn stop(&self) {
-        self.tape.stop();
         self.inner.stop().await;
+        self.tape.stop().await;
+    }
+
+    fn quiet(&self) -> bool {
+        self.inner.quiet() && self.tape.idle()
     }
 
     fn close(&self) {
-        self.tape.stop();
+        self.tape.stop_now();
         self.inner.close();
     }
 }
@@ -489,7 +576,116 @@ mod tests {
         // the take ended a second before the newest sample: the second before that
         let (_, before) = tape.slice(1.0, 1.0).unwrap();
         assert!(before.iter().all(|&s| s == 0));
-        tape.stop();
+        tape.stop_now();
         assert!(tape.slice(1.0, 0.0).is_none());
+    }
+
+    /// A tape capture for tests: a frame of `value` every 5 ms, slow to open and to close,
+    /// counting how many are open.
+    struct SlowMic {
+        open: Arc<std::sync::atomic::AtomicIsize>,
+        value: i16,
+    }
+
+    #[async_trait]
+    impl ghost_voice::transport::MediaIn for SlowMic {
+        async fn next_frame(&mut self) -> Option<ghost_voice::frames::Audio> {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+            Some(ghost_voice::frames::Audio::new(vec![self.value; 160], RATE))
+        }
+    }
+
+    impl Drop for SlowMic {
+        fn drop(&mut self) {
+            std::thread::sleep(Duration::from_millis(50)); // as a capture joins its thread
+            self.open.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    fn slow_tape(
+        open: Arc<std::sync::atomic::AtomicIsize>,
+        opens: Arc<AtomicUsize>,
+    ) -> Arc<ArrayTape> {
+        ArrayTape::with_opener(
+            "n".into(),
+            Arc::new(move |_node: &str| {
+                opens.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                std::thread::sleep(Duration::from_millis(150)); // a slow open
+                open.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                // An open finished: counted down from the opens begun.
+                opens.fetch_add(1 << 16, std::sync::atomic::Ordering::SeqCst);
+                Ok(Box::new(SlowMic {
+                    open: open.clone(),
+                    value: 7,
+                })
+                    as Box<dyn ghost_voice::transport::MediaIn>)
+            }),
+        )
+    }
+
+    use std::sync::atomic::AtomicUsize;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn stopping_the_tape_waits_for_an_open_in_flight_and_its_close() {
+        // Finding 2: the passive loop hands the microphone over only after this returns, so
+        // when it returns no capture of the tape's is open or about to open.
+        let open = Arc::new(std::sync::atomic::AtomicIsize::new(0));
+        let opens = Arc::new(AtomicUsize::new(0));
+        let tape = slow_tape(open.clone(), opens.clone());
+        tape.start();
+        tokio::time::sleep(Duration::from_millis(30)).await; // the open is in flight
+        assert_eq!(
+            opens.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "begun, not finished"
+        );
+        tape.stop().await;
+        assert_eq!(
+            opens.load(std::sync::atomic::Ordering::SeqCst),
+            1 + (1 << 16),
+            "stop returned with an open still in flight"
+        );
+        assert_eq!(
+            open.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "a capture is open"
+        );
+        assert!(tape.idle());
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(
+            open.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "one opened after"
+        );
+        assert!(tape.slice(1.0, 0.0).is_none(), "the tape kept something");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_running_tape_stops_with_its_capture_closed_and_nothing_written_after() {
+        let open = Arc::new(std::sync::atomic::AtomicIsize::new(0));
+        let tape = slow_tape(open.clone(), Arc::new(AtomicUsize::new(0)));
+        tape.start();
+        for _ in 0..100 {
+            if tape.slice(0.01, 0.0).is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(tape.slice(0.01, 0.0).is_some(), "the tape records");
+        tape.stop().await;
+        assert_eq!(open.load(std::sync::atomic::Ordering::SeqCst), 0);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(
+            tape.slice(1.0, 0.0).is_none(),
+            "a frame was written after the stop"
+        );
+        // a stop told while a wait is dropped refuses writes at once, before the join
+        tape.start();
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        tape.halt();
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        assert!(tape.slice(1.0, 0.0).is_none(), "written after the halt");
+        tape.stop().await;
+        assert_eq!(open.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
 }

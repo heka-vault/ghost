@@ -108,6 +108,12 @@ pub trait WakeDetector: Send + Sync {
     /// Release the microphone: after a `wait` that was dropped (the loop chose something
     /// else) the pipeline may still be running.
     async fn stop(&self);
+    /// Nothing of this detector is capturing or about to: after `stop`, the microphone is
+    /// free for another's capture (dictation's, ADR 0077). A listener whose pipeline did not
+    /// stop in time says no.
+    fn quiet(&self) -> bool {
+        true
+    }
     fn close(&self);
 }
 
@@ -238,6 +244,10 @@ impl WakeDetector for SpokenWakeDetector {
 
     async fn stop(&self) {
         self.listener.stop().await;
+    }
+
+    fn quiet(&self) -> bool {
+        self.listener.quiet()
     }
 
     fn close(&self) {
@@ -491,6 +501,8 @@ pub struct WakeListener {
     /// Each check of a hit, as numbers (the microphone's health, ADR 0064).
     on_check: Mutex<Option<OnCheck>>,
     running: Mutex<Option<Running>>,
+    /// Pipelines whose run has not ended: each holds a capture until it does.
+    live: Arc<AtomicUsize>,
     builds: AtomicUsize,
     backoff: Duration,
     /// Set by `reopen`: the pipeline that ends next was stopped on purpose; rebuild it at
@@ -527,6 +539,7 @@ impl WakeListener {
             on_heard: Mutex::new(None),
             on_check: Mutex::new(None),
             running: Mutex::new(None),
+            live: Arc::new(AtomicUsize::new(0)),
             builds: AtomicUsize::new(0),
             backoff: BACKOFF,
             reopening: AtomicBool::new(false),
@@ -580,6 +593,12 @@ impl WakeListener {
     /// How many pipelines have been built.
     pub fn builds(&self) -> usize {
         self.builds.load(Ordering::SeqCst)
+    }
+
+    /// No pipeline of this listener is running, so none holds a capture: `stop` waits for
+    /// that, and a pipeline that outlived its wait keeps this false.
+    pub fn quiet(&self) -> bool {
+        self.live.load(Ordering::SeqCst) == 0
     }
 
     /// A pipeline is running now.
@@ -676,8 +695,11 @@ impl WakeListener {
             let (done_tx, done_rx) = watch::channel(false);
             let token = built.token.clone();
             let run = built.pipeline.run(token.clone());
+            self.live.fetch_add(1, Ordering::SeqCst);
+            let live = self.live.clone();
             tokio::spawn(async move {
-                run.await;
+                run.await; // every stage stopped: the capture is closed
+                live.fetch_sub(1, Ordering::SeqCst);
                 let _ = done_tx.send(true);
             });
             *lock(&self.running) = Some(Running {
@@ -1174,5 +1196,55 @@ mod tests {
                 .await
                 .is_err()
         );
+    }
+
+    /// A capture that counts itself open until it is dropped, slowly.
+    struct Counted(Arc<AtomicUsize>);
+
+    #[async_trait]
+    impl MediaIn for Counted {
+        async fn next_frame(&mut self) -> Option<Audio> {
+            std::future::pending().await
+        }
+    }
+
+    impl Drop for Counted {
+        fn drop(&mut self) {
+            std::thread::sleep(Duration::from_millis(30));
+            self.0.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_listener_is_quiet_only_once_its_capture_is_closed() {
+        // Finding 2's audit of the main wake input: `stop` waits for the pipeline, whose end
+        // means its capture was dropped; `quiet` is what the passive loop checks before it
+        // gives the microphone to dictation (ADR 0077).
+        let open = Arc::new(AtomicUsize::new(0));
+        let media: MediaFactory = {
+            let open = open.clone();
+            Arc::new(move || {
+                open.fetch_add(1, Ordering::SeqCst);
+                Ok(Box::new(Counted(open.clone())) as Box<dyn MediaIn>)
+            })
+        };
+        let l = Arc::new(listener(media, nothing_stt()));
+        assert!(l.quiet());
+        let waiting = {
+            let l = l.clone();
+            tokio::spawn(async move { l.wait(None).await })
+        };
+        for _ in 0..200 {
+            if l.is_running() && open.load(Ordering::SeqCst) == 1 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert!(!l.quiet(), "a running pipeline holds a capture");
+        waiting.abort();
+        let _ = waiting.await;
+        l.stop().await;
+        assert_eq!(open.load(Ordering::SeqCst), 0, "the capture is closed");
+        assert!(l.quiet());
     }
 }

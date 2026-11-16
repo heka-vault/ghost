@@ -27,6 +27,8 @@ use crate::error::{ApiError, ApiResult};
 pub enum DictationState {
     /// Nothing is recording or being read.
     Idle,
+    /// Taking the microphone from the passive listener and opening it; the wake is paused.
+    Starting,
     /// The microphone is open for dictation; the wake is paused.
     Recording,
     /// The microphone is closed; Parakeet is reading what was said.
@@ -87,6 +89,8 @@ pub enum DictationReason {
     NoDisplay,
     /// The display would not let Ghost own the clipboard.
     ClipboardFailed,
+    /// More text than Ghost puts on the clipboard at once.
+    TooLong,
 }
 
 /// What a dictation, or a request, ended with: kinds and numbers, never words.
@@ -150,6 +154,9 @@ impl DictationResult {
             (O::NotOnClipboard, Some(R::NoDisplay)) => {
                 "Ghost couldn't reach the clipboard: there is no display. Nothing was kept.".into()
             }
+            (O::NotOnClipboard, Some(R::TooLong)) => {
+                "Too long for the clipboard in one go. Nothing was kept.".into()
+            }
             (O::NotOnClipboard, _) => {
                 "Ghost couldn't put it on the clipboard. Nothing was kept.".into()
             }
@@ -207,7 +214,8 @@ pub trait DictationPort: Send + Sync {
     fn view(&self) -> DictationView;
     /// Open the microphone and record, or refuse with a reason.
     async fn start(&self) -> DictationView;
-    /// Stop recording and read; answers once the text is on the clipboard (or not).
+    /// Stop recording and read; answers once the text is on the clipboard (or not). A
+    /// stop while the microphone is still opening cancels the start.
     async fn stop(&self) -> DictationView;
     /// Start when idle, stop when recording, refuse while reading.
     async fn toggle(&self) -> DictationView;
@@ -283,7 +291,7 @@ mod tests {
         DictationOutcome::Cancelled,
         DictationOutcome::Refused,
     ];
-    const REASONS: [DictationReason; 17] = [
+    const REASONS: [DictationReason; 18] = [
         DictationReason::NotListening,
         DictationReason::Busy,
         DictationReason::HearingTest,
@@ -301,6 +309,7 @@ mod tests {
         DictationReason::Stopping,
         DictationReason::NoDisplay,
         DictationReason::ClipboardFailed,
+        DictationReason::TooLong,
     ];
 
     fn kinds() -> Vec<String> {
@@ -325,6 +334,7 @@ mod tests {
         }
         for s in [
             DictationState::Idle,
+            DictationState::Starting,
             DictationState::Recording,
             DictationState::Reading,
         ] {

@@ -3114,7 +3114,7 @@ export interface components {
          * @description Why, when the outcome needs one.
          * @enum {string}
          */
-        DictationReason: "not_listening" | "busy" | "hearing_test" | "no_speech_model" | "no_microphone" | "microphone_failed" | "already_dictating" | "still_reading" | "not_dictating" | "limit" | "microphone_ended" | "operator" | "listening_turned_off" | "session_opened" | "stopping" | "no_display" | "clipboard_failed";
+        DictationReason: "not_listening" | "busy" | "hearing_test" | "no_speech_model" | "no_microphone" | "microphone_failed" | "already_dictating" | "still_reading" | "not_dictating" | "limit" | "microphone_ended" | "operator" | "listening_turned_off" | "session_opened" | "stopping" | "no_display" | "clipboard_failed" | "too_long";
         /** @description What a dictation, or a request, ended with: kinds and numbers, never words. */
         DictationResult: {
             /** @description Characters put on the clipboard (after the cleanup). */
@@ -3147,7 +3147,7 @@ export interface components {
          * @description Where a dictation is.
          * @enum {string}
          */
-        DictationState: "idle" | "recording" | "reading";
+        DictationState: "idle" | "starting" | "recording" | "reading";
         /** @description The state now, and a result: what this request ended with, or for `GET` the last one. */
         DictationView: {
             /**

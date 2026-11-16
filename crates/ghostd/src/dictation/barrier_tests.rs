@@ -19,7 +19,6 @@ use crate::wake_takes::{ArrayTape, Keeper, TapedWake};
 
 const BEFORE: i16 = 100;
 const DICTATED: i16 = 900;
-const AFTER: i16 = 300;
 
 /// What is being said in the room now.
 struct Room(AtomicI16);
@@ -94,8 +93,8 @@ struct Reads;
 
 impl Recognizer for Reads {
     fn transcribe(&mut self, audio: &[f32]) -> ghost_infer::Result<String> {
-        let dictated = f32::from(DICTATED) / 32768.0;
-        let heard = audio.iter().any(|&x| (x - dictated).abs() < 1e-3);
+        // Anything louder than the dither is a room speaking.
+        let heard = audio.iter().any(|&x| x.abs() > 0.01);
         Ok(if heard { "Pick up milk." } else { "" }.into())
     }
 }
@@ -135,7 +134,6 @@ struct World {
     d: Arc<Daemon>,
     room: Arc<Room>,
     wake: Arc<RoomWake>,
-    tape: Arc<ArrayTape>,
     takes: Arc<Takes>,
     board: Arc<Board>,
     recorder: Arc<Recorder>,
@@ -186,7 +184,6 @@ fn world() -> World {
         d,
         room,
         wake,
-        tape,
         takes,
         board,
         recorder,
@@ -194,74 +191,195 @@ fn world() -> World {
     }
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn dictation_never_reaches_the_wake_or_a_kept_take() {
-    let w = world();
-    // The array's raw capture, as if it never paused: the room into the tape every 10 ms.
-    let feeding = {
-        let (room, tape) = (w.room.clone(), w.tape.clone());
+/// A room whose sound is a clock: the value goes up by one every 5 ms, so every sample says
+/// when it was heard.
+fn clock_room() -> (Arc<Room>, JoinHandle<()>) {
+    let room = Arc::new(Room(AtomicI16::new(1000)));
+    let ticking = {
+        let room = room.clone();
         tokio::spawn(async move {
             loop {
-                let v = room.0.load(Ordering::SeqCst);
-                tape.push(&vec![v; 320], Instant::now());
-                tokio::time::sleep(Duration::from_millis(10)).await;
+                tokio::time::sleep(Duration::from_millis(5)).await;
+                room.0.fetch_add(1, Ordering::SeqCst);
             }
         })
     };
-    let detector: Arc<dyn WakeDetector> = Arc::new(TapedWake::new(w.wake.clone(), w.tape.clone()));
+    (room, ticking)
+}
+
+/// The array's raw capture on the clock room: slow to open and slow to close (a real one
+/// joins its thread when dropped), counted while open.
+struct TapeMic {
+    room: Arc<Room>,
+    open: Arc<AtomicUsize>,
+    /// Dictation's capture is open; a tape capture alive meanwhile is a clash.
+    dictating: Arc<AtomicBool>,
+    clash: Arc<AtomicBool>,
+}
+
+#[async_trait]
+impl MediaIn for TapeMic {
+    async fn next_frame(&mut self) -> Option<Audio> {
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        Some(Audio::new(
+            vec![self.room.0.load(Ordering::SeqCst); 160],
+            RATE,
+        ))
+    }
+}
+
+impl Drop for TapeMic {
+    fn drop(&mut self) {
+        std::thread::sleep(Duration::from_millis(30));
+        if self.dictating.load(Ordering::SeqCst) {
+            self.clash.store(true, Ordering::SeqCst); // it was open beside dictation's
+        }
+        self.open.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// Dictation's capture on the clock room: what it heard, and whether anything else was
+/// capturing when it opened.
+struct WindowMic {
+    room: Arc<Room>,
+    seen: Arc<Mutex<Vec<i16>>>,
+    dictating: Arc<AtomicBool>,
+}
+
+impl Drop for WindowMic {
+    fn drop(&mut self) {
+        self.dictating.store(false, Ordering::SeqCst);
+    }
+}
+
+#[async_trait]
+impl MediaIn for WindowMic {
+    async fn next_frame(&mut self) -> Option<Audio> {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        let v = self.room.0.load(Ordering::SeqCst);
+        lock(&self.seen).push(v);
+        Some(Audio::new(vec![v; 160], RATE))
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn dictation_never_reaches_the_wake_or_a_kept_take() {
+    let mut w = world();
+    let (room, ticking) = clock_room();
+    let tape_open = Arc::new(AtomicUsize::new(0));
+    let dictating = Arc::new(AtomicBool::new(false));
+    let clash = Arc::new(AtomicBool::new(false));
+    let tape = ArrayTape::with_opener("ghost-test-array".into(), {
+        let (room, open) = (room.clone(), tape_open.clone());
+        let (dictating, clash) = (dictating.clone(), clash.clone());
+        Arc::new(move |_node: &str| {
+            std::thread::sleep(Duration::from_millis(100)); // a slow open
+            if dictating.load(Ordering::SeqCst) {
+                clash.store(true, Ordering::SeqCst); // opened beside dictation's
+            }
+            open.fetch_add(1, Ordering::SeqCst);
+            Ok(Box::new(TapeMic {
+                room: room.clone(),
+                open: open.clone(),
+                dictating: dictating.clone(),
+                clash: clash.clone(),
+            }) as Box<dyn MediaIn>)
+        })
+    });
+    // The wake and dictation hear the clock room too.
+    let wake = Arc::new(RoomWake {
+        room: room.clone(),
+        keeper: Arc::new(Keeper::new(
+            w.takes.clone(),
+            "ghost.mic".into(),
+            Some(tape.clone()),
+        )),
+        waiting: AtomicBool::new(false),
+        heard: Mutex::new(Vec::new()),
+        ever: Mutex::new(Vec::new()),
+        hit: Notify::new(),
+        waits: AtomicUsize::new(0),
+    });
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    {
+        let d = Arc::get_mut(&mut w.d).expect("one reference");
+        let (room, seen, clash) = (room.clone(), seen.clone(), clash.clone());
+        let dictating = dictating.clone();
+        let (tape_open, wake) = (tape_open.clone(), wake.clone());
+        d.ports.dictation_media = Some(Arc::new(move || {
+            // The barrier, observed: nothing else captures when dictation's capture opens.
+            if tape_open.load(Ordering::SeqCst) != 0 || wake.waiting.load(Ordering::SeqCst) {
+                clash.store(true, Ordering::SeqCst);
+            }
+            dictating.store(true, Ordering::SeqCst);
+            Ok(Box::new(WindowMic {
+                room: room.clone(),
+                seen: seen.clone(),
+                dictating: dictating.clone(),
+            }) as Box<dyn MediaIn>)
+        }));
+    }
+    let detector: Arc<dyn WakeDetector> = Arc::new(TapedWake::new(wake.clone(), tape.clone()));
     let passive = {
         let d = w.d.clone();
         tokio::spawn(async move { d.passive(detector).await })
     };
-    // Before: the wake hears the room.
-    until(|| w.wake.waiting.load(Ordering::SeqCst) && !lock(&w.wake.heard).is_empty()).await;
-    // Dictation takes the microphone: the wake stops before its capture opens.
+    // Dictate as soon as the wake listens: the tape's open is likely still in flight.
+    until(|| wake.waiting.load(Ordering::SeqCst)).await;
     let v = w.d.dictation().start().await;
     assert_eq!(v.state, DictationState::Recording, "{v:?}");
-    assert!(
-        !w.wake.waiting.load(Ordering::SeqCst),
-        "the wake is stopped"
-    );
-    w.room.0.store(DICTATED, Ordering::SeqCst);
-    tokio::time::sleep(Duration::from_millis(200)).await;
-    assert!(!w.wake.waiting.load(Ordering::SeqCst), "and stays stopped");
-    // The operator is already saying Ghost's name as they stop.
-    w.room.0.store(AFTER, Ordering::SeqCst);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    // Stopped while the room is still going: the operator talks straight on.
     let v = w.d.dictation().stop().await;
     let r = v.result.unwrap();
     assert_eq!(r.outcome, DictationOutcome::OnClipboard, "{r:?}");
-    assert_eq!(*lock(&w.board.0), ["Pick up milk."]);
-    // At once, the wake listens again and hits.
-    until(|| w.wake.waits.load(Ordering::SeqCst) >= 2 && w.wake.waiting.load(Ordering::SeqCst))
-        .await;
+    let window = {
+        let seen = lock(&seen);
+        (*seen.iter().min().unwrap(), *seen.iter().max().unwrap())
+    };
+    assert!(window.1 - window.0 > 20, "the dictation heard {window:?}");
+    // At once, the wake listens again (the tape too) and hits.
+    until(|| {
+        wake.waits.load(Ordering::SeqCst) >= 2
+            && wake.waiting.load(Ordering::SeqCst)
+            && tape.slice(0.01, 0.0).is_some()
+    })
+    .await;
     tokio::time::sleep(Duration::from_millis(100)).await;
-    w.wake.hit.notify_one();
+    wake.hit.notify_one();
     until(|| !lock(&w.recorder.0).is_empty()).await;
     until(|| !w.takes.list().is_empty()).await;
-    // The take that was kept holds the detector's stream and the array's, and neither has
-    // a sample of the dictation.
+    assert!(
+        !clash.load(Ordering::SeqCst),
+        "something captured beside dictation"
+    );
+    // Nothing heard strictly inside the dictation's window is anywhere but its own read.
+    let inside = |v: &i16| *v > window.0 && *v < window.1;
     let take = &w.takes.list()[0];
     let detector_audio = w.takes.audio(&take.id, false).unwrap();
     let array_audio = w.takes.audio(&take.id, true).unwrap();
-    assert!(!detector_audio.is_empty() && !array_audio.is_empty());
+    assert!(!array_audio.is_empty(), "the take has the array's stream");
     assert!(
-        !detector_audio.contains(&DICTATED),
+        !detector_audio.iter().any(inside),
         "the detector's stream holds dictated audio"
     );
     assert!(
-        !array_audio.contains(&DICTATED),
+        !array_audio.iter().any(inside),
         "the array's tape holds dictated audio"
     );
     assert!(
-        array_audio.len() < 3 * RATE as usize * 2,
-        "the tape began empty when the wake listened again: {} samples",
-        array_audio.len()
+        !lock(&wake.ever).iter().any(inside),
+        "the wake heard dictated audio"
     );
-    // Nothing the wake ever heard, across every wait, was dictated.
-    assert!(!lock(&w.wake.ever).contains(&DICTATED));
+    // The take reaches back 3 s: everything in it was heard after the dictation.
+    assert!(
+        array_audio.iter().all(|v| *v >= window.1),
+        "{:?}",
+        &array_audio[..4]
+    );
     w.d.stop.cancel();
     let _ = tokio::time::timeout(Duration::from_secs(5), passive).await;
-    feeding.abort();
+    ticking.abort();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -275,11 +393,11 @@ async fn a_session_opening_or_listening_off_cancels_it_and_keeps_nothing() {
         tokio::spawn(async move { d.passive(detector).await })
     };
     until(|| w.wake.waiting.load(Ordering::SeqCst)).await;
-    w.room.0.store(DICTATED, Ordering::SeqCst);
     assert_eq!(
         w.d.dictation().start().await.state,
         DictationState::Recording
     );
+    w.room.0.store(DICTATED, Ordering::SeqCst); // only once dictation records
     tokio::time::sleep(Duration::from_millis(100)).await;
     // The room goes quiet before the cancel, so anything dictated the wake heard, it heard
     // while dictation recorded.
@@ -296,12 +414,11 @@ async fn a_session_opening_or_listening_off_cancels_it_and_keeps_nothing() {
         )
     );
     assert!(lock(&w.board.0).is_empty());
+    manual.arm(); // what the real wake's `arm` does at the top of each wait
     // Listening off: refused while off, and a dictation recording when it goes off is dropped.
     until(|| w.wake.waiting.load(Ordering::SeqCst)).await;
-    assert_eq!(
-        w.d.dictation().start().await.state,
-        DictationState::Recording
-    );
+    let v = w.d.dictation().start().await;
+    assert_eq!(v.state, DictationState::Recording, "{v:?}");
     w.room.0.store(DICTATED, Ordering::SeqCst);
     tokio::time::sleep(Duration::from_millis(100)).await;
     w.room.0.store(BEFORE, Ordering::SeqCst);

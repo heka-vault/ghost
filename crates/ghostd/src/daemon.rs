@@ -2610,6 +2610,10 @@ impl Daemon {
             ghost_app.stop(); // or it would be served again as the apps close
         }
         apps.close().await;
+        // ADR 0077: the clipboard's owner gives CLIPBOARD up and is joined; its copy of the
+        // dictated text is wiped.
+        let clipboard = self.ports.clipboard.clone();
+        let _ = tokio::task::spawn_blocking(move || clipboard.close()).await;
         drop(store);
         Ok(())
     }
@@ -2715,7 +2719,11 @@ impl Daemon {
                 // Dictation (ADR 0077): the wake listener stopped above, its capture closed and
                 // its pipeline and the array's tape dropped; dropping the lease (a wake or a
                 // phone in the same tick came first) tells dictation so.
-                if woke.is_none()
+                // Only once nothing of the wake is capturing: its pipeline and the array's tape
+                // have closed (`stop` above waits for both). One that outlived its wait keeps
+                // the lease from being granted, and dictation is told the desk is busy.
+                let quiet = woke.is_none() && d.wake_quiet(&wake).await;
+                if quiet
                     && phone.is_none()
                     && raised.is_none()
                     && !d.stop.is_cancelled()
@@ -2815,9 +2823,13 @@ impl Daemon {
         };
         tokio::pin!(release);
         tokio::pin!(called);
+        let mut released = false;
         let out = loop {
             tokio::select! {
-                _ = &mut release => break Dictating::Done,
+                _ = &mut release => {
+                    released = true;
+                    break Dictating::Done;
+                }
                 _ = d.stop.cancelled() => {
                     d.end_dictation(Why::Stopping).await;
                     break Dictating::Stop;
@@ -2838,13 +2850,37 @@ impl Daemon {
                 }
             }
         };
-        // The capture is closed once the hold is dropped; wait for it, so a session's own
-        // input never opens beside dictation's.
-        if !matches!(out, Dictating::Done) {
-            let _ = tokio::time::timeout(Duration::from_secs(2), &mut release).await;
+        // Dictation's capture is closed once its hold is dropped, which a cancel waits for.
+        // Wait for it with no time limit, so nothing (a session's input, the wake) ever opens
+        // beside it; Ghost stopping is the only way out.
+        if !released && !matches!(out, Dictating::Stop) {
+            let mut said = false;
+            loop {
+                tokio::select! {
+                    _ = &mut release => break,
+                    _ = tokio::time::sleep(Duration::from_secs(2)), if !said => {
+                        warn!("passive: still waiting for dictation's microphone to close");
+                        said = true;
+                    }
+                    _ = d.stop.cancelled() => break,
+                }
+            }
         }
         info!("passive: dictation gave the microphone back");
         out
+    }
+
+    /// The wake has nothing capturing: waited for a moment, since `stop` already waited on
+    /// it; false when it is still capturing after that.
+    async fn wake_quiet(&self, wake: &Arc<dyn WakeDetector>) -> bool {
+        for _ in 0..50 {
+            if wake.quiet() {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        warn!("passive: the wake is still capturing; dictation is not given the microphone");
+        false
     }
 
     /// A typed turn with no session open (2026-11-13): a typed session, which opens no

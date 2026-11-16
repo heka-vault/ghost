@@ -1885,7 +1885,8 @@
           "session_opened",
           "stopping",
           "no_display",
-          "clipboard_failed"
+          "clipboard_failed",
+          "too_long"
         ],
         "type": "string"
       },
@@ -1958,6 +1959,7 @@
         "description": "Where a dictation is.",
         "enum": [
           "idle",
+          "starting",
           "recording",
           "reading"
         ],
