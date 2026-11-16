@@ -166,10 +166,12 @@ own. It goes once Ghost's dictation has the key.
   100 ms to open the stream; the passive loop let go of the microphone in 2 to 5 ms. A word
   begun within that much of the request is clipped; nothing before the request is heard, by
   design. That is under the plan's 100 ms line most of the time, so no ring of passive audio
-  is added.
+  is added. Again after the second review's fixes (the hand-over now waits for the wake's
+  captures to close), 13 starts: 26 to 50 ms in 12, 125 ms once; the hand-over 2 to 9 ms.
 - One read waited 0 ms for the recognizer in every live run (nothing else reads while
   dictation holds the microphone); the read took 187 to 249 ms for 3.4 s of audio and
-  1.57 s for 30 s.
+  1.57 s for 30 s, and 191 to 312 ms for 3.4 s in the second trial (483 ms for its first
+  read).
 
 ## Considered options
 
