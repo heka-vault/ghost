@@ -257,3 +257,15 @@ event is one more broadcast per "open the app", and the quick intent is a phrase
 - A screen share on a desktop that isn't GNOME is not seen; the tray switch is the answer. Showing Ghost in a share is the operator's choice, never a default, and it is marked on the surface.
 - Native Wayland support needs layer-shell (KDE, wlroots) or a GNOME Shell extension that
   stacks the window, both later.
+
+## Amended 2026-11-25: on by default, shown while shared, and dictation
+
+Decided with the operator: Floating is **on by default**, for a new install and for one
+that never chose (no `floating.json`); an explicit off stays off, and the first run shows
+Ghost floating with the switch there instead of offering it. While the screen is shared the
+default is now **Show** (Hide and Ask stay choices): someone presenting who doesn't want Ghost
+heard turns listening off. A **dictation** is an input to the posture rule beside a session:
+it floats when Floating is on and the main window doesn't have the keyboard, as a compact
+scene (Wisp listening with the level, the words as they are read, then "Typed" or "Press
+Ctrl+V"), and the main window's live strip shows it when the window has the keyboard. With
+Floating off, a dictation works with no scene and its notifications.
