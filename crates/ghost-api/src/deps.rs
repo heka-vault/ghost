@@ -183,7 +183,11 @@ impl OtherToolsPort for LiveOtherTools {
     }
 
     async fn claude_code(&self) -> Option<ghost_core::other_tools::program::Found> {
-        let binary = self.which(ghost_core::other_tools::program::BINARY)?;
+        // On the PATH, else in ~/.local/bin, where its installer puts it (ADR 0078).
+        let binary = ghost_core::subscriptions::which(
+            ghost_core::other_tools::program::BINARY,
+            &self.started_env,
+        )?;
         Some(ghost_core::other_tools::program::look(&binary, &self.started_env).await)
     }
 
@@ -488,6 +492,9 @@ pub struct Deps {
     pub in_appimage: bool,
     /// The AI tools already on this computer (ADR 0068); None where there is no home.
     pub other_tools: Option<Arc<dyn OtherToolsPort>>,
+    /// The operator's own AI subscriptions (ADR 0078): their programs asked, installed and
+    /// signed in on the operator's click; None in a daemon without them.
+    pub subscriptions: Option<Arc<ghost_core::subscriptions::Jobs>>,
     /// Debug mode (ADR 0074): the runtime switch, in the daemon's memory only.
     pub debug_audio: Option<Arc<dyn crate::developer::DebugAudioPort>>,
     /// The diagnostic report (ADR 0073): one file the person saves.
@@ -557,6 +564,7 @@ impl Deps {
             questions: None,
             in_appimage: false,
             other_tools: None,
+            subscriptions: None,
             debug_audio: None,
             diagnose: None,
             meter: None,

@@ -18,7 +18,6 @@ import {
   Button,
   Card,
   cx,
-  Disclosure,
   errorText,
   GhostChip,
   GhostMark,
@@ -37,14 +36,12 @@ import {
 import { AddOwnDialog } from "../apps/AddOwnDialog";
 import { AppIcon } from "../apps/AppIcon";
 import { ConnectDialog } from "../apps/ConnectDialog";
-import { FoundModels, NoticedLine, OtherToolsApps, useOtherTools } from "../apps/OtherTools";
+import { NoticedLine, OtherToolsApps, useOtherTools } from "../apps/OtherTools";
 import { verdictOf } from "../settings/check";
-import { ClaudeCodeFix, ClaudeCodeLead } from "../settings/ClaudeCodeCard";
-import { CLAUDE_CODE, claudeCodeOffer, claudeCodeValues } from "../settings/claudeCode";
 import { GhostVoice } from "../settings/GhostVoice";
-import { FROM_ENV } from "../settings/environment";
-import { CONNECTION_KEYS, micOptions, validateConnection } from "../settings/model";
-import { ModelSection } from "../settings/ModelSection";
+import { micOptions } from "../settings/model";
+import { otherProviderOf } from "../settings/ModelPage";
+import { SubscriptionPicker, useSubscriptions } from "../settings/SubscriptionPicker";
 import { HeroPresence, StepFrame, type StepFrameProps, useShortWindow } from "./frame";
 import { canFloat, setFirstMeeting, useFloating, useFloatingForward } from "../../app/floating";
 import { markStateOf, moodOf } from "../../app/mood";
@@ -171,132 +168,51 @@ export function WelcomeStep({ w }: { w: Wizard }) {
 /* ------------------------------------------------------------------------------- model */
 
 /**
- * Settings › Model's own section, on a draft of its own: any provider, its key in the vault,
- * its model from the provider's list, and Test, which checks the draft before anything is
- * saved. Continue saves the draft.
- *
- * When the operator's own Claude Code is signed in on this computer (ADR 0069), the step leads
- * with it: the choice already selected, applied only by its own button, which saves it and goes
- * on; every other way is one click away under "Use something else".
+ * Choose your subscription (ADR 0078): Claude Code, OpenAI Codex or Google Antigravity, the
+ * same picker as Settings › Model. Each card installs its program with the vendor's own
+ * installer, starts its own sign-in, and makes it Ghost's model; Continue goes on once Ghost
+ * has a model. A key, a local model or an address (ADR 0037) is not offered here for now.
  */
 export function ModelStep({ w }: { w: Wizard }) {
   const { client } = useGhost();
   const { online } = useLive();
   const design = !!w.design;
   const [conn, setConn] = useState<ModelConnectionView | null>(null);
-  const [values, setValuesState] = useState<Record<string, string>>({});
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [elsewhere, setElsewhere] = useState(false);
+  const subs = useSubscriptions();
   const s = w.settings;
-  // ADR 0068: a model connection already on this computer, one click each.
-  const others = useOtherTools();
-  const offer = claudeCodeOffer(others.view?.claude_code);
-  const savedProvider = (s?.values.GHOST_LLM_PROVIDER ?? "").trim();
-  const lead = offer?.kind === "use" && !elsewhere ? offer : null;
 
   const readConn = () => {
     client.modelConnection().then(setConn, () => setConn(null));
   };
   useEffect(readConn, [client, online]);
-  // The draft starts as what is saved.
-  useEffect(() => {
-    if (s) setValuesState(Object.fromEntries(CONNECTION_KEYS.map((k) => [k, s.values[k] ?? ""])));
-  }, [s]);
-
-  const problems = validateConnection(values);
-  const dirty = !!s && CONNECTION_KEYS.some((k) => (values[k] ?? "") !== (s.values[k] ?? ""));
-  const save = async (changed: Record<string, string | null>) => {
-    setBusy(true);
-    setError(null);
-    try {
-      await w.save({ values: changed });
-      readConn();
-      w.next();
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-  const submit = async () => {
-    if (!dirty) return w.next();
-    if (Object.keys(problems).length) return setError(Object.values(problems)[0]);
-    await save(Object.fromEntries(CONNECTION_KEYS.filter((k) => (values[k] ?? "") !== (s?.values[k] ?? "")).map((k) => [k, values[k]?.trim() || null])));
-  };
-  // ADR 0069: the one click that chooses Claude Code; nothing is saved until it.
-  const useClaudeCode = () => (savedProvider === CLAUDE_CODE ? w.next() : save(claudeCodeValues(CONNECTION_KEYS)));
+  const inUse = !!subs.view?.in_use;
+  const other = s ? otherProviderOf(s, conn) : null;
+  const ready = inUse || (!!other && !!conn?.ready);
 
   return (
     <StepFrame
       id="model"
       plain
-      title="Connect a model"
-      description={
-        lead
-          ? "Where Ghost thinks. Claude Code is already here; anything else works too."
-          : "Where Ghost thinks. Any provider works, a model on this computer too; Test says how well it will answer out loud."
-      }
-      primary={
-        lead
-          ? { label: savedProvider === CLAUDE_CODE ? "Continue" : "Use Claude Code", onClick: useClaudeCode, loading: busy, disabled: !online }
-          : { label: dirty ? "Save and continue" : "Continue", onClick: submit, loading: busy, disabled: !online }
-      }
+      title="Choose your subscription"
+      description="Where Ghost thinks: the AI subscription you already have, through its own program on this computer."
+      primary={{ label: "Continue", onClick: () => w.next(), disabled: !online || !ready }}
       onBack={w.back}
       onSkip={w.progress.state.model === "done" ? undefined : w.skip}
       skipLabel={w.saved.met ? "Skip for now" : "Skip: meet Ghost first"}
       autoFocus={w.focusOnOpen}
-      notices={
-        <>
-          <NeedsGhost w={w} what="connect a model" />
-          {error && (
-            <Notice tone="danger" title="Couldn’t save" onDismiss={() => setError(null)}>
-              {error}
-            </Notice>
-          )}
-        </>
-      }
+      notices={<NeedsGhost w={w} what="choose a model" />}
     >
       {!s ? (
         <Card aria-hidden padding="md">
           <Skeleton height={14} width={220} />
         </Card>
-      ) : lead ? (
-        <div className="onb-model">
-          <ClaudeCodeLead offer={lead} chosen={savedProvider === CLAUDE_CODE} onElsewhere={() => setElsewhere(true)} />
-        </div>
       ) : (
         <div className="onb-model">
-          {offer?.kind === "fix" && <ClaudeCodeFix offer={offer} look={() => void others.look()} looking={others.looking} />}
-          <FoundModels
-            view={others.view}
-            chosen={(values.GHOST_LLM_PROVIDER ?? "").trim()}
-            onChoose={(provider, model, variable) => {
-              setValuesState((v) => ({ ...v, ...Object.fromEntries(CONNECTION_KEYS.map((k) => [k, ""])), GHOST_LLM_PROVIDER: provider, GHOST_LLM_MODEL: model ?? "" }));
-              // #137: the click on a key in the environment is the person's choice of it for
-              // Ghost: its name (never a value) into settings.env, with what is chosen already.
-              if (variable) {
-                const names = [...new Set([...(conn?.chosen_from_environment ?? []), variable])].sort().join(",");
-                client.updateSettings({ values: { [FROM_ENV]: names } }).then(readConn, (e) => setError(errorText(e)));
-              }
-            }}
-          />
-          <ModelSection
-            s={s}
-            conn={conn}
-            values={values}
-            online={online}
+          <SubscriptionPicker
+            {...subs}
+            otherProvider={other}
             mock={design}
-            claudeCode={others.view ? others.view.claude_code : undefined}
-            lookAgain={() => void others.look()}
-            looking={others.looking}
-            showFix={false}
-            setValues={(patch) => setValuesState((v) => ({ ...v, ...patch }))}
-            help={(_, t) => t}
-            err={(k) => problems[k] ?? null}
-            fieldId={(k) => `onb-${k}`}
-            waiting={new Set()}
-            onPassword={() => {
+            onUsed={() => {
               readConn();
               void w.reload();
             }}

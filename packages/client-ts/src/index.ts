@@ -125,6 +125,12 @@ export type FoundModelView = Schemas["FoundModelView"];
 export type ClaudeCodeView = Schemas["ClaudeCodeView"];
 export type OtherImportResult = Schemas["OtherImportResult"];
 export type OtherLinkResult = Schemas["OtherLinkResult"];
+/** The operator's own AI subscriptions (ADR 0078): Claude Code, OpenAI Codex, Google Antigravity. */
+export type SubscriptionsView = Schemas["SubscriptionsView"];
+export type SubscriptionView = Schemas["SubscriptionView"];
+/** An install or a sign-in, as it goes. Never the pasted code. */
+export type SubscriptionJobView = Schemas["SubscriptionJobView"];
+export type SubscriptionUseResult = Schemas["SubscriptionUseResult"];
 /** What connecting a tool answers, once: its token and what to paste into the tool. */
 export type ClientCreated = Schemas["ClientCreated"];
 export type SkillInfo = Schemas["SkillInfo"];
@@ -738,6 +744,36 @@ export class GhostClient {
   /** Take Ghost back out of another tool's settings. The client stays until it is removed. */
   unlinkOtherTool(tool: string) {
     return unwrap(this.api.DELETE("/other-tools/{tool}/link", { params: { path: { tool } } }));
+  }
+
+  // --- the operator's own subscriptions (ADR 0078) -------------------------------------------
+  /** Claude Code, OpenAI Codex and Google Antigravity, as each program says it is. */
+  subscriptions() {
+    return unwrap(this.api.GET("/subscriptions"));
+  }
+  /** One subscription's install or sign-in, running or the last one; null when none. */
+  subscriptionJob(id: string) {
+    return unwrap(this.api.GET("/subscriptions/{id}/job", { params: { path: { id } } }));
+  }
+  /** Run the vendor's own install command, exactly as shown in `install_command`. */
+  installSubscription(id: string) {
+    return unwrap(this.api.POST("/subscriptions/{id}/install", { params: { path: { id } } }));
+  }
+  /** Start the program's own sign-in: it opens the browser itself. */
+  signInSubscription(id: string) {
+    return unwrap(this.api.POST("/subscriptions/{id}/sign-in", { params: { path: { id } } }));
+  }
+  /** Give the waiting sign-in the code its page showed. Never returned or kept. */
+  subscriptionCode(id: string, code: string) {
+    return unwrap(this.api.POST("/subscriptions/{id}/sign-in/code", { params: { path: { id } }, body: { code } }));
+  }
+  /** Stop the install or the sign-in. */
+  cancelSubscription(id: string) {
+    return unwrap(this.api.POST("/subscriptions/{id}/cancel", { params: { path: { id } } }));
+  }
+  /** Make it Ghost's model (Claude Code); 409 for the ones Ghost can't run yet. */
+  useSubscription(id: string) {
+    return unwrap(this.api.PUT("/subscriptions/{id}/use", { params: { path: { id } } }));
   }
 
   // --- skills (ADR 0023, ADR 0035) -----------------------------------------------------------

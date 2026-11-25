@@ -6,6 +6,7 @@
  *                    is F9, bound)
  *   &typing=refused  Ghost isn't allowed to type: the text goes to the clipboard
  *   &tidy=none       no model set up, so nothing to tidy with
+ *   &tidy=openrouter OPENROUTER_API_KEY set: the tidy goes to OpenRouter (ADR 0078)
  *
  * Scenarios (`?mock=dictation…`, on `floating.html` or the main window): `dictation` plays every
  * ending in turn, over and over; `dictation-listening` and `dictation-writing` hold that state;
@@ -35,7 +36,10 @@ export function keyViewFor(params: URLSearchParams): DictationKeyView {
     key: state === "ready" ? "Press F9" : null,
     typing: params.get("typing") === "refused" ? "refused" : state === "ready" ? "allowed" : "unknown",
     tidy: true,
-    tidy_with: params.get("tidy") === "none" ? null : "Anthropic",
+    tidy_with: params.get("tidy") === "none" ? null : params.get("tidy") === "openrouter" ? "OpenRouter" : "Anthropic",
+    tidy_model: "anthropic/claude-haiku-5.5",
+    tidy_model_default: "anthropic/claude-haiku-5.5",
+    openrouter: params.get("tidy") === "openrouter",
   };
 }
 
@@ -61,6 +65,7 @@ export class MockDictation {
 
   private async set(b: DictationKeyBody): Promise<DictationKeyView> {
     if (b.tidy != null) this.key = { ...this.key, tidy: b.tidy };
+    if (b.tidy_model != null) this.key = { ...this.key, tidy_model: b.tidy_model.trim() || (this.key.tidy_model_default ?? "") };
     if (b.on === false) this.key = { ...this.key, on: false, state: "off", key: null };
     if (b.on === true && !this.key.on) {
       // GNOME's two dialogs: the key, then typing. The switch waits for both.

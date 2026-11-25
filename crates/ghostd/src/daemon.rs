@@ -244,7 +244,8 @@ pub fn claude_code_for(
     if target.provider != ghost_core::connection::CLAUDE_CODE {
         return None;
     }
-    let binary = ghost_core::other_tools::program::which(env.get("PATH").map(String::as_str))
+    // On the PATH, else in ~/.local/bin, where its installer puts it (ADR 0078).
+    let binary = ghost_core::subscriptions::which(ghost_core::other_tools::program::BINARY, env)
         .unwrap_or_default();
     // Only what the clean environment is built from: none of the vault's values.
     let started: HashMap<String, String> = ["HOME", "PATH", "USER", "LANG"]
@@ -3205,6 +3206,9 @@ impl Daemon {
             other_tools: Some(Arc::new(ghost_api::deps::LiveOtherTools {
                 started_env: self.started_env.clone(),
             })),
+            subscriptions: Some(Arc::new(ghost_core::subscriptions::Jobs::new(
+                self.started_env.clone(),
+            ))),
             debug_audio: Some(Arc::new(crate::debug_audio::DebugAudioDesk(debug_audio))),
             diagnose: Some(Arc::new(crate::diagnose::DiagnoseDesk {
                 daemon: Arc::downgrade(self),

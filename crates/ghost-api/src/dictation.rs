@@ -340,9 +340,19 @@ pub struct DictationKeyView {
     /// "Tidy with the model": the text goes to the model before it is typed.
     pub tidy: bool,
     /// Where the words go for the tidy: the provider's name ("Anthropic", "Claude Code"),
-    /// or None when no model is set (the tidy is skipped).
+    /// "OpenRouter" when its password is set (ADR 0078), or None when no model is set (the
+    /// tidy is skipped).
     #[schema(required)]
     pub tidy_with: Option<String>,
+    /// The model the tidy asks on OpenRouter.
+    #[serde(default)]
+    pub tidy_model: String,
+    /// OpenRouter's model when none is chosen.
+    #[serde(default)]
+    pub tidy_model_default: String,
+    /// `OPENROUTER_API_KEY` is set: the tidy goes to OpenRouter. The name, never a value.
+    #[serde(default)]
+    pub openrouter: bool,
 }
 
 /// A change to the dictation key's switches; absent fields stay as they are.
@@ -352,6 +362,9 @@ pub struct DictationKeyBody {
     pub on: Option<bool>,
     #[serde(default)]
     pub tidy: Option<bool>,
+    /// The tidy's model on OpenRouter (`anthropic/claude-haiku-5.5`); empty is the default.
+    #[serde(default)]
+    pub tidy_model: Option<String>,
 }
 
 /// What the daemon does for the dictation key (`ghostd::dictation::desk`).

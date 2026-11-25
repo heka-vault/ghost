@@ -45,11 +45,14 @@ cursor is. Turn it on in Settings › Sound.";
 pub const PREFERRED: [&str; 5] = ["F9", "F10", "F8", "F7", "F6"];
 
 /// The operator's choices, kept in the store.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Choice {
     pub on: bool,
     pub tidy: bool,
+    /// The model the tidy asks on OpenRouter when `OPENROUTER_API_KEY` is set; None is
+    /// [`OPENROUTER_TIDY_MODEL`].
+    pub tidy_model: Option<String>,
 }
 
 impl Default for Choice {
@@ -57,8 +60,51 @@ impl Default for Choice {
         Self {
             on: false,
             tidy: true,
+            tidy_model: None,
         }
     }
+}
+
+/// The password that turns the tidy to OpenRouter (ADR 0078): the same one OpenRouter's
+/// sign-in keeps in the vault.
+pub const OPENROUTER_KEY: &str = "OPENROUTER_API_KEY";
+/// OpenRouter's OpenAI-compatible address.
+pub const OPENROUTER_URL: &str = "https://openrouter.ai/api/v1";
+/// The tidy's model on OpenRouter unless the operator names another: a small, quick one
+/// (listed by OpenRouter's `/api/v1/models` on 2026-11-25).
+pub const OPENROUTER_TIDY_MODEL: &str = "anthropic/claude-haiku-5.5";
+
+/// A model id as OpenRouter writes them (`anthropic/claude-haiku-5.5`, `meta-llama/llama-3.1-8b-instruct:nitro`).
+pub fn tidy_model_ok(m: &str) -> bool {
+    !m.is_empty()
+        && m.len() <= 100
+        && m.chars()
+            .all(|c| c.is_ascii_alphanumeric() || "._:/~-".contains(c))
+}
+
+/// Where the tidy goes on OpenRouter, when `env` holds its key: an OpenAI-protocol connection
+/// to [`OPENROUTER_URL`] with `model`. None without the key.
+pub fn openrouter_target(
+    env: &std::collections::HashMap<String, String>,
+    model: Option<&str>,
+) -> Option<ghost_core::connection::Target> {
+    let key = env.get(OPENROUTER_KEY).filter(|k| !k.trim().is_empty())?;
+    let model = model
+        .filter(|m| tidy_model_ok(m))
+        .unwrap_or(OPENROUTER_TIDY_MODEL);
+    let conn_env: std::collections::HashMap<&str, &str> = [
+        ("GHOST_LLM_PROVIDER", "custom"),
+        ("GHOST_LLM_PROTOCOL", "openai"),
+        ("GHOST_LLM_BASE_URL", OPENROUTER_URL),
+        ("GHOST_LLM_PASSWORD", OPENROUTER_KEY),
+        ("GHOST_LLM_MODEL", model),
+        (OPENROUTER_KEY, key.as_str()),
+    ]
+    .into_iter()
+    .collect();
+    let mut target = ghost_core::connection::ModelConnection::from_env(&conn_env).target(&conn_env);
+    target.provider = "openrouter".into();
+    Some(target)
 }
 
 struct Status {
@@ -112,15 +158,16 @@ impl KeyDesk {
             .and_then(|i| i.setting(SETTING).ok().flatten())
             .and_then(|s| serde_json::from_str::<Choice>(&s).ok())
             .unwrap_or_default();
+        let on = choice.on;
         *lock(&self.choice) = choice;
-        if choice.on {
+        if on {
             let me = self.clone();
             tokio::spawn(async move { me.enable(false).await });
         }
     }
 
     pub fn choice(&self) -> Choice {
-        *lock(&self.choice)
+        lock(&self.choice).clone()
     }
 
     /// The one-time note: while the switch is off, on a desktop not known to lack the portal.
@@ -132,7 +179,7 @@ impl KeyDesk {
     }
 
     fn save(&self, choice: Choice) {
-        *lock(&self.choice) = choice;
+        *lock(&self.choice) = choice.clone();
         if let Some(i) = self.items()
             && let Ok(s) = serde_json::to_string(&choice)
             && let Err(e) = i.set_setting(SETTING, &s)
@@ -268,10 +315,14 @@ impl KeyDesk {
         }
     }
 
-    /// The provider the tidy's words go to, when a model is set.
+    /// The provider the tidy's words go to, when a model is set: OpenRouter when its key is
+    /// set (ADR 0078), else the operator's model.
     fn tidy_with(&self) -> Option<String> {
         let d = self.d.upgrade()?;
         let env = d.env();
+        if openrouter_target(&env, None).is_some() {
+            return Some("OpenRouter".into());
+        }
         let voice = d.voice();
         if !voice.llm_problems(Some(&env)).is_empty() {
             return None;
@@ -298,6 +349,15 @@ impl KeyDesk {
             typing: st.typing,
             tidy: choice.tidy,
             tidy_with: self.tidy_with(),
+            tidy_model: choice
+                .tidy_model
+                .clone()
+                .unwrap_or_else(|| OPENROUTER_TIDY_MODEL.into()),
+            tidy_model_default: OPENROUTER_TIDY_MODEL.into(),
+            openrouter: self
+                .d
+                .upgrade()
+                .is_some_and(|d| openrouter_target(&d.env(), None).is_some()),
         }
     }
 
@@ -305,6 +365,13 @@ impl KeyDesk {
         let mut choice = self.choice();
         if let Some(t) = body.tidy {
             choice.tidy = t;
+        }
+        if let Some(m) = body.tidy_model.as_deref().map(str::trim) {
+            if m.is_empty() || m == OPENROUTER_TIDY_MODEL {
+                choice.tidy_model = None;
+            } else if tidy_model_ok(m) {
+                choice.tidy_model = Some(m.to_string());
+            }
         }
         let turned = body.on.filter(|&on| on != choice.on);
         if let Some(on) = body.on {
@@ -508,11 +575,22 @@ pub struct ModelReviewer {
 #[async_trait]
 impl Reviewer for ModelReviewer {
     async fn review(&self, text: &str) -> Option<Zeroizing<String>> {
-        if !self.desk.upgrade()?.choice().tidy {
+        let choice = self.desk.upgrade()?.choice();
+        if !choice.tidy {
             return None;
         }
         let d = self.d.upgrade()?;
         let env = d.env();
+        // OpenRouter when its key is set (ADR 0078): quicker than a program started per call,
+        // and the main model's connection left alone. The same budget and guard-rails apply.
+        if let Some(target) = openrouter_target(&env, choice.tidy_model.as_deref()) {
+            let model = ghost_llm::model::shared(&target).ok()?;
+            return model
+                .complete(review::SYSTEM, text, review::MAX_TOKENS)
+                .await
+                .ok()
+                .map(Zeroizing::new);
+        }
         let voice = d.voice();
         if !voice.llm_problems(Some(&env)).is_empty() {
             return None;
@@ -682,10 +760,43 @@ mod tests {
             Choice::default(),
             Choice {
                 on: false,
-                tidy: true
+                tidy: true,
+                tidy_model: None,
             }
         );
         let old: Choice = serde_json::from_str("{}").unwrap();
         assert_eq!(old, Choice::default());
+        let before: Choice = serde_json::from_str(r#"{"on":true,"tidy":false}"#).unwrap();
+        assert_eq!(before.tidy_model, None);
+    }
+
+    #[test]
+    fn the_tidy_goes_to_openrouter_only_with_its_key() {
+        use std::collections::HashMap;
+        let none: HashMap<String, String> = HashMap::new();
+        assert!(openrouter_target(&none, None).is_none());
+        let blank: HashMap<String, String> = [(OPENROUTER_KEY.to_string(), " ".to_string())].into();
+        assert!(openrouter_target(&blank, None).is_none());
+        let env: HashMap<String, String> = [
+            (
+                OPENROUTER_KEY.to_string(),
+                "sk-or-fixture-0123456789".to_string(),
+            ),
+            ("GHOST_LLM_PROVIDER".to_string(), "anthropic".to_string()),
+        ]
+        .into();
+        let t = openrouter_target(&env, None).unwrap();
+        assert_eq!(t.provider, "openrouter");
+        assert_eq!(t.base_url, OPENROUTER_URL);
+        assert_eq!(t.protocol, ghost_core::connection::Protocol::Openai);
+        assert_eq!(t.model, OPENROUTER_TIDY_MODEL);
+        assert_eq!(t.api_key.as_str(), "sk-or-fixture-0123456789");
+        let t = openrouter_target(&env, Some("meta-llama/llama-3.1-8b-instruct:nitro")).unwrap();
+        assert_eq!(t.model, "meta-llama/llama-3.1-8b-instruct:nitro");
+        // A model id that isn't one falls back to the default, never onto the wire.
+        let t = openrouter_target(&env, Some("x\nAuthorization: y")).unwrap();
+        assert_eq!(t.model, OPENROUTER_TIDY_MODEL);
+        assert!(!tidy_model_ok("has space"));
+        assert!(tidy_model_ok("~anthropic/claude-haiku-latest"));
     }
 }

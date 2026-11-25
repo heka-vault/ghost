@@ -142,6 +142,7 @@ import { GhostVoice } from "./GhostVoice";
 import { DictationSection } from "./Dictation";
 import { RealtimeVoiceSection } from "./RealtimeVoice";
 import { MODEL_FORM_ID, ModelPageSection } from "./ModelSection";
+import { ModelPage } from "./ModelPage";
 import { type BarState, CommandCopy, Row, SaveBar, SetupSection, type SetupStep, secretActionId } from "./parts";
 import { PasswordsSection } from "./Passwords";
 import { OutsideToolsSection } from "./OutsideTools";
@@ -1015,7 +1016,7 @@ export default function SettingsScreen({ params: route }: RouteProps) {
         )}
 
         {s && page === "model" && (
-          <>
+          <ModelPage s={s} conn={conn} mock={mock} onUsed={passwordChanged}>
           {/* The page's fields name this form (`form=`), since the key's row is a form of its
               own and forms can't nest: Enter in any of them saves, as on the other pages. */}
           <form id={MODEL_FORM_ID} onSubmit={submit} autoComplete="off" className="sr-only">
@@ -1037,7 +1038,7 @@ export default function SettingsScreen({ params: route }: RouteProps) {
               passwordChanged();
             }}
           />
-          </>
+          </ModelPage>
         )}
 
         {s && page === "sound" && (

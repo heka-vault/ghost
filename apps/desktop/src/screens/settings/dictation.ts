@@ -26,6 +26,22 @@ export function tidyLine(tidyWith: string | null | undefined): string {
   return tidyWith ? `Your words go to ${tidyWith} to be tidied before they’re typed.` : "No model is set up, so Ghost types what it heard.";
 }
 
+/** OpenRouter's row for the tidy (ADR 0078): where the words go, or what adding its password does. */
+export const OPENROUTER_TITLE = "Tidy with OpenRouter (fastest)";
+export function openRouterLine(v: Pick<DictationKeyView, "openrouter" | "tidy_model">): string {
+  return v.openrouter
+    ? `Your OpenRouter password is set, so the tidy asks ${v.tidy_model || "OpenRouter’s quick model"} there instead of your model. It has 3 seconds, like any tidy.`
+    : "Add an OpenRouter password and the tidy goes there instead of your model: a small, quick model answers well inside the tidy’s 3 seconds, where a program started for each dictation often can’t.";
+}
+
+/** A model id as OpenRouter writes them; null when it may be saved. */
+export function tidyModelProblem(m: string): string | null {
+  const t = m.trim();
+  if (!t) return null; // empty: the default
+  if (t.length > 100 || !/^[A-Za-z0-9._:/~-]+$/.test(t)) return "That isn’t an OpenRouter model id, like anthropic/claude-haiku-5.5.";
+  return null;
+}
+
 /** A line under the section; `command`, when there is one, is in `text` and shown as code. */
 export type KeyNote = { tone: "info" | "warn" | "danger"; text: string; command?: string };
 

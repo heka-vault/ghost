@@ -31,6 +31,9 @@ its Today page shows the same.
 - **Tidied by your model**, when one is set up and **Tidy with the model** is on (it is by
   default): misheard words, punctuation and capitals are fixed before typing. If the model
   takes more than three seconds, or changes more than small fixes, Ghost types what it heard.
+  With an OpenRouter password set (Settings › Sound › Dictation, **Tidy with OpenRouter**), the
+  tidy asks a small, quick model there instead of your model (ADR 0078): Claude Code started
+  for each dictation is often slower than three seconds.
 - **Fillers go**: "um", "uh", "er", "hmm". A word said three times in a row ("I I I") is kept
   once. Line breaks, tabs and control characters are never typed: no Enter is ever sent, so
   typing into a terminal never runs a command.
@@ -94,7 +97,8 @@ quitting Ghost always works.
 - **To your own screen**, as you speak: Ghost's floating room or its window shows them, and
   keeps nothing.
 - **To your model, when Tidy with the model is on.** Settings › Sound says which: with a cloud
-  provider ("Anthropic", "Claude Code"), your dictated words leave this computer to be tidied.
+  provider ("Anthropic", "Claude Code", "OpenRouter"), your dictated words leave this computer to
+be tidied.
   Turn the switch off to keep them here.
 
 Ghost doesn't store them, log them (not even in debug mode), send them to the phone, or give

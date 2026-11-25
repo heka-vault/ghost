@@ -1885,6 +1885,13 @@
               "boolean",
               "null"
             ]
+          },
+          "tidy_model": {
+            "description": "The tidy's model on OpenRouter (`anthropic/claude-haiku-5.5`); empty is the default.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "type": "object"
@@ -1915,6 +1922,10 @@
             "description": "The operator's switch, \"Hold a key to dictate\".",
             "type": "boolean"
           },
+          "openrouter": {
+            "description": "`OPENROUTER_API_KEY` is set: the tidy goes to OpenRouter. The name, never a value.",
+            "type": "boolean"
+          },
           "state": {
             "$ref": "#/components/schemas/DictationKeyState"
           },
@@ -1922,8 +1933,16 @@
             "description": "\"Tidy with the model\": the text goes to the model before it is typed.",
             "type": "boolean"
           },
+          "tidy_model": {
+            "description": "The model the tidy asks on OpenRouter.",
+            "type": "string"
+          },
+          "tidy_model_default": {
+            "description": "OpenRouter's model when none is chosen.",
+            "type": "string"
+          },
           "tidy_with": {
-            "description": "Where the words go for the tidy: the provider's name (\"Anthropic\", \"Claude Code\"),\nor None when no model is set (the tidy is skipped).",
+            "description": "Where the words go for the tidy: the provider's name (\"Anthropic\", \"Claude Code\"),\n\"OpenRouter\" when its password is set (ADR 0078), or None when no model is set (the\ntidy is skipped).",
             "type": [
               "string",
               "null"
@@ -8070,6 +8089,240 @@
         },
         "required": [
           "status"
+        ],
+        "type": "object"
+      },
+      "SubscriptionCode": {
+        "description": "The code the program's page showed, pasted. Written to the program and never kept.",
+        "properties": {
+          "code": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "type": "object"
+      },
+      "SubscriptionJobView": {
+        "description": "What a job is doing, as shown. Never the pasted code.",
+        "properties": {
+          "command": {
+            "description": "The command as shown: the vendor's install command, or the sign-in's.",
+            "type": "string"
+          },
+          "device_code": {
+            "description": "A code the program shows for you to type on its page.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ended_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "description": "install or sign_in.",
+            "type": "string"
+          },
+          "lines": {
+            "description": "What the program printed: escapes out, each line bounded and redacted, an address\nshown only to its path. Someone else's text, shown as data.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "message": {
+            "description": "How it ended, or what it waits for, in a sentence.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "signed_in": {
+            "description": "Asked of the program when a sign-in ended.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "state": {
+            "description": "running, needs_code (the program waits for the code its page showed), done, failed or\ncancelled.",
+            "type": "string"
+          },
+          "url": {
+            "description": "The sign-in address, on the vendor's own domains only, for a link in case the browser\ndidn't open.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "state",
+          "command",
+          "lines",
+          "url",
+          "device_code",
+          "message",
+          "started_at",
+          "ended_at",
+          "signed_in"
+        ],
+        "type": "object"
+      },
+      "SubscriptionUseResult": {
+        "description": "The result of making one Ghost's model.",
+        "properties": {
+          "done": {
+            "description": "What was done, in a sentence.",
+            "type": "string"
+          },
+          "restart_required": {
+            "description": "Ghost picks it up at its next start, not now.",
+            "type": "boolean"
+          },
+          "subscriptions": {
+            "$ref": "#/components/schemas/SubscriptionsView"
+          }
+        },
+        "required": [
+          "done",
+          "restart_required",
+          "subscriptions"
+        ],
+        "type": "object"
+      },
+      "SubscriptionView": {
+        "description": "One subscription, as its program says it is.",
+        "properties": {
+          "ghost_can_use": {
+            "description": "Ghost can run it as its model at all; false: \"Coming next\".",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "claude-code, codex or antigravity.",
+            "type": "string"
+          },
+          "in_use": {
+            "description": "It is Ghost's model now.",
+            "type": "boolean"
+          },
+          "install_command": {
+            "description": "The vendor's own install command, exactly as Ghost would run it.",
+            "type": "string"
+          },
+          "install_source": {
+            "description": "Where the vendor documents it.",
+            "type": "string"
+          },
+          "installed": {
+            "description": "The program is on this computer.",
+            "type": "boolean"
+          },
+          "job": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SubscriptionJobView",
+                "description": "Its install or sign-in, running or the last one."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "line": {
+            "description": "What to say about it in a sentence: how it is signed in, or what stops Ghost.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "note": {
+            "description": "A version Ghost was not measured with, said once.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "program": {
+            "description": "Its program's name (`claude`, `codex`, `agy`).",
+            "type": "string"
+          },
+          "sign_in_command": {
+            "description": "The program's own sign-in command, as shown.",
+            "type": "string"
+          },
+          "sign_in_here": {
+            "description": "Ghost runs the sign-in (true), or the operator runs it in a terminal: the program's\nsign-in has choices that are theirs (Antigravity).",
+            "type": "boolean"
+          },
+          "signed_in": {
+            "description": "The program says it is signed in.",
+            "type": "boolean"
+          },
+          "title": {
+            "type": "string"
+          },
+          "usable": {
+            "description": "Ghost can run it as its model now (signed in, and for Claude Code a version with every\nswitch Ghost needs).",
+            "type": "boolean"
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "program",
+          "installed",
+          "version",
+          "signed_in",
+          "usable",
+          "in_use",
+          "ghost_can_use",
+          "install_command",
+          "install_source",
+          "sign_in_command",
+          "sign_in_here",
+          "line",
+          "note",
+          "job"
+        ],
+        "type": "object"
+      },
+      "SubscriptionsView": {
+        "properties": {
+          "in_use": {
+            "description": "The one Ghost uses as its model now, by id; None when its model is none of them.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "subscriptions": {
+            "items": {
+              "$ref": "#/components/schemas/SubscriptionView"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "subscriptions",
+          "in_use"
         ],
         "type": "object"
       },
@@ -14223,6 +14476,261 @@
         "summary": "Get Status",
         "tags": [
           "session"
+        ]
+      }
+    },
+    "/subscriptions": {
+      "get": {
+        "description": "Claude Code, OpenAI Codex and Google Antigravity, each as its own program says it is:\ninstalled, its version, signed in, and whether it is Ghost's model. Asks the programs, in an\nenvironment with no keys; reads none of their files.",
+        "operationId": "subscriptions_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriptionsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Subscriptions",
+        "tags": [
+          "subscriptions"
+        ]
+      }
+    },
+    "/subscriptions/{id}/cancel": {
+      "post": {
+        "operationId": "subscription_cancel",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriptionJobView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Nothing running"
+          }
+        },
+        "summary": "Cancel a subscription's job",
+        "tags": [
+          "subscriptions"
+        ]
+      }
+    },
+    "/subscriptions/{id}/install": {
+      "post": {
+        "description": "Run the vendor's own install command (`install_command`), exactly as given, as you and\nnever as root. Its output is the job's lines.",
+        "operationId": "subscription_install",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriptionJobView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "description": "Already installed, or busy"
+          }
+        },
+        "summary": "Install a subscription's program",
+        "tags": [
+          "subscriptions"
+        ]
+      }
+    },
+    "/subscriptions/{id}/job": {
+      "get": {
+        "operationId": "subscription_job_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/SubscriptionJobView"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such subscription"
+          }
+        },
+        "summary": "Subscription job",
+        "tags": [
+          "subscriptions"
+        ]
+      }
+    },
+    "/subscriptions/{id}/sign-in": {
+      "post": {
+        "description": "Run the program's own sign-in. It opens your browser itself; the job carries the address in\ncase it didn't, and says when the program waits for the code its page shows.",
+        "operationId": "subscription_sign_in",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriptionJobView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "description": "Busy, or signed in in a terminal"
+          }
+        },
+        "summary": "Sign in to a subscription",
+        "tags": [
+          "subscriptions"
+        ]
+      }
+    },
+    "/subscriptions/{id}/sign-in/code": {
+      "post": {
+        "operationId": "subscription_sign_in_code",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubscriptionCode"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriptionJobView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "description": "Not waiting for a code"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Paste a sign-in code",
+        "tags": [
+          "subscriptions"
+        ]
+      }
+    },
+    "/subscriptions/{id}/use": {
+      "put": {
+        "operationId": "subscription_use",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriptionUseResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "description": "Ghost can't use it as its model yet, or it isn't ready"
+          }
+        },
+        "summary": "Use a subscription as Ghost's model",
+        "tags": [
+          "subscriptions"
         ]
       }
     },

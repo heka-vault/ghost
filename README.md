@@ -257,8 +257,12 @@ Each step can be skipped, and the steps below do the same from a terminal.
 
 ## Connect a model
 
-Ghost uses one model connection for everything (ADR 0037). Pick it in **Settings › Model**, or
-in `~/.config/ghost/settings.env`, which holds settings only, never a password:
+Ghost uses one model connection for everything (ADR 0037). **Settings › Model** and the first
+run start with your subscription (ADR 0078): Claude Code, OpenAI Codex or Google Antigravity,
+each installed with its maker's own installer and signed in with its own sign-in from a button
+there, and **Use it** (Claude Code today; the other two are coming next). Ghost uses your own
+program as its makers allow; it is not another harness for it. Every other way below is set in
+`~/.config/ghost/settings.env`, which holds settings only, never a password:
 
 | You have | `settings.env` | The password, in Ghost's vault |
 |---|---|---|

@@ -6,12 +6,14 @@
  * GNOME's own picker. The tidy sends the words to the model first, and says which one. Each
  * change applies at once, like the rest of this page's sections below the form.
  */
-import type { DictationKeyView } from "@ghost/client-ts";
+import type { DictationKeyView, PasswordInfo, PasswordsView } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
 import { useEffect, useState } from "react";
 
-import { Button, Card, Kbd, ListRow, Notice, Section, Spinner, Switch, errorText, useLive, useToast } from "../../ui";
-import { BINDING, HOLD_OR_TAP, TYPES_WHERE, keyBusy, keyName, keyNotes, keyShown, tidyLine } from "./dictation";
+import { Button, Card, Field, Input, Kbd, ListRow, Notice, Section, Spinner, Switch, errorText, useLive, useToast } from "../../ui";
+import { BINDING, HOLD_OR_TAP, OPENROUTER_TITLE, TYPES_WHERE, keyBusy, keyName, keyNotes, keyShown, openRouterLine, tidyLine, tidyModelProblem } from "./dictation";
+import { PasswordRow } from "./Passwords";
+import { Row } from "./parts";
 import { SECTION_TITLE, sectionDomId } from "./model";
 
 export function DictationSection() {
@@ -66,7 +68,111 @@ export function DictationSection() {
     }
   };
 
-  return <DictationRows view={view} pending={pending} online={online} onTurn={(on) => void turn(on)} onTidy={(on) => void tidy(on)} onChange={() => void change()} />;
+  return (
+    <>
+      <DictationRows view={view} pending={pending} online={online} onTurn={(on) => void turn(on)} onTidy={(on) => void tidy(on)} onChange={() => void change()} />
+      <OpenRouterTidy view={view} online={online} onView={setView} />
+    </>
+  );
+}
+
+const OPENROUTER_KEY = "OPENROUTER_API_KEY";
+
+/**
+ * Tidy with OpenRouter (ADR 0078): its password, kept in Ghost's vault as on the Passwords page
+ * (the value goes in and never comes back out), and the model asked there. With the password
+ * set, the tidy goes to OpenRouter instead of the operator's model.
+ */
+function OpenRouterTidy({ view, online, onView }: { view: DictationKeyView; online: boolean; onView: (v: DictationKeyView) => void }) {
+  const { client } = useGhost();
+  const toast = useToast();
+  const [vault, setVault] = useState<PasswordsView | null>(null);
+  const [open, setOpen] = useState(false);
+  const [model, setModel] = useState(view.tidy_model ?? "");
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    client.passwords().then(setVault, () => {});
+  }, [client]);
+  useEffect(() => setModel(view.tidy_model ?? ""), [view.tidy_model]);
+  const row: PasswordInfo = vault?.passwords.find((p) => p.name === OPENROUTER_KEY) ?? {
+    name: OPENROUTER_KEY,
+    set: !!view.openrouter,
+    ghost: true,
+    used_by: ["Dictation’s tidy"],
+    from_environment: false,
+    offered: false,
+    added: null,
+    updated: null,
+    last_used: null,
+  };
+  const reread = () => {
+    client.dictationKey().then(onView, () => {});
+  };
+  const forget = async (p: PasswordInfo) => {
+    try {
+      setVault((await client.deletePassword(p.name)).passwords);
+      reread();
+    } catch (e) {
+      toast({ title: "Couldn’t delete it", description: errorText(e), tone: "danger" });
+    }
+  };
+  const problem = tidyModelProblem(model);
+  const saveModel = async () => {
+    if (problem || model.trim() === (view.tidy_model ?? "")) return;
+    setSaving(true);
+    try {
+      onView(await client.setDictationKey({ tidy_model: model.trim() }));
+    } catch (e) {
+      toast({ title: "Couldn’t change the model", description: errorText(e), tone: "danger" });
+    } finally {
+      setSaving(false);
+    }
+  };
+  const closed = !!vault && vault.vault.state !== "open";
+  return (
+    <Section title={OPENROUTER_TITLE} description={openRouterLine(view)} className="set-section">
+      <Card list>
+        <div className="set-model-key">
+          <PasswordRow
+            p={row}
+            open={open}
+            onOpen={() => setOpen(true)}
+            onClose={() => setOpen(false)}
+            onSaved={(v) => {
+              setVault(v);
+              reread();
+            }}
+            onDelete={(p) => void forget(p)}
+            waiting={false}
+            disabled={!online || closed}
+          />
+        </div>
+        <Row>
+          <Field
+            layout="inline"
+            id="dictation-tidy-model"
+            label="Model on OpenRouter"
+            help={`Empty means ${view.tidy_model_default || "OpenRouter’s quick default"}. Any model id OpenRouter lists works.`}
+            error={problem ?? undefined}
+          >
+            <Input
+              mono
+              value={model}
+              placeholder={view.tidy_model_default || ""}
+              spellCheck={false}
+              autoComplete="off"
+              disabled={!online || saving}
+              onChange={(e) => setModel(e.target.value)}
+              onBlur={() => void saveModel()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void saveModel();
+              }}
+            />
+          </Field>
+        </Row>
+      </Card>
+    </Section>
+  );
 }
 
 export type DictationPending = "on" | "off" | "tidy" | "change" | null;

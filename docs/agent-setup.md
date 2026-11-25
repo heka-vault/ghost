@@ -155,13 +155,16 @@ user service, no password; `echo-cancel off` removes it). No sound and no microp
 
 ## 7. A model, and opening Ghost
 
-Ghost needs one model connection. With Claude Code signed in on this computer the first run
-offers **Use Claude Code**: Ghost runs their own Claude Code, and replies count against their
-Claude plan's limits (not signed in: they run `claude auth login` themselves). Otherwise an
-Anthropic, OpenRouter or OpenAI API key, typed by them into Ghost's own window or with
-`ghostd passwords set ANTHROPIC_API_KEY` (or `OPENROUTER_API_KEY`, `OPENAI_API_KEY`) in their
-own terminal, or a local model in Ollama or LM Studio (no key). Their click and their typing:
-never through you or this chat, and never your own credentials. Check for a local model:
+Ghost needs one model connection. The first run's model step is **Choose your subscription**
+(ADR 0078): Claude Code, OpenAI Codex or Google Antigravity, each the vendor's own program.
+Each card installs it with the vendor's own installer, starts its own sign-in (the browser
+opens; they paste back a code if the page shows one), and **Use it** makes it Ghost's model:
+Claude Code today, replies counting against their own plan's limits; Codex and Antigravity are
+"Coming next". Their clicks and their sign-in: never through you or this chat, never your own
+credentials, and don't run the installers or `claude auth login` for them. A Ghost can still
+run on an Anthropic, OpenRouter or OpenAI API key (`ghostd passwords set ANTHROPIC_API_KEY`
+in their own terminal, then `GHOST_LLM_PROVIDER` in `settings.env`) or a local model in Ollama
+or LM Studio (no key), though the first run no longer offers these. Check for a local model:
 
 ```bash
 curl -s -m 2 http://127.0.0.1:11434/api/tags >/dev/null && echo "Ollama is running"

@@ -687,6 +687,8 @@ pub struct World {
     pub in_appimage: bool,
     /// The AI tools on this computer (ADR 0068): a temp home, never the operator's.
     pub other_tools: Option<Arc<dyn ghost_api::deps::OtherToolsPort>>,
+    /// The subscriptions (ADR 0078): fake programs on a temp PATH, never the operator's.
+    pub subscriptions: Option<Arc<ghost_core::subscriptions::Jobs>>,
 }
 
 impl World {
@@ -793,6 +795,7 @@ impl World {
             clients_listening: Vec::new(),
             in_appimage: false,
             other_tools: None,
+            subscriptions: None,
             tmp,
         }
     }
@@ -876,6 +879,7 @@ impl World {
         deps.clients_listening = self.clients_listening.clone();
         deps.in_appimage = self.in_appimage;
         deps.other_tools = self.other_tools.clone();
+        deps.subscriptions = self.subscriptions.clone();
         if let Some(d) = &self.devices {
             deps.devices = d.clone();
         }

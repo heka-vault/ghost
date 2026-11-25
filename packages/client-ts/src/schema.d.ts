@@ -2134,6 +2134,138 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/subscriptions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Subscriptions
+         * @description Claude Code, OpenAI Codex and Google Antigravity, each as its own program says it is:
+         *     installed, its version, signed in, and whether it is Ghost's model. Asks the programs, in an
+         *     environment with no keys; reads none of their files.
+         */
+        get: operations["subscriptions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/subscriptions/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel a subscription's job */
+        post: operations["subscription_cancel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/subscriptions/{id}/install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Install a subscription's program
+         * @description Run the vendor's own install command (`install_command`), exactly as given, as you and
+         *     never as root. Its output is the job's lines.
+         */
+        post: operations["subscription_install"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/subscriptions/{id}/job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Subscription job */
+        get: operations["subscription_job_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/subscriptions/{id}/sign-in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sign in to a subscription
+         * @description Run the program's own sign-in. It opens your browser itself; the job carries the address in
+         *     case it didn't, and says when the program waits for the code its page shows.
+         */
+        post: operations["subscription_sign_in"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/subscriptions/{id}/sign-in/code": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Paste a sign-in code */
+        post: operations["subscription_sign_in_code"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/subscriptions/{id}/use": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Use a subscription as Ghost's model */
+        put: operations["subscription_use"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/uninstall": {
         parameters: {
             query?: never;
@@ -3156,6 +3288,8 @@ export interface components {
         DictationKeyBody: {
             on?: boolean | null;
             tidy?: boolean | null;
+            /** @description The tidy's model on OpenRouter (`anthropic/claude-haiku-5.5`); empty is the default. */
+            tidy_model?: string | null;
         };
         /**
          * @description Where the dictation key stands.
@@ -3168,12 +3302,19 @@ export interface components {
             key: string | null;
             /** @description The operator's switch, "Hold a key to dictate". */
             on: boolean;
+            /** @description `OPENROUTER_API_KEY` is set: the tidy goes to OpenRouter. The name, never a value. */
+            openrouter?: boolean;
             state: components["schemas"]["DictationKeyState"];
             /** @description "Tidy with the model": the text goes to the model before it is typed. */
             tidy: boolean;
+            /** @description The model the tidy asks on OpenRouter. */
+            tidy_model?: string;
+            /** @description OpenRouter's model when none is chosen. */
+            tidy_model_default?: string;
             /**
              * @description Where the words go for the tidy: the provider's name ("Anthropic", "Claude Code"),
-             *     or None when no model is set (the tidy is skipped).
+             *     "OpenRouter" when its password is set (ADR 0078), or None when no model is set (the
+             *     tidy is skipped).
              */
             tidy_with: string | null;
             typing: components["schemas"]["DictationTyping"];
@@ -5205,6 +5346,93 @@ export interface components {
              */
             type: "status";
         };
+        /** @description The code the program's page showed, pasted. Written to the program and never kept. */
+        SubscriptionCode: {
+            code: string;
+        };
+        /** @description What a job is doing, as shown. Never the pasted code. */
+        SubscriptionJobView: {
+            /** @description The command as shown: the vendor's install command, or the sign-in's. */
+            command: string;
+            /** @description A code the program shows for you to type on its page. */
+            device_code: string | null;
+            /** Format: date-time */
+            ended_at: string | null;
+            /** @description install or sign_in. */
+            kind: string;
+            /**
+             * @description What the program printed: escapes out, each line bounded and redacted, an address
+             *     shown only to its path. Someone else's text, shown as data.
+             */
+            lines: string[];
+            /** @description How it ended, or what it waits for, in a sentence. */
+            message: string | null;
+            /** @description Asked of the program when a sign-in ended. */
+            signed_in: boolean | null;
+            /** Format: date-time */
+            started_at: string;
+            /**
+             * @description running, needs_code (the program waits for the code its page showed), done, failed or
+             *     cancelled.
+             */
+            state: string;
+            /**
+             * @description The sign-in address, on the vendor's own domains only, for a link in case the browser
+             *     didn't open.
+             */
+            url: string | null;
+        };
+        SubscriptionsView: {
+            /** @description The one Ghost uses as its model now, by id; None when its model is none of them. */
+            in_use: string | null;
+            subscriptions: components["schemas"]["SubscriptionView"][];
+        };
+        /** @description The result of making one Ghost's model. */
+        SubscriptionUseResult: {
+            /** @description What was done, in a sentence. */
+            done: string;
+            /** @description Ghost picks it up at its next start, not now. */
+            restart_required: boolean;
+            subscriptions: components["schemas"]["SubscriptionsView"];
+        };
+        /** @description One subscription, as its program says it is. */
+        SubscriptionView: {
+            /** @description Ghost can run it as its model at all; false: "Coming next". */
+            ghost_can_use: boolean;
+            /** @description claude-code, codex or antigravity. */
+            id: string;
+            /** @description It is Ghost's model now. */
+            in_use: boolean;
+            /** @description The vendor's own install command, exactly as Ghost would run it. */
+            install_command: string;
+            /** @description Where the vendor documents it. */
+            install_source: string;
+            /** @description The program is on this computer. */
+            installed: boolean;
+            job: components["schemas"]["SubscriptionJobView"] | null;
+            /** @description What to say about it in a sentence: how it is signed in, or what stops Ghost. */
+            line: string | null;
+            /** @description A version Ghost was not measured with, said once. */
+            note: string | null;
+            /** @description Its program's name (`claude`, `codex`, `agy`). */
+            program: string;
+            /** @description The program's own sign-in command, as shown. */
+            sign_in_command: string;
+            /**
+             * @description Ghost runs the sign-in (true), or the operator runs it in a terminal: the program's
+             *     sign-in has choices that are theirs (Antigravity).
+             */
+            sign_in_here: boolean;
+            /** @description The program says it is signed in. */
+            signed_in: boolean;
+            title: string;
+            /**
+             * @description Ghost can run it as its model now (signed in, and for Claude Code a version with every
+             *     switch Ghost needs).
+             */
+            usable: boolean;
+            version: string | null;
+        };
         SwitchesResult: {
             /** @description The names a running Ghost took at once. */
             applied: string[];
@@ -5842,6 +6070,11 @@ export type SchemaSpeechModelsFetchState = components['schemas']['SpeechModelsFe
 export type SchemaSpeechModelsView = components['schemas']['SpeechModelsView'];
 export type SchemaStatus = components['schemas']['Status'];
 export type SchemaStatusEvent = components['schemas']['StatusEvent'];
+export type SchemaSubscriptionCode = components['schemas']['SubscriptionCode'];
+export type SchemaSubscriptionJobView = components['schemas']['SubscriptionJobView'];
+export type SchemaSubscriptionsView = components['schemas']['SubscriptionsView'];
+export type SchemaSubscriptionUseResult = components['schemas']['SubscriptionUseResult'];
+export type SchemaSubscriptionView = components['schemas']['SubscriptionView'];
 export type SchemaSwitchesResult = components['schemas']['SwitchesResult'];
 export type SchemaSwitchesUpdate = components['schemas']['SwitchesUpdate'];
 export type SchemaSwitchesView = components['schemas']['SwitchesView'];
@@ -9910,6 +10143,213 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Status"];
                 };
+            };
+        };
+    };
+    subscriptions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubscriptionsView"];
+                };
+            };
+        };
+    };
+    subscription_cancel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubscriptionJobView"];
+                };
+            };
+            /** @description Nothing running */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    subscription_install: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubscriptionJobView"];
+                };
+            };
+            /** @description Already installed, or busy */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    subscription_job_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubscriptionJobView"] | null;
+                };
+            };
+            /** @description No such subscription */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    subscription_sign_in: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubscriptionJobView"];
+                };
+            };
+            /** @description Busy, or signed in in a terminal */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    subscription_sign_in_code: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SubscriptionCode"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubscriptionJobView"];
+                };
+            };
+            /** @description Not waiting for a code */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    subscription_use: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubscriptionUseResult"];
+                };
+            };
+            /** @description Ghost can't use it as its model yet, or it isn't ready */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

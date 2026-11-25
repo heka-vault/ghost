@@ -842,6 +842,35 @@ async fn no_tool_reads_or_writes_the_other_tools_on_this_computer() {
 }
 
 #[tokio::test]
+async fn no_tool_installs_or_signs_in_another_tool() {
+    // ADR 0078: installing the operator's Claude Code, Codex or Antigravity, starting its
+    // sign-in, pasting the code its page shows and making it Ghost's model are the operator's
+    // clicks on their desktop (`/subscriptions` on the control API). No agent, run or outside
+    // client (served a part of these same tools, ADR 0048) reaches any of it.
+    let w = world().await;
+    for t in w.server.tools() {
+        let n = t.name.to_lowercase();
+        for word in [
+            "subscription",
+            "install",
+            "login",
+            "log_in",
+            "sign_in",
+            "signin",
+            "codex",
+            "antigravity",
+            "agy",
+        ] {
+            assert!(!n.contains(word), "{n}");
+        }
+        let about = t.description.as_deref().unwrap_or_default().to_lowercase();
+        for words in ["install.sh", "auth login", "codex login", "subscription"] {
+            assert!(!about.contains(words), "{n}: {about}");
+        }
+    }
+}
+
+#[tokio::test]
 async fn no_tool_sets_a_sign_in_client() {
     // ADR 0076: which client Ghost signs in as is Ghost's table and the operator's own
     // client ID, given on an app's page. No agent, run or outside client (served a part of

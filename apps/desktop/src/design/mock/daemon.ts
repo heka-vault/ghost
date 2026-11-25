@@ -68,6 +68,7 @@ import { MockLive, type MeterRoom } from "./live";
 import { MockWakeTakes } from "./wakeTakes";
 import { isConnectionKey, isModelOnly, MockModel } from "./model";
 import { MockOtherTools } from "./otherTools";
+import { MockSubscriptions } from "./subscriptions";
 import { MockSchedules, askedSchedule } from "./schedules";
 import { type AppFixture, type CatalogSeed, DEFAULT_LIMITS, GENERIC_TOOLS, TOOLS_BY_CATALOG, githubDeviceSignIn, gmailNeedsClient, needsClientSentence } from "./fixtures/apps";
 import type { AgentRecord } from "./fixtures/conversations";
@@ -292,6 +293,8 @@ export class MockDaemon {
   private reach: MockReach;
   /** The dictation key and a dictation's live view (ADR 0077 as amended 2026-11-25). */
   private dictation: MockDictation;
+  /** The operator's own subscriptions (ADR 0078): their programs, installs and sign-ins. */
+  private subscriptions!: MockSubscriptions;
   private reachTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(scenario: Scenario, f: Fixtures, options: MockOptions = {}) {
@@ -356,6 +359,14 @@ export class MockDaemon {
     for (const [id, p] of Object.entries(f.session.results)) this.callResults.set(id, { ...p, id, session_id: f.session.sessionId ?? "" });
     this.questions = f.session.questions;
     this.settings = f.settings.settings;
+    this.subscriptions = new MockSubscriptions(
+      typeof window !== "undefined" ? new URLSearchParams(window.location.search) : new URLSearchParams(),
+      () => (this.settings.values.GHOST_LLM_PROVIDER ?? "").trim(),
+      (provider) => {
+        for (const k of ["GHOST_LLM_MODEL", "GHOST_LLM_PROTOCOL", "GHOST_LLM_BASE_URL", "GHOST_LLM_PASSWORD", "GHOST_LLM_HEADERS", "GHOST_LLM_TIMEOUT_SECS"]) delete this.settings.values[k];
+        this.settings.values.GHOST_LLM_PROVIDER = provider;
+      },
+    );
     this.passwords = structuredClone(f.settings.passwords);
     if (options.vault === "locked") this.passwords.vault = { ...this.passwords.vault, state: "locked", problem: "Your keyring is locked" };
     if (options.vault === "broken")
@@ -2028,6 +2039,10 @@ export class MockDaemon {
     }
     if (path.startsWith("/debug-audio") || path.startsWith("/developer") || path.startsWith("/diagnose")) {
       const answer = this.developer.handle(method, path, b);
+      if (answer !== undefined) return answer;
+    }
+    if (path.startsWith("/subscriptions")) {
+      const answer = this.subscriptions.handle(method, path, b);
       if (answer !== undefined) return answer;
     }
     if (path.startsWith("/dictation/key")) {
