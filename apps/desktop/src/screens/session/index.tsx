@@ -529,7 +529,7 @@ export function startCopy({ online, loading, needsSetup, locked, inSession, onPh
   if (loading) return micOff ? { title: "Almost ready", text: "Your mic is off. Type below once the models finish." } : { title: "Almost ready", text: `Say ${quoted("Hey Ghost")} once the models finish` };
   // A locked keyring (ADR 0036): the password is there, Ghost just can't read it yet.
   if (needsSetup && locked) return { title: "Unlock your keyring", text: "Ghost can’t read its passwords, the model’s included, until it’s unlocked." };
-  if (needsSetup) return { title: "Finish setup to talk to Ghost", text: "Ghost needs a model password before it can answer." };
+  if (needsSetup) return { title: "Finish setup to talk to Ghost", text: "Ghost needs a model before it can answer: choose your subscription and sign in." };
   // The header already says “Listening”; this says what to do with it.
   if (onPhone) return { title: "On your phone", text: "Ghost hears you through your phone. You can end the session here." };
   if (inSession && micOff) return { title: "Your mic is off", text: "Type below. Ghost can’t hear you until you turn listening on." };
