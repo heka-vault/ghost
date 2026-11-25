@@ -1855,9 +1855,151 @@
         ],
         "type": "object"
       },
+      "DictationEvent": {
+        "description": "Dictation's live view (ADR 0077 as amended 2026-11-25): the words as they are read, to the\noperator's own `/events` WebSocket only, from its own channel, never the bus.",
+        "properties": {
+          "dictation": {
+            "$ref": "#/components/schemas/DictationLiveView"
+          },
+          "type": {
+            "default": "dictation",
+            "type": "string"
+          }
+        },
+        "required": [
+          "dictation"
+        ],
+        "type": "object"
+      },
+      "DictationKeyBody": {
+        "description": "A change to the dictation key's switches; absent fields stay as they are.",
+        "properties": {
+          "on": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "tidy": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "DictationKeyState": {
+        "description": "Where the dictation key stands.",
+        "enum": [
+          "off",
+          "binding",
+          "ready",
+          "unavailable",
+          "refused",
+          "failed"
+        ],
+        "type": "string"
+      },
+      "DictationKeyView": {
+        "description": "The dictation key in Settings › Sound.",
+        "properties": {
+          "key": {
+            "description": "The desktop's own words for the key (\"Press F9\"), once bound.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "on": {
+            "description": "The operator's switch, \"Hold a key to dictate\".",
+            "type": "boolean"
+          },
+          "state": {
+            "$ref": "#/components/schemas/DictationKeyState"
+          },
+          "tidy": {
+            "description": "\"Tidy with the model\": the text goes to the model before it is typed.",
+            "type": "boolean"
+          },
+          "tidy_with": {
+            "description": "Where the words go for the tidy: the provider's name (\"Anthropic\", \"Claude Code\"),\nor None when no model is set (the tidy is skipped).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "typing": {
+            "$ref": "#/components/schemas/DictationTyping"
+          }
+        },
+        "required": [
+          "on",
+          "state",
+          "key",
+          "typing",
+          "tidy",
+          "tidy_with"
+        ],
+        "type": "object"
+      },
+      "DictationLiveView": {
+        "description": "The live view of a dictation, for the operator's own desktop only: the one view of\ndictation that carries the words, shown as they are read and never kept. It travels on\nits own channel, merged into the `/events` WebSocket the desktop opens, never on the event\nbus, so the phone, an outside client and the daemon's own taps never see it. About fifteen\na second while recording (the level), and one at each change.",
+        "properties": {
+          "key": {
+            "description": "From the dictation key (true) or a command (`ghostd dictate`, the API).",
+            "type": "boolean"
+          },
+          "level": {
+            "description": "The microphone's level, 0.0 to 1.0 (the RMS of the last 50 ms, -50 dBFS to 0 dBFS),\nwhile listening.",
+            "format": "float",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "limit_secs": {
+            "format": "double",
+            "type": "number"
+          },
+          "scene": {
+            "$ref": "#/components/schemas/DictationScene"
+          },
+          "seconds": {
+            "description": "Seconds recorded so far, and the limit.",
+            "format": "double",
+            "type": "number"
+          },
+          "sentence": {
+            "description": "Ghost's own sentence for how it ended (`DictationResult::sentence`), at the end.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "text": {
+            "description": "The words so far, as each piece is read.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "scene",
+          "key",
+          "level",
+          "text",
+          "seconds",
+          "limit_secs",
+          "sentence"
+        ],
+        "type": "object"
+      },
       "DictationOutcome": {
         "description": "How a dictation, or a request about one, ended.",
         "enum": [
+          "typed",
           "on_clipboard",
           "nothing_heard",
           "not_on_clipboard",
@@ -1887,7 +2029,9 @@
           "no_display",
           "clipboard_failed",
           "too_long",
-          "failed"
+          "failed",
+          "no_keys",
+          "typing_failed"
         ],
         "type": "string"
       },
@@ -1956,6 +2100,19 @@
         ],
         "type": "object"
       },
+      "DictationScene": {
+        "description": "Where a dictation is, for the scene the operator watches (ADR 0077 as amended\n2026-11-25). Finer than [`DictationState`]: it also says how it ended.",
+        "enum": [
+          "starting",
+          "listening",
+          "writing",
+          "typed",
+          "clipboard",
+          "nothing_heard",
+          "stopped"
+        ],
+        "type": "string"
+      },
       "DictationState": {
         "description": "Where a dictation is.",
         "enum": [
@@ -1963,6 +2120,15 @@
           "starting",
           "recording",
           "reading"
+        ],
+        "type": "string"
+      },
+      "DictationTyping": {
+        "description": "Whether Ghost may type into the window that has the keyboard.",
+        "enum": [
+          "unknown",
+          "allowed",
+          "refused"
         ],
         "type": "string"
       },
@@ -10599,6 +10765,77 @@
         ]
       }
     },
+    "/dictation/key": {
+      "get": {
+        "operationId": "dictation_key_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DictationKeyView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "The dictation key",
+        "tags": [
+          "dictation"
+        ]
+      },
+      "put": {
+        "operationId": "dictation_key_set",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DictationKeyBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DictationKeyView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Set the dictation key",
+        "tags": [
+          "dictation"
+        ]
+      }
+    },
+    "/dictation/key/change": {
+      "post": {
+        "operationId": "dictation_key_change",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DictationKeyView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Change the dictation key",
+        "tags": [
+          "dictation"
+        ]
+      }
+    },
     "/dictation/start": {
       "post": {
         "operationId": "dictation_start",
@@ -10677,6 +10914,7 @@
                       "activity": "#/components/schemas/ActivityEvent",
                       "apps": "#/components/schemas/AppsEvent",
                       "conversation": "#/components/schemas/ConversationEvent",
+                      "dictation": "#/components/schemas/DictationEvent",
                       "hear": "#/components/schemas/HearEvent",
                       "heard": "#/components/schemas/HeardEvent",
                       "log": "#/components/schemas/LogEvent",
@@ -10753,6 +10991,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/MeterEvent"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DictationEvent"
                     }
                   ]
                 }

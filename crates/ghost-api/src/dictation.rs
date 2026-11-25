@@ -296,6 +296,109 @@ pub trait DictationPort: Send + Sync {
     async fn cancel(&self) -> DictationView;
 }
 
+/// Where the dictation key stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DictationKeyState {
+    /// The switch is off.
+    Off,
+    /// Asking the desktop for the key (GNOME's dialog may be open).
+    Binding,
+    /// The key is bound: hold or tap it to dictate.
+    Ready,
+    /// This desktop has no shortcut portal (X11, Hyprland, Sway, no portal backend): use a
+    /// shortcut of the desktop's own that runs `ghostd dictate toggle`.
+    Unavailable,
+    /// The operator said no at GNOME's dialog.
+    Refused,
+    /// Something went wrong asking for it.
+    Failed,
+}
+
+/// Whether Ghost may type into the window that has the keyboard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DictationTyping {
+    /// Not asked yet.
+    Unknown,
+    /// Allowed: the text is typed.
+    Allowed,
+    /// Refused or unavailable: the text goes to the clipboard.
+    Refused,
+}
+
+/// The dictation key in Settings › Sound.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct DictationKeyView {
+    /// The operator's switch, "Hold a key to dictate".
+    pub on: bool,
+    pub state: DictationKeyState,
+    /// The desktop's own words for the key ("Press F9"), once bound.
+    #[schema(required)]
+    pub key: Option<String>,
+    pub typing: DictationTyping,
+    /// "Tidy with the model": the text goes to the model before it is typed.
+    pub tidy: bool,
+    /// Where the words go for the tidy: the provider's name ("Anthropic", "Claude Code"),
+    /// or None when no model is set (the tidy is skipped).
+    #[schema(required)]
+    pub tidy_with: Option<String>,
+}
+
+/// A change to the dictation key's switches; absent fields stay as they are.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct DictationKeyBody {
+    #[serde(default)]
+    pub on: Option<bool>,
+    #[serde(default)]
+    pub tidy: Option<bool>,
+}
+
+/// What the daemon does for the dictation key (`ghostd::dictation::desk`).
+#[async_trait]
+pub trait DictationKeyPort: Send + Sync {
+    fn view(&self) -> DictationKeyView;
+    /// Turn the key on (GNOME's dialogs, the key then typing) or off, and the tidy.
+    async fn set(&self, body: DictationKeyBody) -> DictationKeyView;
+    /// GNOME's own place to change the key.
+    async fn change(&self) -> DictationKeyView;
+}
+
+fn key_port(deps: &SharedDeps) -> ApiResult<&dyn DictationKeyPort> {
+    deps.dictation_key
+        .as_deref()
+        .ok_or_else(|| ApiError::unavailable("the dictation key is not available in this daemon"))
+}
+
+/// The dictation key: the switch, the key, typing and the tidy.
+#[utoipa::path(get, path = "/dictation/key", operation_id = "dictation_key_get",
+    tag = "dictation", summary = "The dictation key",
+    responses((status = 200, description = "Successful Response", body = DictationKeyView)))]
+async fn dictation_key_get(State(deps): State<SharedDeps>) -> ApiResult<Json<DictationKeyView>> {
+    Ok(Json(key_port(&deps)?.view()))
+}
+
+/// Turn the dictation key on or off, or the tidy. Turning it on asks the desktop for the key
+/// and for typing (GNOME's dialogs) and answers once they are settled.
+#[utoipa::path(put, path = "/dictation/key", operation_id = "dictation_key_set",
+    tag = "dictation", summary = "Set the dictation key",
+    request_body = DictationKeyBody,
+    responses((status = 200, description = "Successful Response", body = DictationKeyView)))]
+async fn dictation_key_set(
+    State(deps): State<SharedDeps>,
+    Json(body): Json<DictationKeyBody>,
+) -> ApiResult<Json<DictationKeyView>> {
+    Ok(Json(key_port(&deps)?.set(body).await))
+}
+
+/// Open the desktop's own place to change the dictation key.
+#[utoipa::path(post, path = "/dictation/key/change", operation_id = "dictation_key_change",
+    tag = "dictation", summary = "Change the dictation key",
+    responses((status = 200, description = "Successful Response", body = DictationKeyView)))]
+async fn dictation_key_change(State(deps): State<SharedDeps>) -> ApiResult<Json<DictationKeyView>> {
+    Ok(Json(key_port(&deps)?.change().await))
+}
+
 fn port(deps: &SharedDeps) -> ApiResult<&dyn DictationPort> {
     deps.dictation
         .as_deref()
@@ -350,6 +453,8 @@ pub fn router() -> OpenApiRouter<SharedDeps> {
         .routes(routes!(dictation_stop))
         .routes(routes!(dictation_toggle))
         .routes(routes!(dictation_cancel))
+        .routes(routes!(dictation_key_get, dictation_key_set))
+        .routes(routes!(dictation_key_change))
 }
 
 #[cfg(test)]

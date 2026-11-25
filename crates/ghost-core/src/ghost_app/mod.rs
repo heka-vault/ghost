@@ -411,10 +411,14 @@ impl GhostServer {
             json!(items.iter().filter(|i| i.needs_alerting(Some(now))).count()),
         );
         // What Ghost itself reports: the waiting list's own source (an app not connected,
-        // a locked keyring, a file in Ghost's folder that doesn't read).
+        // a locked keyring, a file in Ghost's folder that doesn't read). Not Ghost's notes
+        // (a slow connection, debug mode, the dictation key): those are for the screen,
+        // shown and never said (ADR 0056), so no agent gets them to say.
         let problems: Vec<&str> = items
             .iter()
-            .filter(|i| i.source == waiting::GHOST)
+            .filter(|i| {
+                i.source == waiting::GHOST && i.response != waiting::Response::Show.as_str()
+            })
             .map(|i| i.title.as_str())
             .collect();
         out.insert("problems".into(), json!(problems));

@@ -594,6 +594,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/dictation/key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The dictation key */
+        get: operations["dictation_key_get"];
+        /** Set the dictation key */
+        put: operations["dictation_key_set"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/dictation/key/change": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Change the dictation key */
+        post: operations["dictation_key_change"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/dictation/start": {
         parameters: {
             query?: never;
@@ -3106,15 +3141,82 @@ export interface components {
             path: string;
         };
         /**
+         * @description Dictation's live view (ADR 0077 as amended 2026-11-25): the words as they are read, to the
+         *     operator's own `/events` WebSocket only, from its own channel, never the bus.
+         */
+        DictationEvent: {
+            dictation: components["schemas"]["DictationLiveView"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "dictation";
+        };
+        /** @description A change to the dictation key's switches; absent fields stay as they are. */
+        DictationKeyBody: {
+            on?: boolean | null;
+            tidy?: boolean | null;
+        };
+        /**
+         * @description Where the dictation key stands.
+         * @enum {string}
+         */
+        DictationKeyState: "off" | "binding" | "ready" | "unavailable" | "refused" | "failed";
+        /** @description The dictation key in Settings › Sound. */
+        DictationKeyView: {
+            /** @description The desktop's own words for the key ("Press F9"), once bound. */
+            key: string | null;
+            /** @description The operator's switch, "Hold a key to dictate". */
+            on: boolean;
+            state: components["schemas"]["DictationKeyState"];
+            /** @description "Tidy with the model": the text goes to the model before it is typed. */
+            tidy: boolean;
+            /**
+             * @description Where the words go for the tidy: the provider's name ("Anthropic", "Claude Code"),
+             *     or None when no model is set (the tidy is skipped).
+             */
+            tidy_with: string | null;
+            typing: components["schemas"]["DictationTyping"];
+        };
+        /**
+         * @description The live view of a dictation, for the operator's own desktop only: the one view of
+         *     dictation that carries the words, shown as they are read and never kept. It travels on
+         *     its own channel, merged into the `/events` WebSocket the desktop opens, never on the event
+         *     bus, so the phone, an outside client and the daemon's own taps never see it. About fifteen
+         *     a second while recording (the level), and one at each change.
+         */
+        DictationLiveView: {
+            /** @description From the dictation key (true) or a command (`ghostd dictate`, the API). */
+            key: boolean;
+            /**
+             * Format: float
+             * @description The microphone's level, 0.0 to 1.0 (the RMS of the last 50 ms, -50 dBFS to 0 dBFS),
+             *     while listening.
+             */
+            level: number | null;
+            /** Format: double */
+            limit_secs: number;
+            scene: components["schemas"]["DictationScene"];
+            /**
+             * Format: double
+             * @description Seconds recorded so far, and the limit.
+             */
+            seconds: number;
+            /** @description Ghost's own sentence for how it ended (`DictationResult::sentence`), at the end. */
+            sentence: string | null;
+            /** @description The words so far, as each piece is read. */
+            text: string | null;
+        };
+        /**
          * @description How a dictation, or a request about one, ended.
          * @enum {string}
          */
-        DictationOutcome: "on_clipboard" | "nothing_heard" | "not_on_clipboard" | "cancelled" | "refused";
+        DictationOutcome: "typed" | "on_clipboard" | "nothing_heard" | "not_on_clipboard" | "cancelled" | "refused";
         /**
          * @description Why, when the outcome needs one.
          * @enum {string}
          */
-        DictationReason: "not_listening" | "busy" | "hearing_test" | "no_speech_model" | "no_microphone" | "microphone_failed" | "already_dictating" | "still_reading" | "not_dictating" | "limit" | "microphone_ended" | "operator" | "listening_turned_off" | "session_opened" | "stopping" | "no_display" | "clipboard_failed" | "too_long" | "failed";
+        DictationReason: "not_listening" | "busy" | "hearing_test" | "no_speech_model" | "no_microphone" | "microphone_failed" | "already_dictating" | "still_reading" | "not_dictating" | "limit" | "microphone_ended" | "operator" | "listening_turned_off" | "session_opened" | "stopping" | "no_display" | "clipboard_failed" | "too_long" | "failed" | "no_keys" | "typing_failed";
         /** @description What a dictation, or a request, ended with: kinds and numbers, never words. */
         DictationResult: {
             /** @description Characters put on the clipboard (after the cleanup). */
@@ -3144,10 +3246,21 @@ export interface components {
             seconds: number;
         };
         /**
+         * @description Where a dictation is, for the scene the operator watches (ADR 0077 as amended
+         *     2026-11-25). Finer than [`DictationState`]: it also says how it ended.
+         * @enum {string}
+         */
+        DictationScene: "starting" | "listening" | "writing" | "typed" | "clipboard" | "nothing_heard" | "stopped";
+        /**
          * @description Where a dictation is.
          * @enum {string}
          */
         DictationState: "idle" | "starting" | "recording" | "reading";
+        /**
+         * @description Whether Ghost may type into the window that has the keyboard.
+         * @enum {string}
+         */
+        DictationTyping: "unknown" | "allowed" | "refused";
         /** @description The state now, and a result: what this request ended with, or for `GET` the last one. */
         DictationView: {
             /**
@@ -5556,10 +5669,17 @@ export type SchemaDiagnosePart = components['schemas']['DiagnosePart'];
 export type SchemaDiagnosePreview = components['schemas']['DiagnosePreview'];
 export type SchemaDiagnoseRequest = components['schemas']['DiagnoseRequest'];
 export type SchemaDiagnoseSaved = components['schemas']['DiagnoseSaved'];
+export type SchemaDictationEvent = components['schemas']['DictationEvent'];
+export type SchemaDictationKeyBody = components['schemas']['DictationKeyBody'];
+export type SchemaDictationKeyState = components['schemas']['DictationKeyState'];
+export type SchemaDictationKeyView = components['schemas']['DictationKeyView'];
+export type SchemaDictationLiveView = components['schemas']['DictationLiveView'];
 export type SchemaDictationOutcome = components['schemas']['DictationOutcome'];
 export type SchemaDictationReason = components['schemas']['DictationReason'];
 export type SchemaDictationResult = components['schemas']['DictationResult'];
+export type SchemaDictationScene = components['schemas']['DictationScene'];
 export type SchemaDictationState = components['schemas']['DictationState'];
+export type SchemaDictationTyping = components['schemas']['DictationTyping'];
 export type SchemaDictationView = components['schemas']['DictationView'];
 export type SchemaFirstMeetingRequest = components['schemas']['FirstMeetingRequest'];
 export type SchemaFirstMeetingView = components['schemas']['FirstMeetingView'];
@@ -6922,6 +7042,70 @@ export interface operations {
             };
         };
     };
+    dictation_key_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DictationKeyView"];
+                };
+            };
+        };
+    };
+    dictation_key_set: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DictationKeyBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DictationKeyView"];
+                };
+            };
+        };
+    };
+    dictation_key_change: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DictationKeyView"];
+                };
+            };
+        };
+    };
     dictation_start: {
         parameters: {
             query?: never;
@@ -6997,7 +7181,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StatusEvent"] | components["schemas"]["TurnEvent"] | components["schemas"]["PendingEvent"] | components["schemas"]["OutcomeEvent"] | components["schemas"]["LogEvent"] | components["schemas"]["ConversationEvent"] | components["schemas"]["WaitingEvent"] | components["schemas"]["QuestionEvent"] | components["schemas"]["AppsEvent"] | components["schemas"]["VoiceEvent"] | components["schemas"]["ActivityEvent"] | components["schemas"]["HeardEvent"] | components["schemas"]["SayingEvent"] | components["schemas"]["HearEvent"] | components["schemas"]["RunEvent"] | components["schemas"]["ReachEvent"] | components["schemas"]["ShowAppEvent"] | components["schemas"]["TimingEvent"] | components["schemas"]["MeterEvent"];
+                    "application/json": components["schemas"]["StatusEvent"] | components["schemas"]["TurnEvent"] | components["schemas"]["PendingEvent"] | components["schemas"]["OutcomeEvent"] | components["schemas"]["LogEvent"] | components["schemas"]["ConversationEvent"] | components["schemas"]["WaitingEvent"] | components["schemas"]["QuestionEvent"] | components["schemas"]["AppsEvent"] | components["schemas"]["VoiceEvent"] | components["schemas"]["ActivityEvent"] | components["schemas"]["HeardEvent"] | components["schemas"]["SayingEvent"] | components["schemas"]["HearEvent"] | components["schemas"]["RunEvent"] | components["schemas"]["ReachEvent"] | components["schemas"]["ShowAppEvent"] | components["schemas"]["TimingEvent"] | components["schemas"]["MeterEvent"] | components["schemas"]["DictationEvent"];
                 };
             };
         };

@@ -24,7 +24,9 @@
 
 pub mod cleanup;
 pub mod clipboard;
+pub mod desk;
 pub mod key;
+pub mod portal;
 pub mod review;
 pub mod typing;
 
@@ -535,6 +537,12 @@ impl Dictation {
     pub fn view(&self) -> DictationView {
         let last = lock(&self.inner).last;
         self.view_with(last)
+    }
+
+    /// Each result as it is decided: the key's loop watches it for a dictation that ended
+    /// by itself.
+    pub fn decided(&self) -> watch::Receiver<Option<(u64, DictationResult)>> {
+        self.done.subscribe()
     }
 
     /// The result decided for `generation`, if it was.

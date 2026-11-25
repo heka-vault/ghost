@@ -498,6 +498,8 @@ pub struct Deps {
     pub checks: Option<Arc<dyn crate::developer::ChecksPort>>,
     /// Dictation (ADR 0077): the operator's start and stop; never the words.
     pub dictation: Option<Arc<dyn crate::dictation::DictationPort>>,
+    /// The dictation key's switch and where it stands (ADR 0077 as amended 2026-11-25).
+    pub dictation_key: Option<Arc<dyn crate::dictation::DictationKeyPort>>,
 }
 
 impl Deps {
@@ -560,6 +562,7 @@ impl Deps {
             meter: None,
             checks: None,
             dictation: None,
+            dictation_key: None,
         }
     }
 

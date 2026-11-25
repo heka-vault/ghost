@@ -127,7 +127,6 @@ fn world(tmp: &std::path::Path) -> World {
         infra_dir: t("infra"),
         wake_mode: "file".into(),
         chime: false,
-        nerd_dictation_flag: t("rt/dictation"),
         ..GhostdSettings::default()
     };
     let cache = t("cache").to_string_lossy().into_owned();

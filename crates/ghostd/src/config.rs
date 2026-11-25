@@ -192,16 +192,11 @@ pub struct GhostdSettings {
     /// while no session is open, at most once an hour; `ask` (the default) leaves a note
     /// with Repair.
     pub input_repair_auto: bool,
-
-    /// Coexist with nerd-dictation (F9): its toggle script writes this file while active.
-    pub nerd_dictation_flag: PathBuf,
 }
 
 impl Default for GhostdSettings {
     fn default() -> Self {
         let home = home();
-        let runtime = std::env::var_os("XDG_RUNTIME_DIR")
-            .map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
         Self {
             data_dir: home.join(".local/share/ghost"),
             policy_path: home.join(".config/ghost/policy.toml"),
@@ -243,7 +238,6 @@ impl Default for GhostdSettings {
             pause_players: true,
             input_repair_auto: false,
             chime: true,
-            nerd_dictation_flag: runtime.join("dictation-audio-duck.state"),
         }
     }
 }
@@ -466,7 +460,6 @@ impl GhostdSettings {
         let mut repair = String::new();
         env.string("GHOST_INPUT_REPAIR", &mut repair);
         s.input_repair_auto = repair.trim().eq_ignore_ascii_case("auto");
-        env.path("GHOST_DICTATION_FLAG", &mut s.nerd_dictation_flag);
         Ok(s)
     }
 
@@ -596,10 +589,6 @@ mod tests {
         assert_eq!(s.clients_dir(), home.join(".local/share/ghost/clients"));
         let off = GhostdSettings::from_env(&env(&[("GHOST_MCP_LISTEN", "")])).unwrap();
         assert_eq!(off.mcp_listen, "");
-        assert!(
-            s.nerd_dictation_flag
-                .ends_with("dictation-audio-duck.state")
-        );
     }
 
     #[test]
