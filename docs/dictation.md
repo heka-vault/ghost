@@ -17,7 +17,9 @@ ghostd dictate stop      # Ghost reads it and puts it on the clipboard
 
 Then press Ctrl+V (Ctrl+Shift+V in a terminal). `ghostd dictate toggle` starts when nothing
 is going on and stops when Ghost is recording. `ghostd dictate cancel` drops it: nothing
-reaches the clipboard. `ghostd dictate status` says where it is and how the last one ended.
+reaches the clipboard. `ghostd dictate status` says where it is: `Dictating: …` while Ghost
+records, `Writing it down…` while it reads, and when nothing is going on, `Not dictating.` and
+how the last one ended. A script can also read the state from the control API, `GET /dictation`.
 
 ## Bind it to a key (GNOME)
 

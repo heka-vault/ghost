@@ -11,6 +11,12 @@ yanked = "deny"
 # Transitive crates that stop being maintained are a fact of life under a GUI toolkit; a
 # workspace crate's own dependency going unmaintained is ours to deal with.
 unmaintained = "workspace"
+ignore = [
+    # Unmaintained, no vulnerability and no upgrade; our own crates use both directly.
+    # Moving off them is heka-vault/ghost#180, which removes these two.
+    { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained; migration tracked in #180" },
+    { id = "RUSTSEC-2026-0555", reason = "chrono-tz unmaintained; migration tracked in #180" },
+]
 
 [licenses]
 version = 2

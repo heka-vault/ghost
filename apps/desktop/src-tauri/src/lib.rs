@@ -85,12 +85,26 @@ fn stop_daemon(app: &tauri::AppHandle) {
     }
 }
 
+/// An editor or terminal that is itself an AppImage (T3 Code, Cursor) hands its `APPIMAGE`
+/// and `APPDIR` to every program started from its shell. Tauri's `Env` takes `APPIMAGE` as
+/// this app's own file: the login item started that AppImage instead of Ghost (#178), and
+/// the updater would replace it. Whatever `ghost_core::appimage` says is not Ghost's own is
+/// removed before Tauri, the daemon or any child reads the environment.
+fn drop_another_programs_appimage() {
+    for key in ghost_api::appimage::foreign() {
+        eprintln!("ghost: {key} names another program's AppImage; ignored");
+        // SAFETY: the first thing `main` does, before any thread starts.
+        unsafe { std::env::remove_var(key) };
+    }
+}
+
 /// The app's one context (its config and the window's assets, embedded once).
 fn context() -> tauri::Context<tauri::Wry> {
     tauri::generate_context!()
 }
 
 pub fn run() {
+    drop_another_programs_appimage();
     // ADR 0075: `Ghost.AppImage ghostd <args>` runs the bundled daemon's command line, so a
     // person with the AppImage has `ghostd` too (and `ghostd command install` puts it on the
     // PATH). Only as the first argument; nothing else of the app starts.
@@ -234,4 +248,24 @@ pub fn run() {
         }
         _ => {}
     });
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn another_programs_appimage_is_dropped_before_anything_reads_the_environment() {
+        // #178: Tauri's `Env`, the login item and the updater take `APPIMAGE` as the app's;
+        // the drop is only sound while no thread runs. Both hold only as `run`'s first line.
+        let src = include_str!("lib.rs");
+        let body = src
+            .split_once("pub fn run() {")
+            .expect("run")
+            .1
+            .trim_start();
+        assert!(
+            body.starts_with("drop_another_programs_appimage();"),
+            "run() begins: {}",
+            &body[..body.len().min(80)]
+        );
+    }
 }

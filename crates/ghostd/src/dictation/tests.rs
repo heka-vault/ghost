@@ -563,6 +563,55 @@ fn the_command_line_says_kinds_and_numbers() {
     );
 }
 
+#[tokio::test]
+async fn status_says_the_dictation_going_on_not_the_last_one() {
+    // #177: `GET /dictation` carries the last result beside the state, and the status
+    // printed that result while a new dictation recorded, so a shortcut's script read
+    // "Dictation cancelled" and started again instead of stopping.
+    let w = world_with("Hello there.", true, false, LIMIT, Board::default());
+    let (line, code) = describe_status(&w.d.view());
+    assert_eq!((line.as_str(), code), ("Not dictating.", 0));
+    w.d.start().await;
+    w.d.cancel(DictationReason::Operator).await;
+    let (line, code) = describe_status(&w.d.view());
+    assert_eq!(code, 0, "the status answered: {line}");
+    assert!(line.starts_with("Not dictating."), "{line}");
+    assert!(line.contains("cancelled"), "how the last one ended: {line}");
+
+    w.d.start().await;
+    let v = w.d.view();
+    assert_eq!(v.state, DictationState::Recording);
+    assert!(
+        v.result.is_some(),
+        "the last result is still beside the state"
+    );
+    let (line, code) = describe_status(&v);
+    assert!(line.starts_with("Dictating:"), "{line}");
+    assert_eq!(code, 0);
+
+    let d = w.d.clone();
+    let stopping = tokio::spawn(async move { d.stop().await });
+    settle(|| w.d.state() == DictationState::Reading).await;
+    let (line, code) = describe_status(&w.d.view());
+    assert_eq!((line.as_str(), code), ("Writing it down…", 0));
+    w.gate.store(true, Ordering::SeqCst);
+    stopping.await.unwrap();
+    let (line, _) = describe_status(&w.d.view());
+    assert!(
+        line.starts_with("Not dictating. Last time: On your clipboard: 12 characters."),
+        "{line}"
+    );
+
+    // A request still answers with its own result: a second start is refused.
+    w.d.start().await;
+    let (line, code) = describe(&w.d.start().await);
+    assert_eq!(
+        (line.as_str(), code),
+        ("Already dictating. Stop it first.", 0)
+    );
+    w.d.cancel(DictationReason::Operator).await;
+}
+
 fn host_with(model: SharedRecognizer, tweak: impl FnOnce(&mut Fake)) -> Arc<Fake> {
     let mut f = Fake {
         refusal: Mutex::new(None),
