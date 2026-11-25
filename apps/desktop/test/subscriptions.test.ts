@@ -130,3 +130,17 @@ describe("dictation's tidy on OpenRouter", () => {
     expect(tidyModelProblem("not a model")).not.toBeNull();
   });
 });
+
+describe("Continue with the one subscription that's ready", () => {
+  it("is the one signed-in subscription Ghost can run, while Ghost has no model", async () => {
+    const { onlyReady } = await import("../src/screens/settings/subscriptions");
+    const claude = sub({ id: "claude-code", title: "Claude Code", signed_in: true, ghost_can_use: true, usable: true });
+    const codex = sub({ id: "codex", title: "OpenAI Codex", signed_in: true, ghost_can_use: false });
+    expect(onlyReady({ in_use: null, subscriptions: [claude, codex] })?.id).toBe("claude-code");
+    // Already has a model, or none signed in, or two to choose from: the person picks.
+    expect(onlyReady({ in_use: "claude-code", subscriptions: [claude] })).toBeNull();
+    expect(onlyReady({ in_use: null, subscriptions: [{ ...claude, signed_in: false }, codex] })).toBeNull();
+    expect(onlyReady({ in_use: null, subscriptions: [claude, { ...codex, ghost_can_use: true, usable: true }] })).toBeNull();
+    expect(onlyReady(null)).toBeNull();
+  });
+});

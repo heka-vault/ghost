@@ -46,6 +46,16 @@ export function jobRunning(j: SubscriptionJobView | null | undefined): boolean {
   return !!j && (j.state === "running" || j.state === "needs_code");
 }
 
+/**
+ * The one subscription Continue may make Ghost's model by itself: signed in, one Ghost can
+ * run, and the only such one, while Ghost has none. With two or more, the person picks.
+ */
+export function onlyReady(view: { in_use?: string | null; subscriptions: SubscriptionView[] } | null | undefined): SubscriptionView | null {
+  if (!view || view.in_use) return null;
+  const ready = view.subscriptions.filter((s) => s.signed_in && s.ghost_can_use && s.usable);
+  return ready.length === 1 ? ready[0] : null;
+}
+
 export function cardFace(s: SubscriptionView): CardFace {
   if (jobRunning(s.job)) {
     const installing = s.job?.kind === "install";

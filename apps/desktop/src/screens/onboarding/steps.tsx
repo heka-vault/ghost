@@ -42,6 +42,7 @@ import { GhostVoice } from "../settings/GhostVoice";
 import { micOptions } from "../settings/model";
 import { otherProviderOf } from "../settings/ModelPage";
 import { SubscriptionPicker, useSubscriptions } from "../settings/SubscriptionPicker";
+import { onlyReady } from "../settings/subscriptions";
 import { HeroPresence, StepFrame, type StepFrameProps, useShortWindow } from "./frame";
 import { canFloat, setFirstMeeting, useFloating, useFloatingForward } from "../../app/floating";
 import { markStateOf, moodOf } from "../../app/mood";
@@ -188,6 +189,27 @@ export function ModelStep({ w }: { w: Wizard }) {
   const inUse = !!subs.view?.in_use;
   const other = s ? otherProviderOf(s, conn) : null;
   const ready = inUse || (!!other && !!conn?.ready);
+  // Signed in to the one subscription Ghost can run: Continue makes it Ghost's model.
+  const only = ready ? null : onlyReady(subs.view);
+  const [using, setUsing] = useState(false);
+  const [useError, setUseError] = useState<string | null>(null);
+  const goOn = async () => {
+    if (only) {
+      setUsing(true);
+      setUseError(null);
+      try {
+        await client.useSubscription(only.id);
+        readConn();
+        await w.reload();
+      } catch (e) {
+        setUseError(e instanceof Error ? e.message : String(e));
+        return;
+      } finally {
+        setUsing(false);
+      }
+    }
+    w.next();
+  };
 
   return (
     <StepFrame
@@ -195,7 +217,7 @@ export function ModelStep({ w }: { w: Wizard }) {
       plain
       title="Choose your subscription"
       description="Where Ghost thinks: the AI subscription you already have, through its own program on this computer."
-      primary={{ label: "Continue", onClick: () => w.next(), disabled: !online || !ready }}
+      primary={{ label: only ? `Use ${only.title} and continue` : "Continue", onClick: () => void goOn(), loading: using, disabled: !online || !(ready || only) }}
       onBack={w.back}
       onSkip={w.progress.state.model === "done" ? undefined : w.skip}
       skipLabel={w.saved.met ? "Skip for now" : "Skip: meet Ghost first"}
@@ -208,6 +230,7 @@ export function ModelStep({ w }: { w: Wizard }) {
         </Card>
       ) : (
         <div className="onb-model">
+          {useError && <p className="set-help is-readable" role="alert">{`Ghost couldn’t use it: ${useError}`}</p>}
           <SubscriptionPicker
             {...subs}
             otherProvider={other}
