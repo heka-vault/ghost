@@ -132,10 +132,10 @@ function FloatingSettings({ optionsOpen }: { optionsOpen: boolean }) {
       {on && status.capture === "yes" && (
         <Notice tone="info" title="Your screen is being shared or recorded">
           {status.sharing === "shown"
-            ? "Ghost is in the share, marked “Screen shared”. The tray’s Show Ghost in this share takes it out."
+            ? "Ghost shows in it, marked “Screen shared”. To keep Ghost out of this share, untick Show Ghost in this share in the tray."
             : status.sharing === "asking"
               ? "Ghost is asking on the screen whether to show itself in this share."
-              : "Ghost stays out of it until the share ends; a spoken session shows in this window meanwhile. The tray’s Show Ghost in this share puts it in."}
+              : "Ghost stays out of it until the share ends, and a spoken session shows in this window meanwhile. To show Ghost in this share, tick Show Ghost in this share in the tray."}
         </Notice>
       )}
       {on && status.capture === "unknown" && (
