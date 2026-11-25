@@ -39,6 +39,9 @@ pub enum DictationState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DictationOutcome {
+    /// Typed into the window that has the keyboard (the dictation key only, ADR 0077 as
+    /// amended 2026-11-25).
+    Typed,
     /// The text is on the clipboard.
     OnClipboard,
     /// Parakeet read nothing, or nothing was left after the fillers.
@@ -93,6 +96,12 @@ pub enum DictationReason {
     TooLong,
     /// Something in Ghost failed while dictating (a fault in the recording or the read).
     Failed,
+    /// The text has a character the keyboard cannot type (an accent, another script, an
+    /// emoji): it went to the clipboard instead, whole.
+    NoKeys,
+    /// Typing into the window failed (no typing permission, or the desktop refused): it went
+    /// to the clipboard instead.
+    TypingFailed,
 }
 
 /// What a dictation, or a request, ended with: kinds and numbers, never words.
@@ -144,6 +153,19 @@ impl DictationResult {
         use DictationOutcome as O;
         use DictationReason as R;
         match (self.outcome, self.reason) {
+            (O::Typed, Some(R::Limit)) => {
+                format!("Stopped at the limit. Typed {} characters.", self.chars)
+            }
+            (O::Typed, _) => format!("Typed {} characters.", self.chars),
+            (O::OnClipboard, Some(R::NoKeys)) => format!(
+                "Some characters can't be typed here. On your clipboard: {} characters. Press \
+                 Ctrl+V.",
+                self.chars
+            ),
+            (O::OnClipboard, Some(R::TypingFailed)) => format!(
+                "Ghost couldn't type it. On your clipboard: {} characters. Press Ctrl+V.",
+                self.chars
+            ),
             (O::OnClipboard, Some(R::Limit)) => format!(
                 "Stopped at the limit. On your clipboard: {} characters. Press Ctrl+V.",
                 self.chars
@@ -211,6 +233,52 @@ pub struct DictationView {
     pub first_frame_ms: Option<u64>,
     #[schema(required)]
     pub result: Option<DictationResult>,
+}
+
+/// Where a dictation is, for the scene the operator watches (ADR 0077 as amended
+/// 2026-11-25). Finer than [`DictationState`]: it also says how it ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DictationScene {
+    /// The microphone is opening.
+    Starting,
+    /// Recording: the words so far and the level.
+    Listening,
+    /// The last piece is being read, tidied and typed.
+    Writing,
+    /// Typed into the window that has the keyboard.
+    Typed,
+    /// On the clipboard: "Press Ctrl+V".
+    Clipboard,
+    /// Nothing was heard.
+    NothingHeard,
+    /// It did not start, or stopped without a result: `sentence` says why.
+    Stopped,
+}
+
+/// The live view of a dictation, for the operator's own desktop only: the one view of
+/// dictation that carries the words, shown as they are read and never kept. It travels on
+/// its own channel, merged into the `/events` WebSocket the desktop opens, never on the event
+/// bus, so the phone, an outside client and the daemon's own taps never see it. About fifteen
+/// a second while recording (the level), and one at each change.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct DictationLiveView {
+    pub scene: DictationScene,
+    /// From the dictation key (true) or a command (`ghostd dictate`, the API).
+    pub key: bool,
+    /// The microphone's level, 0.0 to 1.0 (the RMS of the last 50 ms, -50 dBFS to 0 dBFS),
+    /// while listening.
+    #[schema(required)]
+    pub level: Option<f32>,
+    /// The words so far, as each piece is read.
+    #[schema(required)]
+    pub text: Option<String>,
+    /// Seconds recorded so far, and the limit.
+    pub seconds: f64,
+    pub limit_secs: f64,
+    /// Ghost's own sentence for how it ended (`DictationResult::sentence`), at the end.
+    #[schema(required)]
+    pub sentence: Option<String>,
 }
 
 /// What the daemon does for dictation (`ghostd::dictation`).
@@ -289,14 +357,15 @@ mod tests {
     use super::*;
     use serde_json::Value;
 
-    const OUTCOMES: [DictationOutcome; 5] = [
+    const OUTCOMES: [DictationOutcome; 6] = [
+        DictationOutcome::Typed,
         DictationOutcome::OnClipboard,
         DictationOutcome::NothingHeard,
         DictationOutcome::NotOnClipboard,
         DictationOutcome::Cancelled,
         DictationOutcome::Refused,
     ];
-    const REASONS: [DictationReason; 19] = [
+    const REASONS: [DictationReason; 21] = [
         DictationReason::NotListening,
         DictationReason::Busy,
         DictationReason::HearingTest,
@@ -316,6 +385,8 @@ mod tests {
         DictationReason::ClipboardFailed,
         DictationReason::TooLong,
         DictationReason::Failed,
+        DictationReason::NoKeys,
+        DictationReason::TypingFailed,
     ];
 
     fn kinds() -> Vec<String> {
