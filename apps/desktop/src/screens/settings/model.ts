@@ -30,6 +30,7 @@ export type SectionId =
   | "sounds"
   | "wave"
   | "voice-mode"
+  | "dictation"
   | "floating"
   | "login"
   | "reach"
@@ -61,6 +62,7 @@ export const SECTION_TITLE: Record<SectionId, string> = {
   sounds: "Sounds",
   wave: "While Ghost speaks",
   "voice-mode": "Voice mode",
+  dictation: "Dictation",
   floating: "Floating",
   login: "Start at login",
   reach: "How Ghost reaches you",
@@ -110,6 +112,7 @@ export const SECTION_PAGE: Record<SectionId, string> = {
   sounds: "sound",
   wave: "sound",
   "voice-mode": "sound",
+  dictation: "sound",
   phone: "phone",
 };
 export const isSectionId = (v: string | null): v is SectionId => !!v && v in SECTION_PAGE;

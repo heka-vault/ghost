@@ -114,7 +114,7 @@ function FloatingSettings({ optionsOpen }: { optionsOpen: boolean }) {
                 size="sm"
                 className="float-select"
                 aria-label="While my screen is shared"
-                value={status.settings.while_shared ?? "hide"}
+                value={status.settings.while_shared ?? "show"}
                 options={[
                   { value: "hide", label: "Hide Ghost" },
                   { value: "show", label: "Show Ghost" },

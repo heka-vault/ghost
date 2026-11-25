@@ -10,6 +10,7 @@ import { createContext, type ReactNode, useContext, useEffect, useMemo, useState
 
 import { type Activity, addActivity } from "./activity";
 import { createDevLive, type DevLive } from "./devLive";
+import { createDictationLive, type DictationLive } from "./dictationLive";
 import { createHearLive, type HearLive } from "./hearLive";
 import { createSaidWords, type SaidWords } from "./said";
 import { createReachLive, type ReachLive } from "./reachLive";
@@ -50,6 +51,8 @@ export interface GhostState {
   reach: ReachLive;
   /** Developer's timing overlay and microphone meter (ADR 0073 as amended), outside React state. Stable for the provider's life. */
   dev: DevLive;
+  /** A dictation going on (ADR 0077 as amended 2026-11-25): its scene, level and words, in memory only, outside React state. Stable for the provider's life. */
+  dictation: DictationLive;
 }
 
 const Ctx = createContext<GhostState | null>(null);
@@ -72,6 +75,7 @@ export function GhostProvider({ client, children }: { client: GhostClient; child
   const [runsVersion, setRunsVersion] = useState(0);
   const [reach] = useState(createReachLive);
   const [dev] = useState(createDevLive);
+  const [dictation] = useState(createDictationLive);
 
   useEffect(() => {
     let stop: (() => void) | null = null;
@@ -119,6 +123,12 @@ export function GhostProvider({ client, children }: { client: GhostClient; child
           }
           if (m.type === "meter") {
             dev.pushMeter(m.meter);
+            return;
+          }
+          // A dictation, fifteen a second while it listens: into its store, never into
+          // `lastEvent` or any other state, since it carries the words being dictated.
+          if (m.type === "dictation") {
+            dictation.push(m.dictation);
             return;
           }
           setLastEvent(m);
@@ -172,6 +182,7 @@ export function GhostProvider({ client, children }: { client: GhostClient; child
           setConnected(false);
           voice.set(0);
           hear.reset();
+          dictation.reset();
           // Tear this subscription down before the next one, or its listeners keep
           // firing alongside the new ones and every event shows up twice.
           const s = stop;
@@ -198,11 +209,11 @@ export function GhostProvider({ client, children }: { client: GhostClient; child
       if (timer) clearTimeout(timer);
       stop?.();
     };
-  }, [client, voice, hear, said, reach, dev]);
+  }, [client, voice, hear, said, reach, dev, dictation]);
 
   const value = useMemo(
-    () => ({ client, status, connected, turns: captions.shown, heldTurns: captions.held.length, pending, activity, logs, lastEvent, conversationsVersion, waitingVersion, appsVersion, voice, hear, said, runsVersion, reach, dev }),
-    [client, status, connected, captions, pending, activity, logs, lastEvent, conversationsVersion, waitingVersion, appsVersion, voice, hear, said, runsVersion, reach, dev],
+    () => ({ client, status, connected, turns: captions.shown, heldTurns: captions.held.length, pending, activity, logs, lastEvent, conversationsVersion, waitingVersion, appsVersion, voice, hear, said, runsVersion, reach, dev, dictation }),
+    [client, status, connected, captions, pending, activity, logs, lastEvent, conversationsVersion, waitingVersion, appsVersion, voice, hear, said, runsVersion, reach, dev, dictation],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

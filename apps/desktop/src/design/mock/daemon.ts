@@ -60,6 +60,7 @@ import { pairLink } from "@ghost/client-ts";
 import { DESKTOP_BUILD, DESKTOP_VERSION } from "../../app/version";
 import { HttpError } from "./errors";
 import { type HearDesign, MockHear } from "./hear";
+import { MockDictation } from "./dictation";
 import { MockReports } from "./reports";
 import { uninstallView } from "./uninstall";
 import { MockDeveloper } from "./developer";
@@ -289,6 +290,8 @@ export class MockDaemon {
   private otherTools: MockOtherTools;
   /** Each call an agent made, as counts and sizes (ADR 0060). */
   private reach: MockReach;
+  /** The dictation key and a dictation's live view (ADR 0077 as amended 2026-11-25). */
+  private dictation: MockDictation;
   private reachTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(scenario: Scenario, f: Fixtures, options: MockOptions = {}) {
@@ -298,6 +301,11 @@ export class MockDaemon {
       () => this.pushStatus({ debug_audio: this.developer.mark() }),
     );
     this.devLive = new MockLive(options.meterRoom ?? "quiet", (e) => this.emit(e), () => this.status);
+    this.dictation = new MockDictation(
+      (e) => this.emit(e),
+      typeof window !== "undefined" ? new URLSearchParams(window.location.search) : new URLSearchParams(),
+      scenario.dictation ?? null,
+    );
     this.phone = f.settings.phone;
     const hoursAgo = (h: number) => new Date(Date.now() - h * 3600_000).toISOString();
     const cursor: ClientView = { name: "cursor", title: "Cursor", created_at: hoursAgo(24 * 3), last_used_at: null };
@@ -528,6 +536,7 @@ export class MockDaemon {
     this.playFloating();
     this.playFloatingTour();
     this.playFloatingSite();
+    this.dictation.play();
     return () => this.listeners.delete(l);
   }
   /**
@@ -2021,6 +2030,10 @@ export class MockDaemon {
       const answer = this.developer.handle(method, path, b);
       if (answer !== undefined) return answer;
     }
+    if (path.startsWith("/dictation/key")) {
+      const answer = await this.dictation.handle(method, path, b);
+      if (answer !== undefined) return answer;
+    }
     if (path.startsWith("/reports")) {
       const answer = this.reports.handle(method, path, b);
       if (answer !== undefined) return answer;
@@ -2441,6 +2454,7 @@ export class MockDaemon {
 
   dispose() {
     this.hear.dispose();
+    this.dictation.dispose();
     for (const t of this.timers) clearTimeout(t);
     if (this.voiceTimer) clearInterval(this.voiceTimer);
     if (this.reachTimer) clearInterval(this.reachTimer);

@@ -207,6 +207,16 @@ export type CallPreview = Schemas["CallPreview"];
 export type ReachCall = Schemas["ReachCall"];
 export type ReachTotalView = Schemas["ReachTotalView"];
 export type ReachView = Schemas["ReachView"];
+/**
+ * A dictation as the operator watches it (ADR 0077 as amended 2026-11-25): its scene, the
+ * microphone's level, the words read so far and Ghost's sentence at the end. The one view that
+ * carries dictated words: shown, never kept or logged.
+ */
+export type DictationLiveView = Schemas["DictationLiveView"];
+export type DictationScene = Schemas["DictationScene"];
+/** The dictation key in Settings › Sound: the switch, where it stands, GNOME's words for the key, the tidy. */
+export type DictationKeyView = Schemas["DictationKeyView"];
+export type DictationKeyBody = Schemas["DictationKeyBody"];
 /** A run started or ended (ADR 0060). */
 export type RunPhase = Schemas["RunEvent"]["phase"];
 /** `aec` is ghost.mic, after the echo canceller; `raw` the array under it. */
@@ -243,7 +253,9 @@ export type GhostEvent =
   /** One turn of the live session, timed, at its end: Developer's timing overlay. Numbers only. Desktop only. */
   | Schemas["TimingEvent"]
   /** Developer's microphone meter, ~15/s while it is open, then one with `open` false. Levels and kinds only. Desktop only. */
-  | Schemas["MeterEvent"];
+  | Schemas["MeterEvent"]
+  /** A dictation, ~15/s while it listens and once at each change: its scene, level and the words so far. The operator's own desktop only; never kept. */
+  | Schemas["DictationEvent"];
 
 export type Unsubscribe = () => void;
 
@@ -903,6 +915,19 @@ export class GhostClient {
   /** Save a diagnostic report as a file. Nothing is uploaded. */
   diagnose(body: DiagnoseRequest) {
     return unwrap(this.api.POST("/diagnose", { body }));
+  }
+  // ------------------------------------------------------------------ dictation (ADR 0077)
+  /** The dictation key: the switch, where it stands with GNOME, the key, typing, the tidy. */
+  dictationKey() {
+    return unwrap(this.api.GET("/dictation/key"));
+  }
+  /** Turn the key on or off, or the tidy. Turning it on waits for GNOME's dialogs. */
+  setDictationKey(body: DictationKeyBody) {
+    return unwrap(this.api.PUT("/dictation/key", { body }));
+  }
+  /** Open GNOME's own picker for the key. */
+  changeDictationKey() {
+    return unwrap(this.api.POST("/dictation/key/change"));
   }
   // ------------------------------------------------------------------ removing Ghost (#147)
   /** What Ghost left on this computer, by kind, with sizes. The removal is the app's (`remove_ghost`). */

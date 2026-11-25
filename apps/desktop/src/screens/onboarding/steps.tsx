@@ -496,7 +496,7 @@ const NOT_HEARD_AFTER_MS = 12_000;
 
 /**
  * Where the moment will happen, in one line, with the switch right there (ADR 0059 as amended
- * 2026-11-14): over the desktop, by the person's visible choice, or in this window and why.
+ * 2026-11-14): over the desktop (on by default since 2026-11-25), or in this window and why.
  */
 function FloatLine({ floating, met }: { floating: ReturnType<typeof useFloating>; met: boolean }) {
   const st = floating.status;
@@ -550,8 +550,9 @@ function WindowMoment({ why }: { why: string | null }) {
  * no microphone) and Ghost comes forward over their desktop, lit, and says its own first line
  * (the daemon's `first_meeting`, never a model's), then answers what they said. The first run
  * arms it on Ghost (`PUT /first-meeting`) and on the floating room (`floating_first_meeting`,
- * so it floats over this window too), turns the floating room on once by the person's visible
- * choice (the switch under the title), and says where it happened. Where the desktop can't
+ * so it floats over this window too), shows the floating room's switch under the title (on by
+ * default since 2026-11-25, so the person can turn it off right there), and says where it
+ * happened. Where the desktop can't
  * float, or the screen is shared, the moment happens on this beat itself (2026-11-14: there is
  * no room view any more): the lit mark, Ghost's state, its first line as it is spoken, and one
  * sentence saying why it answered here.
@@ -586,14 +587,6 @@ export function WakeStep({ w }: { w: Wizard }) {
   const session = status?.session_id ?? null;
   const desk = !!session && status?.session_origin !== "phone";
   const mp = w.devices?.microphone ?? null;
-
-  // The floating room, on once, by the first run (never for an install that finished it).
-  const offered = useRef(false);
-  useEffect(() => {
-    if (offered.current || w.saved.finished || w.saved.floatOffered || !floating.status) return;
-    offered.current = true;
-    void floating.offer().then(() => w.setSaved({ floatOffered: true }));
-  }, [floating, w]);
 
   // Arm the moment on Ghost while it hasn't happened, and on the floating room until the
   // session it opened has ended, so Ghost stays over the desktop while it talks.

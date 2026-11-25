@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import { answeredHere, echoOfferNow, EMPTY, type Facts, firstSentence, MEET, micHealthyOf, parseSaved, inputName, pathToMoment, progressOf, requiredAt, routeAfter, STEPS, taskNumber, TASKS, timeLeft, wakeHelp, wakeItems, WAKE_ITEMS_MAX, countLine, keepsLead } from "../src/screens/onboarding/state";
-import { offerOnce } from "../src/app/floating";
 import { exchangeOf } from "../src/screens/onboarding/watch";
 
 
@@ -205,16 +204,6 @@ describe("the path to the moment (2026-11-14)", () => {
     const s = parseSaved(JSON.stringify({ met: "typed", metWhere: "floating", floatOffered: true, waitingForEars: true, metAt: "2026-11-14T15:04:00Z" }));
     expect([s.met, s.metWhere, s.floatOffered, s.waitingForEars]).toEqual(["typed", "floating", true, true]);
     expect(parseSaved(JSON.stringify({ met: "model", metWhere: "moon" })).met).toBeNull();
-  });
-});
-
-describe("the floating room's first-run offer (ADR 0059 as amended 2026-11-14)", () => {
-  const off = { on: false, monitor: "other" as const };
-  it("turns it on once, where the desktop can float, and never again", () => {
-    const first = offerOnce(off, true);
-    expect(first).toMatchObject({ on: true, offered: true });
-    expect(offerOnce({ ...first!, on: false }, true)).toBeNull();
-    expect(offerOnce(off, false)).toMatchObject({ on: false, offered: true });
   });
 });
 

@@ -25,7 +25,12 @@ export type Scene =
   /** An agent, a run, an outside tool or an app asked the operator something (ADR 0051). */
   | "question"
   /** Ghost has decided to hang up; its goodbye may still be playing. */
-  | "ending";
+  | "ending"
+  /**
+   * A dictation (ADR 0077 as amended 2026-11-25), with no session: Wisp listening to the level,
+   * the words so far, then Ghost's sentence for how it ended. No beams, no cards.
+   */
+  | "dictation";
 
 export type Capture = "yes" | "no" | "unknown";
 
@@ -57,6 +62,8 @@ export interface SceneInput {
   openCalls?: number;
   /** The goodbye has had its time (`goneAfterGoodbye`): the session is over for this surface. */
   gone?: boolean;
+  /** A dictation is on screen and no session is (a session's own scene wins). */
+  dictating?: boolean;
 }
 
 /**
@@ -74,6 +81,7 @@ export function sceneOf(i: SceneInput): Scene {
   const shared = sharingOf(i.capture, i.sharing);
   if (shared === "hidden" || shared === "asking") return "hidden";
   if (i.posture !== "float") return "line";
+  if (i.dictating) return "dictation";
   if (i.gone) return "line";
   if (i.ending) return "ending";
   if (i.phase === "hold") return "hold";
@@ -122,9 +130,12 @@ export function fpsOf(s: Scene, arriving: boolean): number {
 /** The scene's word, in the label under Wisp. A few words: the beams say where. */
 export function labelOf(
   s: Scene,
-  o: { agent: string; using: string | null; asker: string | null; micOff: boolean; modelSecs?: number | null; typed?: boolean },
+  o: { agent: string; using: string | null; asker: string | null; micOff: boolean; modelSecs?: number | null; typed?: boolean; dictation?: string },
 ): string {
   switch (s) {
+    case "dictation":
+      // The dictation's own words for its state (app/dictation.ts: “Listening”, “Writing it down”, the end).
+      return o.dictation || "Listening";
     case "you":
       return "Listening to you";
     case "listening":

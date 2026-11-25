@@ -1,0 +1,261 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, it, vi } from "vitest";
+
+import { GhostClient, type DictationKeyView, type DictationLiveView, type GhostEvent } from "@ghost/client-ts";
+import { createDictationLive } from "@ghost/ui";
+
+import { dictationSentence, dictationShown, dictationTitle, goneAt, isEnded, lingerMs, nextSeen, toneOf, wordsShown } from "../src/app/dictation";
+import { MockDaemon } from "../src/design/mock/daemon";
+import { keyViewFor } from "../src/design/mock/dictation";
+import { composeFixtures } from "../src/design/mock/fixtures";
+import { scenarioByName } from "../src/design/mock/scenarios";
+import { labelOf, sceneOf } from "../src/floating/scene";
+import { DictationRows } from "../src/screens/settings/Dictation";
+import { BINDING, HOLD_OR_TAP, keyBusy, keyName, keyNotes, keyShown, tidyLine } from "../src/screens/settings/dictation";
+
+// settings/model.ts reads the address at load (its draft's key); Node has no window.
+vi.hoisted(() => {
+  const g = globalThis as { window?: unknown };
+  g.window ??= { location: { search: "", hash: "" } };
+});
+
+const view = (o: Partial<DictationLiveView> = {}): DictationLiveView => ({ scene: "listening", key: true, level: null, text: null, seconds: 1, limit_secs: 120, sentence: null, ...o });
+
+describe("a dictation's words (ADR 0077 as amended 2026-11-25)", () => {
+  it("says its state in a few words, then how it ended", () => {
+    expect(dictationTitle(view({ scene: "starting" }))).toBe("Listening");
+    expect(dictationTitle(view({ scene: "listening" }))).toBe("Listening");
+    expect(dictationTitle(view({ scene: "writing" }))).toBe("Writing it down");
+    expect(dictationTitle(view({ scene: "typed", sentence: "Typed 42 characters." }))).toBe("Typed");
+    expect(dictationTitle(view({ scene: "clipboard" }))).toBe("On your clipboard");
+    expect(dictationTitle(view({ scene: "nothing_heard" }))).toBe("Nothing heard");
+    expect(dictationTitle(view({ scene: "stopped" }))).toBe("Stopped");
+  });
+
+  it("adds Ghost's sentence only when it says more: what to do, or why it stopped", () => {
+    const clip = "Some characters can't be typed here. On your clipboard: 12 characters. Press Ctrl+V.";
+    expect(dictationSentence(view({ scene: "clipboard", sentence: clip }))).toBe(clip);
+    expect(dictationSentence(view({ scene: "clipboard" }))).toContain("Ctrl+V");
+    // Typed: the text is where the cursor was; “Typed” is all.
+    expect(dictationSentence(view({ scene: "typed", sentence: "Typed 42 characters." }))).toBeNull();
+    // A sentence that only repeats the title is said once.
+    expect(dictationSentence(view({ scene: "nothing_heard", sentence: "Nothing heard." }))).toBeNull();
+    expect(dictationSentence(view({ scene: "stopped", sentence: "Stopped: a session opened." }))).toBe("Stopped: a session opened.");
+    // Never while it goes on.
+    expect(dictationSentence(view({ scene: "listening", sentence: "x" }))).toBeNull();
+  });
+
+  it("draws its light by state", () => {
+    expect(toneOf("starting")).toBe("listening");
+    expect(toneOf("writing")).toBe("writing");
+    for (const s of ["typed", "clipboard", "nothing_heard", "stopped"] as const) expect(toneOf(s)).toBe("done");
+  });
+
+  it("keeps the newest words when they don't fit, cut at a word", () => {
+    expect(wordsShown(null)).toBe("");
+    expect(wordsShown("  move   the  review ")).toBe("move the review");
+    const long = Array.from({ length: 60 }, (_, i) => `word${i}`).join(" ");
+    const shown = wordsShown(long, 40);
+    expect(shown.startsWith("…")).toBe(true);
+    expect(shown.endsWith("word59")).toBe(true);
+    expect(shown.length).toBeLessThanOrEqual(41);
+    expect(shown.slice(1).split(" ").every((w) => /^word\d+$/.test(w))).toBe(true);
+  });
+});
+
+describe("how long a dictation stays on screen", () => {
+  it("goes a moment after it typed or heard nothing, longer when there is something to do or read", () => {
+    expect(lingerMs("typed")).toBe(1_000);
+    expect(lingerMs("nothing_heard")).toBe(1_000);
+    expect(lingerMs("clipboard")).toBe(3_000);
+    expect(lingerMs("stopped")).toBe(3_000);
+    for (const s of ["starting", "listening", "writing"] as const) {
+      expect(lingerMs(s)).toBeNull();
+      expect(isEnded(s)).toBe(false);
+    }
+  });
+
+  it("stays while it goes on, then for its moment from the first end seen", () => {
+    let seen = nextSeen(null, view({ scene: "starting" }), 0);
+    expect(goneAt(seen)).toBeNull();
+    expect(dictationShown(seen, 1e9)).toBe(true);
+    seen = nextSeen(seen, view({ scene: "writing" }), 5_000);
+    expect(dictationShown(seen, 1e9)).toBe(true);
+    seen = nextSeen(seen, view({ scene: "clipboard" }), 6_000);
+    expect(goneAt(seen)).toBe(9_000);
+    // The same end again doesn't restart the clock.
+    seen = nextSeen(seen, view({ scene: "clipboard" }), 8_000);
+    expect(goneAt(seen)).toBe(9_000);
+    expect(dictationShown(seen, 8_999)).toBe(true);
+    expect(dictationShown(seen, 9_000)).toBe(false);
+    // Typed goes after a second.
+    const typed = nextSeen(null, view({ scene: "typed" }), 100);
+    expect(dictationShown(typed, 1_099)).toBe(true);
+    expect(dictationShown(typed, 1_100)).toBe(false);
+    // A new dictation brings it back at once.
+    expect(dictationShown(nextSeen(seen, view({ scene: "starting" }), 20_000), 20_000)).toBe(true);
+    expect(dictationShown(null, 0)).toBe(false);
+    expect(nextSeen(seen, null, 0)).toBeNull();
+  });
+});
+
+describe("the dictation's store: in memory, the words kept only while it is on screen", () => {
+  it("keeps the last level when a reading has none, and the words through writing and the end", () => {
+    const d = createDictationLive();
+    const changes = vi.fn();
+    const levels = vi.fn();
+    d.subscribe(changes);
+    d.subscribeLevel(levels);
+    d.push(view({ scene: "starting" }));
+    expect(d.get()?.text).toBeNull();
+    d.push(view({ level: 0.5 }));
+    d.push(view({ level: 0.6, text: "move the" }));
+    d.push(view({ level: 0.4, text: "move the" }));
+    expect(levels).toHaveBeenCalledTimes(3);
+    // A level alone is no change for the drawing; the words are.
+    expect(changes).toHaveBeenCalledTimes(3);
+    d.push(view({ scene: "writing", level: null, text: null }));
+    expect(d.get()).toMatchObject({ scene: "writing", text: "move the", level: 0.4 });
+    d.push(view({ scene: "typed", text: null, sentence: "Typed 8 characters." }));
+    expect(d.get()?.text).toBe("move the");
+    // The next dictation starts with none of the last one's words.
+    d.push(view({ scene: "starting" }));
+    expect(d.get()?.text).toBeNull();
+    expect(d.level().level).toBe(0);
+    // A dropped connection forgets it.
+    d.reset();
+    expect(d.get()).toBeNull();
+  });
+});
+
+describe("the floating scene of a dictation", () => {
+  const base = { capture: null, phase: "passive", ending: false, youTalking: false, pending: false, question: false } as const;
+  it("is its own scene when it floats, and the line when it doesn't", () => {
+    expect(sceneOf({ ...base, posture: "float", dictating: true })).toBe("dictation");
+    expect(sceneOf({ ...base, posture: "desk", dictating: true })).toBe("line");
+    // A share Ghost is kept out of hides it like anything else.
+    expect(sceneOf({ ...base, posture: "float", dictating: true, sharing: "hidden" })).toBe("hidden");
+  });
+  it("is labelled in the dictation's own words", () => {
+    const o = { agent: "Ghost", using: null, asker: null, micOff: false };
+    expect(labelOf("dictation", { ...o, dictation: "Writing it down" })).toBe("Writing it down");
+    expect(labelOf("dictation", o)).toBe("Listening");
+  });
+});
+
+describe("Settings › Sound › Dictation", () => {
+  const ready: DictationKeyView = { on: true, state: "ready", key: "Press F9", typing: "allowed", tidy: true, tidy_with: "Anthropic" };
+  const rows = (v: DictationKeyView, pending: "on" | "off" | "tidy" | "change" | null = null) =>
+    renderToStaticMarkup(createElement(DictationRows, { view: v, pending, online: true, onTurn: () => undefined, onTidy: () => undefined, onChange: () => undefined }));
+
+  it("shows the key in GNOME's words, short, with Change key, and hold or tap", () => {
+    expect(keyName("Press F9")).toBe("F9");
+    expect(keyName("Press Ctrl+Alt+D")).toBe("Ctrl+Alt+D");
+    expect(keyName("Press F9 or F10")).toBe("Press F9 or F10");
+    expect(keyName("Super+D")).toBe("Super+D");
+    expect(keyName(null)).toBeNull();
+    const html = rows(ready);
+    expect(html).toContain("Hold a key to dictate");
+    expect(html).toContain(">F9<");
+    expect(html).toContain("Change key");
+    expect(html).toContain(HOLD_OR_TAP.replaceAll("’", "&#x27;").slice(0, 20));
+    expect(keyShown(ready)).toBe(true);
+    expect(keyShown({ ...ready, state: "binding" })).toBe(false);
+  });
+
+  it("waits for GNOME's dialogs while it turns on, and says so", () => {
+    expect(keyBusy({ state: "binding" }, false)).toBe(true);
+    expect(keyBusy({ state: "off" }, true)).toBe(true);
+    expect(keyBusy({ state: "ready" }, false)).toBe(false);
+    const html = rows({ ...ready, on: false, state: "off", key: null }, "on");
+    expect(html).toContain(BINDING);
+    expect(html).not.toContain("Change key");
+  });
+
+  it("says where the tidy sends the words, or that there is no model", () => {
+    expect(tidyLine("Anthropic")).toBe("Your words go to Anthropic to be tidied before they’re typed.");
+    expect(tidyLine(null)).toBe("No model is set up, so Ghost types what it heard.");
+    expect(rows({ ...ready, tidy_with: null })).toContain("No model is set up");
+  });
+
+  it("has a line for each state that needs one, in Ghost's words", () => {
+    expect(keyNotes(ready)).toEqual([]);
+    const unavailable = keyNotes({ on: false, state: "unavailable", typing: "unknown" });
+    expect(unavailable[0].text).toBe("This desktop doesn’t let apps use a key this way. Make a keyboard shortcut of your own that runs ghostd dictate toggle; the text then goes to your clipboard.");
+    expect(rows({ ...ready, on: false, state: "unavailable", key: null })).toContain("<code");
+    expect(keyNotes({ on: true, state: "refused", typing: "unknown" })[0].text).toBe("GNOME said no to the key. Turn the switch off and on to be asked again.");
+    expect(keyNotes({ on: true, state: "failed", typing: "unknown" })[0].text).toBe("Ghost couldn’t ask GNOME for the key.");
+    expect(keyNotes({ ...ready, typing: "refused" })[0].text).toBe("Ghost isn’t allowed to type, so the text goes to your clipboard. Press Ctrl+V to paste it.");
+    // Never the plumbing's words.
+    for (const state of ["off", "binding", "ready", "unavailable", "refused", "failed"] as const)
+      for (const typing of ["unknown", "allowed", "refused"] as const) {
+        const html = rows({ ...ready, state, typing }).toLowerCase();
+        for (const word of ["mcp", "server", "portal"]) expect(html).not.toContain(word);
+      }
+  });
+
+  it("calls the key's routes: read, switch and tidy, and GNOME's picker", async () => {
+    const calls: { method: string; path: string; body: string }[] = [];
+    const fetch = (async (input: Request | string, init?: RequestInit) => {
+      const req = input instanceof Request ? input : new Request(String(input), init);
+      calls.push({ method: req.method, path: new URL(req.url).pathname, body: req.method === "GET" ? "" : await req.text() });
+      return new Response(JSON.stringify(ready), { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof globalThis.fetch;
+    const client = new GhostClient({ baseUrl: "http://ghost", fetch, events: { subscribe: () => () => undefined } });
+    await client.dictationKey();
+    await client.setDictationKey({ on: true });
+    await client.setDictationKey({ tidy: false });
+    await client.changeDictationKey();
+    expect(calls.map((c) => [c.method, c.path, c.body])).toEqual([
+      ["GET", "/dictation/key", ""],
+      ["PUT", "/dictation/key", '{"on":true}'],
+      ["PUT", "/dictation/key", '{"tidy":false}'],
+      ["POST", "/dictation/key/change", ""],
+    ]);
+  });
+
+  it("turns on in the mock through GNOME's wait, and off at once", async () => {
+    vi.useFakeTimers();
+    try {
+      const s = scenarioByName("passive");
+      const d = new MockDaemon(s, composeFixtures(s), {});
+      const q = new URLSearchParams();
+      expect(((await d.handle("GET", "/dictation/key", q, null)) as DictationKeyView).state).toBe("off");
+      const on = d.handle("PUT", "/dictation/key", q, { on: true }) as Promise<DictationKeyView>;
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(await on).toMatchObject({ on: true, state: "ready", key: "Press F9" });
+      const off = (await d.handle("PUT", "/dictation/key", q, { on: false })) as DictationKeyView;
+      expect(off).toMatchObject({ on: false, state: "off", key: null });
+      d.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(keyViewFor(new URLSearchParams("dictkey=unavailable")).on).toBe(false);
+    expect(keyViewFor(new URLSearchParams("dictkey=ready&typing=refused&tidy=none"))).toMatchObject({ key: "Press F9", typing: "refused", tidy_with: null });
+  });
+
+  it("plays each designed dictation as the daemon sends it, ending the way its scenario says", async () => {
+    vi.useFakeTimers();
+    try {
+      for (const [name, end] of [["dictation-typed", "typed"], ["dictation-clipboard", "clipboard"], ["dictation-nothing", "nothing_heard"], ["dictation-stopped", "stopped"]] as const) {
+        const s = scenarioByName(name);
+        expect(s.name).toBe(name);
+        const d = new MockDaemon(s, composeFixtures(s), {});
+        const seen: DictationLiveView[] = [];
+        d.subscribe((e) => {
+          if ("type" in e && (e as GhostEvent).type === "dictation") seen.push((e as Extract<GhostEvent, { type: "dictation" }>).dictation);
+        });
+        await vi.advanceTimersByTimeAsync(9_000);
+        d.dispose();
+        const scenes = seen.map((v) => v.scene);
+        expect(scenes[0], name).toBe("starting");
+        expect(scenes, name).toContain("listening");
+        expect(scenes, name).toContain(end);
+        if (end !== "nothing_heard") expect(seen.some((v) => !!v.text), name).toBe(true);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

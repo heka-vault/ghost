@@ -10,6 +10,7 @@ describe("where a waiting item leads", () => {
       ["output:unavailable", "sound", "audio"],
       ["models:missing", "sound", "models"],
       ["voice:realtime", "sound", "voice-mode"],
+      ["dictation:key", "sound", "dictation"],
     ] as const) {
       const to = placeOf({ place, key })!;
       expect(to.path, key).toBe(`/settings/sound/${section}`);

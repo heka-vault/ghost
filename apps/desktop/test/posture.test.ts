@@ -37,8 +37,31 @@ describe("postureOf: the desk or floating, nothing else", () => {
     for (const deskSession of [true, false])
       for (const floating of [true, false, undefined])
         for (const windowActive of [true, false, undefined])
-          for (const introducing of [true, false, undefined]) answers.add(postureOf({ deskSession, floating, windowActive, introducing }));
+          for (const introducing of [true, false, undefined])
+            for (const dictation of [true, false, undefined]) answers.add(postureOf({ deskSession, floating, windowActive, introducing, dictation }));
     expect([...answers].sort()).toEqual(["desk", "float"]);
+  });
+});
+
+describe("a dictation (ADR 0077 as amended 2026-11-25)", () => {
+  const away = { deskSession: false, floating: true, windowActive: false };
+  it("floats a dictation beside the work when the window isn't the one in use", () => {
+    expect(postureOf({ ...away, dictation: true })).toBe("float");
+    // Without one, nothing floats.
+    expect(postureOf(away)).toBe("desk");
+    expect(postureOf({ ...away, dictation: false })).toBe("desk");
+  });
+  it("keeps it in the window when the window has the keyboard (Today's live strip shows it)", () => {
+    expect(postureOf({ ...away, windowActive: true, dictation: true })).toBe("desk");
+    expect(postureOf({ deskSession: false, floating: true, dictation: true })).toBe("desk");
+  });
+  it("keeps it in the window when floating is off or can't show now", () => {
+    expect(postureOf({ ...away, floating: false, dictation: true })).toBe("desk");
+    expect(postureOf({ deskSession: false, windowActive: false, dictation: true })).toBe("desk");
+  });
+  it("is the same rule as a session's: the first run's moment floats it too", () => {
+    expect(postureOf({ deskSession: false, floating: true, windowActive: true, introducing: true, dictation: true })).toBe("float");
+    expect(postureOf({ deskSession: true, floating: true, windowActive: false, dictation: true })).toBe("float");
   });
 });
 

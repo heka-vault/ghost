@@ -27,6 +27,7 @@ const SECTIONS: Record<string, string> = {
   "output:unavailable": "/settings/sound/audio",
   "models:missing": "/settings/sound/models",
   "voice:realtime": "/settings/sound/voice-mode",
+  "dictation:key": "/settings/sound/dictation",
 };
 
 /**

@@ -264,6 +264,17 @@ a.today-figure:hover .today-figure__value { color: var(--accent-text); }
 .talk.is-working .talk__title { color: var(--phase-thinking); }
 .talk.is-speaking .talk__title { color: var(--phase-speaking); }
 .talk.is-hold .talk__title, .talk.is-phone .talk__title { color: var(--text-2); }
+/* A dictation in the strip (ADR 0077 as amended 2026-11-25): its state in the phase's colour, the level beside it. */
+.talk.is-dictation.is-done .talk__title { color: var(--text-1); }
+.talk__level { flex: none; width: 48px; height: 6px; margin-left: var(--space-2); border-radius: var(--radius-full); background: var(--bg-sunken); overflow: hidden; }
+.talk__level > span { display: block; height: 100%; background: var(--phase-listening); transform-origin: left center; transform: scaleX(var(--talk-level, 0)); transition: transform 70ms linear; }
+.talk-dictation { display: grid; gap: var(--space-1_5); padding: var(--space-3) var(--space-4); border-radius: var(--radius-xl); background: var(--bg-raised); border: 1px solid var(--border-subtle); }
+.talk-dictation.is-listening { border-color: color-mix(in srgb, var(--phase-listening) 45%, transparent); }
+.talk-dictation.is-writing { border-color: color-mix(in srgb, var(--phase-thinking) 45%, transparent); }
+.talk-dictation__words { margin: 0; font-size: var(--text-md); line-height: var(--leading-md); color: var(--text-1); overflow-wrap: anywhere; }
+.talk-dictation__words.is-empty { color: var(--text-3); }
+.talk-dictation__said { margin: 0; font-size: var(--text-sm); color: var(--text-2); }
+@media (prefers-reduced-motion: reduce) { .talk__level > span { transition: none; } }
 
 /* The dock: a yes or a question waiting in the session sits right above the bar, its buttons in reach. */
 .talk-dock { display: flex; flex-direction: column; gap: var(--space-2); width: min(100%, var(--page-default)); margin: 0 auto; }
