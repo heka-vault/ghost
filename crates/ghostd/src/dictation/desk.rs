@@ -177,12 +177,18 @@ impl KeyDesk {
         if has_token {
             lock(&self.status).typing = DictationTyping::Allowed;
         } else if asking {
+            // Only a no at the dialog is a refusal; a dialog left unanswered, or a failure,
+            // leaves it unasked, and GNOME asks again at the first typing.
             match portal.grant_typing(None).await {
                 Ok(next) => {
                     self.keep_token(next).await;
                     lock(&self.status).typing = DictationTyping::Allowed;
                 }
-                Err(_) => lock(&self.status).typing = DictationTyping::Refused,
+                Err(PortalError::Refused) => lock(&self.status).typing = DictationTyping::Refused,
+                Err(_) => {
+                    info!("dictation key: typing was not answered; GNOME asks at the first typing");
+                    lock(&self.status).typing = DictationTyping::Unknown;
+                }
             }
         }
         let task = tokio::spawn(key_loop(
