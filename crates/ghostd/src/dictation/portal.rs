@@ -38,8 +38,10 @@ pub const APP_ID: &str = "heka-ghost-desktop";
 pub const SHORTCUT: &str = "dictate";
 /// What GNOME's dialog and Settings › Keyboard call it.
 pub const SHORTCUT_DESCRIPTION: &str = "Dictate (hold to talk, tap to lock)";
-/// How long a request may wait for the operator at a dialog.
-pub const DIALOG_WAIT: Duration = Duration::from_secs(180);
+/// How long a request may wait for the operator at a dialog. Long: a request closed while
+/// GNOME's dialog is still up leaves a remote-desktop session made and never started, which
+/// GNOME keeps until its portal restarts and which reads as a screen share (seen 2026-11-25).
+pub const DIALOG_WAIT: Duration = Duration::from_secs(15 * 60);
 /// How long a request may take when no dialog is expected.
 pub const QUIET_WAIT: Duration = Duration::from_secs(10);
 
