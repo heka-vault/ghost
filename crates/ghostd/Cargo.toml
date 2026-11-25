@@ -57,6 +57,7 @@ percent-encoding.workspace = true
 async-trait.workspace = true
 nix.workspace = true
 zbus.workspace = true
+unicode-normalization.workspace = true
 # The dictation clipboard's owner (ADR 0077): the X11 protocol in pure Rust.
 x11rb.workspace = true
 x11rb-protocol.workspace = true

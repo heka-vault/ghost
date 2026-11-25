@@ -250,6 +250,8 @@ pub struct Parakeet {
     max_tokens_per_step: usize,
     state_shape: (usize, usize),
     space_pattern: Regex,
+    /// English only: which tokens may be chosen. None: any (the parity's, Parakeet's own).
+    allowed: Option<Vec<bool>>,
 }
 
 /// A transcript with the token ids and their text, for the parity tests and for debugging.
@@ -316,7 +318,26 @@ impl Parakeet {
             max_tokens_per_step: config.max_tokens_per_step.unwrap_or(10),
             state_shape,
             space_pattern: Regex::new(r"\A\s|\s\B|(\s)\b").expect("a fixed pattern"),
+            allowed: None,
         })
+    }
+
+    /// English only (Ghost's, 2026-11-25): a token is chosen only when every character of it
+    /// is printable ASCII, so Parakeet v3, which reads 25 languages, gives its best English
+    /// reading where it would have written a Cyrillic or accented letter (seen in an
+    /// English speaker's dictation). Of v3's 8,193 tokens, 3,022 are left out. The blank
+    /// stays. Off by default: the parity is Parakeet's own decode.
+    pub fn english_only(mut self, on: bool) -> Self {
+        self.allowed = on.then(|| {
+            self.vocab
+                .iter()
+                .enumerate()
+                .map(|(i, t)| {
+                    i == self.blank || t.chars().all(|c| c.is_ascii() && !c.is_ascii_control())
+                })
+                .collect()
+        });
+        self
     }
 
     /// The encoder's input for `samples_16k`: features in `[n_mels, frames]` order, the
@@ -404,7 +425,10 @@ impl Parakeet {
                     self.vocab_size
                 )));
             }
-            let token = argmax(&joint[..self.vocab_size]);
+            let token = match &self.allowed {
+                Some(allowed) => argmax_of(&joint[..self.vocab_size], allowed),
+                None => argmax(&joint[..self.vocab_size]),
+            };
             let step = argmax(&joint[self.vocab_size..]);
             if token != self.blank {
                 state1 = new1;
@@ -433,6 +457,34 @@ fn argmax(values: &[f32]) -> usize {
         }
     }
     best
+}
+
+/// The first of the largest among the `allowed`; the plain argmax when none is allowed.
+fn argmax_of(values: &[f32], allowed: &[bool]) -> usize {
+    let mut best: Option<usize> = None;
+    for (i, v) in values.iter().enumerate() {
+        if allowed.get(i).copied().unwrap_or(false) && best.is_none_or(|b| *v > values[b]) {
+            best = Some(i);
+        }
+    }
+    best.unwrap_or_else(|| argmax(values))
+}
+
+#[cfg(test)]
+mod english_only_tests {
+    use super::*;
+
+    #[test]
+    fn a_left_out_token_is_never_chosen_and_the_best_allowed_one_is() {
+        let values = [0.1, 5.0, 0.3, 2.0];
+        let allowed = [true, false, true, true];
+        assert_eq!(argmax(&values), 1);
+        assert_eq!(argmax_of(&values, &allowed), 3);
+        // Ties keep the first, as np.argmax does.
+        assert_eq!(argmax_of(&[1.0, 1.0, 1.0], &[false, true, true]), 1);
+        // Nothing allowed: the plain argmax rather than a panic.
+        assert_eq!(argmax_of(&[0.0, 2.0], &[false, false]), 1);
+    }
 }
 
 /// The last `INTERIM_WINDOW_SECS` of an open segment plus the pipeline's trailing silence,

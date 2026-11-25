@@ -328,9 +328,23 @@ async fn a_command_still_ends_on_the_clipboard_and_is_notified() {
 }
 
 #[tokio::test]
-async fn a_character_without_a_key_sends_it_all_to_the_clipboard() {
+async fn english_only_an_accent_comes_off_and_the_text_is_typed() {
     let w = world(Setup {
         texts: vec!["Meet me at the caf\u{e9}."],
+        ..Setup::default()
+    });
+    w.d.start_key().await;
+    tokio::time::sleep(Duration::from_millis(60)).await;
+    let v = w.d.stop().await;
+    assert_eq!(outcome(&v), (DictationOutcome::Typed, None));
+    assert_eq!(*w.typed.typed.lock().unwrap(), ["Meet me at the cafe."]);
+    assert!(w.board.0.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn nothing_typable_goes_to_the_clipboard_and_is_notified() {
+    let w = world(Setup {
+        texts: vec!["\u{6771}\u{4eac}"],
         ..Setup::default()
     });
     w.d.start_key().await;
@@ -340,11 +354,7 @@ async fn a_character_without_a_key_sends_it_all_to_the_clipboard() {
         outcome(&v),
         (DictationOutcome::OnClipboard, Some(DictationReason::NoKeys))
     );
-    assert!(
-        w.typed.typed.lock().unwrap().is_empty(),
-        "nothing half typed"
-    );
-    assert_eq!(*w.board.0.lock().unwrap(), ["Meet me at the caf\u{e9}."]);
+    assert!(w.typed.typed.lock().unwrap().is_empty());
     // The clipboard is notified even from the key: "Press Ctrl+V".
     assert_eq!(w.notes.0.lock().unwrap().len(), 1);
 }

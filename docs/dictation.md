@@ -36,10 +36,12 @@ its Today page shows the same.
   typing into a terminal never runs a command.
 - **Your speakers are muted** while you dictate, so music doesn't get into the microphone, and
   come back when you stop.
-- **Plain characters are typed; anything else goes to the clipboard.** GNOME can type only the
-  keys your keyboard layout has. If the text has an accent, another script or an emoji (café,
-  Zürich, €), Ghost doesn't type half of it: the whole text goes on your clipboard and Ghost
-  says "Press Ctrl+V". Curly quotes, long dashes and "…" are typed as their plain forms.
+- **English only.** Ghost reads your voice as English: its speech model chooses English
+  letters only, so a misheard sound never comes out as a Cyrillic or accented letter. What it
+  types is plain English characters too, because GNOME can type only the keys your keyboard
+  has: an accent comes off (café is typed cafe, ½ as 1/2), curly quotes, long dashes and "…"
+  become their plain forms, and anything else (another script, an emoji) is left out. Only
+  when nothing typable is left does the text go to your clipboard ("Press Ctrl+V").
 - **While Ghost isn't listening**, the key still works: pressing it is you opening the
   microphone, for that dictation only. Nothing else does.
 - **While dictating, Ghost doesn't listen for its name**, and nothing you dictate wakes it or
@@ -75,7 +77,7 @@ control API, `GET /dictation`.
 | The Hearing test has the microphone. Finish it first. | |
 | Dictation needs Ghost's speech model, which isn't ready yet. | The speech model is still downloading or loading. |
 | Ghost can't find a microphone. / Ghost couldn't open the microphone. | Check Settings › Sound. |
-| Some characters can't be typed here. On your clipboard: … Press Ctrl+V. | An accent, another script or an emoji: see above. |
+| Some characters can't be typed here. On your clipboard: … Press Ctrl+V. | Nothing in it could be typed (only another script or emoji): see above. |
 | Ghost couldn't type it. On your clipboard: … Press Ctrl+V. | Typing isn't allowed (turn the switch off and on to be asked again) or failed. |
 | Ghost couldn't reach the clipboard: there is no display. | Ghost runs without a desktop (the headless service with no `DISPLAY`). |
 

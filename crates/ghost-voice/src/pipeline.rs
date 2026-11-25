@@ -191,7 +191,8 @@ impl Models {
             s.stt_quantization.as_deref().unwrap_or("fp32")
         );
         let parakeet = Parakeet::load(&paths, s.stt_threads)
-            .map_err(|e| LoadError::new(SpeechPart::Parakeet, e))?;
+            .map_err(|e| LoadError::new(SpeechPart::Parakeet, e))?
+            .english_only(s.stt_english_only);
         let mut kokoro =
             Kokoro::load(&s.kokoro_paths()).map_err(|e| LoadError::new(SpeechPart::Kokoro, e))?;
         let (halves, problem) = windowed_halves(s);

@@ -278,6 +278,14 @@ Decided with the operator (the grilling of 2026-11-25; spikes in `.scratch/ptt-s
   Enter, ever), typographic punctuation made plain, and if anything outside printable ASCII
   is left, the whole text goes to the clipboard ("Press Ctrl+V", `NoKeys`); typing that fails
   does the same (`TypingFailed`). A command never types: it ends on the clipboard as before.
+- **English only** (the operator's choice after an 86 s dictation at the desk went whole to
+  the clipboard because Parakeet v3 read three sounds as Cyrillic and one as "ä"). Parakeet
+  chooses only tokens of printable ASCII (`Parakeet::english_only`, `GHOST_STT_ENGLISH_ONLY`,
+  on; 3,022 of v3's 8,193 tokens left out; the parity's own decode keeps them all), for
+  sessions and dictation alike. Typing folds what is left: accents off (NFKD, and the Latin
+  letters with no decomposition), a fraction's slash kept (½ is 1/2, never 12), anything else
+  left out; the clipboard only when nothing typable is left. This replaces "one untypable
+  character sends the whole text to the clipboard" above.
 - **Sound.** The default output is muted while recording and put back after, however it
   ends, and after a crash at the next start (`SinkMute`).
 - **Notifications.** From the key, only what went wrong and the clipboard's "Press Ctrl+V";

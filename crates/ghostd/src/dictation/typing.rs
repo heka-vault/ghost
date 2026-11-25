@@ -1,11 +1,13 @@
 //! What can be typed (ADR 0077 as amended 2026-11-25). GNOME's RemoteDesktop portal types a
 //! keysym only when the keyboard layout has a key for it and drops any other silently, with
 //! no error (measured on GNOME 50.1: é, ü, €, Cyrillic, CJK, an emoji and an em dash all
-//! vanished). So the text is checked before a single key is sent: typographic punctuation
-//! becomes its plain form, and if anything outside printable ASCII is still left, nothing is
-//! typed and the whole text goes to the clipboard. Typing half a sentence with holes is never
-//! right.
+//! vanished). Ghost's dictation is English only (the operator's choice of the same day, and
+//! Parakeet decodes English tokens only), so before a key is sent: typographic punctuation
+//! becomes its plain form, an accented letter its plain letter (café becomes cafe), and
+//! anything else outside printable ASCII is left out. The clipboard is the way only when
+//! nothing typable is left.
 
+use unicode_normalization::UnicodeNormalization;
 use zeroize::Zeroizing;
 
 use super::cleanup::sanitize;
@@ -13,9 +15,9 @@ use super::cleanup::sanitize;
 /// How the text reaches the window.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Plan {
-    /// Every character has a key: type it.
+    /// Type it, made English: every character has a key.
     Type(Zeroizing<String>),
-    /// Something has no key: the clipboard, and "Press Ctrl+V".
+    /// Nothing typable is left: the clipboard, and "Press Ctrl+V".
     Clipboard,
 }
 
@@ -28,13 +30,30 @@ fn plain(c: char) -> Option<&'static str> {
         '\u{2010}' | '\u{2011}' | '\u{2012}' | '\u{2013}' | '\u{2014}' | '\u{2015}'
         | '\u{2212}' => "-",
         '\u{2026}' => "...",
+        // A fraction's slash (½ decomposes to 1, it, 2): never "12".
+        '\u{2044}' | '\u{2215}' => "/",
+        // Latin letters with no decomposition into a plain one.
+        '\u{df}' => "ss",
+        '\u{c6}' => "AE",
+        '\u{e6}' => "ae",
+        '\u{d8}' => "O",
+        '\u{f8}' => "o",
+        '\u{152}' => "OE",
+        '\u{153}' => "oe",
+        '\u{141}' => "L",
+        '\u{142}' => "l",
+        '\u{110}' => "D",
+        '\u{111}' => "d",
+        '\u{de}' => "Th",
+        '\u{fe}' => "th",
         '\u{00A0}' | '\u{2007}' | '\u{202F}' | '\u{2009}' | '\u{200A}' => " ",
         _ => return None,
     })
 }
 
 /// Sanitized (no control character, no line break: nothing typed can submit or run
-/// anything), typographic punctuation made plain, then checked: printable ASCII only.
+/// anything), typographic punctuation made plain, accents taken off (NFKD, the marks left
+/// out), anything else outside printable ASCII left out.
 pub fn plan(text: &str) -> Plan {
     let sane = sanitize(text);
     let mut out = Zeroizing::new(String::with_capacity(sane.len() + 8));
@@ -44,7 +63,14 @@ pub fn plan(text: &str) -> Plan {
         } else if c == ' ' || c.is_ascii_graphic() {
             out.push(c);
         } else {
-            return Plan::Clipboard;
+            // é is e and a mark, ß is ss, ﬁ is fi; Cyrillic, CJK and an emoji have no ASCII.
+            for d in c.nfkd() {
+                if let Some(p) = plain(d) {
+                    out.push_str(p);
+                } else if d == ' ' || d.is_ascii_graphic() {
+                    out.push(d);
+                }
+            }
         }
     }
     // A plain space may have doubled a space; sanitize again collapses it.
@@ -96,19 +122,28 @@ mod tests {
     }
 
     #[test]
-    fn a_character_without_a_key_sends_the_whole_text_to_the_clipboard() {
-        // Each of these vanished when typed in the 2026-11-25 spike.
-        for t in [
-            "Caf\u{e9} au lait",
-            "Z\u{fc}rich",
-            "costs 5 \u{20ac}",
-            "Tokyo \u{6771}\u{4eac}",
-            "Moscow \u{41c}\u{43e}\u{441}\u{43a}\u{432}\u{430}",
-            "nice \u{1f642}",
-            "\u{bd} cup",
-        ] {
-            assert_eq!(plan(t), Plan::Clipboard, "{t:?}");
-        }
+    fn english_only_accents_come_off_and_other_scripts_are_left_out() {
+        // Each of these vanished when typed in the 2026-11-25 spike; now the text is typed.
+        assert_eq!(typed("Caf\u{e9} au lait"), "Cafe au lait");
+        assert_eq!(
+            typed("Z\u{fc}rich, \u{c6}r\u{f8}sk\u{f8}bing"),
+            "Zurich, AEroskobing"
+        );
+        assert_eq!(typed("stra\u{df}e and \u{fb01}le"), "strasse and file");
+        assert_eq!(typed("costs 5 \u{20ac}"), "costs 5");
+        assert_eq!(
+            typed("Tokyo \u{6771}\u{4eac} and nice \u{1f642}"),
+            "Tokyo and nice"
+        );
+        // Parakeet's misreading in an English dictation: the stray letters go, the rest stays.
+        assert_eq!(typed("on \u{41a}\u{43e}\u{433} main"), "on main");
+        assert_eq!(typed("\u{bd} cup"), "1/2 cup");
+    }
+
+    #[test]
+    fn only_nothing_typable_goes_to_the_clipboard() {
+        assert_eq!(plan("\u{6771}\u{4eac}"), Plan::Clipboard);
+        assert_eq!(plan("\u{1f642}"), Plan::Clipboard);
     }
 
     #[test]
