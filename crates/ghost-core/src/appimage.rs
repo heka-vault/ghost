@@ -69,6 +69,25 @@ pub fn var(key: &str) -> Option<String> {
     )
 }
 
+/// Which of the two variables `env` holds for another program: set, and not this program's
+/// own ([`own`]). The desktop app removes these from its environment before Tauri reads it,
+/// since Tauri's `Env` takes `APPIMAGE` as the app's own file for the login item and the
+/// updater (#178).
+pub fn foreign_in(env: impl Fn(&str) -> Option<OsString>, exe: Option<&Path>) -> Vec<&'static str> {
+    VARIABLES
+        .into_iter()
+        .filter(|key| env(key).is_some() && own(key, &env, exe).is_none())
+        .collect()
+}
+
+/// [`foreign_in`] for this process.
+pub fn foreign() -> Vec<&'static str> {
+    foreign_in(
+        |k| std::env::var_os(k),
+        std::env::current_exe().ok().as_deref(),
+    )
+}
+
 /// The AppImage this process runs from: its own file, or None.
 pub fn file() -> Option<PathBuf> {
     own(
@@ -118,6 +137,26 @@ mod tests {
                 Some("/home/p".to_string())
             );
         }
+    }
+
+    #[test]
+    fn another_programs_variables_are_named_to_be_dropped_and_ghosts_kept() {
+        // #178: the .deb's app started from a shell inside T3 Code wrote T3 Code's AppImage
+        // as Ghost's login item.
+        let deb = Some(Path::new("/usr/bin/heka-ghost-desktop"));
+        assert_eq!(foreign_in(env(&EDITOR), deb), ["APPIMAGE", "APPDIR"]);
+        let only_file = [("APPIMAGE", "/home/p/Applications/T3-Code.AppImage")];
+        assert_eq!(foreign_in(env(&only_file), deb), ["APPIMAGE"]);
+        assert!(foreign_in(env(&[("HOME", "/home/p")]), deb).is_empty());
+        // Ghost's own AppImage keeps both.
+        let ghost = [
+            ("APPIMAGE", "/home/p/Applications/Ghost.AppImage"),
+            ("APPDIR", "/tmp/.mount_GhostAb12Cd"),
+        ];
+        let exe = Some(Path::new(
+            "/tmp/.mount_GhostAb12Cd/usr/bin/heka-ghost-desktop",
+        ));
+        assert!(foreign_in(env(&ghost), exe).is_empty());
     }
 
     #[test]
