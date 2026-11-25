@@ -39,7 +39,7 @@ import type { PendingProposal, QuestionView, Turn } from "@ghost/client-ts";
 import { agentName, splitSaid, useGhost, youSpeaking } from "@ghost/ui";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import { type DictationTone, useDictation, wordsShown } from "../app/dictation";
+import { type DictationTone, splitWords, useDictation } from "../app/dictation";
 import { postureOf } from "../app/posture";
 import { useSaying, useSessionQuestions } from "../screens/session/live";
 import { Mascot } from "../ui/Mascot";
@@ -240,8 +240,17 @@ export function FloatingRoom({ stage = false }: { stage?: boolean } = {}) {
     void readSound().then(setSnd);
   }, [shell.captions, scene, reply?.at]);
   const captions = captionsShown(shell.captions, scene, snd);
-  // The words so far of a dictation, in the captions' band.
-  const dictWords = scene === "dictation" ? wordsShown(dict.view?.text) : "";
+  // The words so far of a dictation, under Wisp in its glow: the phrase just read fades in,
+  // what was shown before dims. Made again from the event each time; never kept.
+  const dictText = scene === "dictation" ? (dict.view?.text ?? null) : null;
+  const [dictWords, setDictWords] = useState<{ before: string | null; older: string; newest: string; n: number }>({ before: null, older: "", newest: "", n: 0 });
+  useEffect(() => {
+    setDictWords((w) => {
+      if (dictText === w.before) return w;
+      if (!dictText) return { before: null, older: "", newest: "", n: w.n };
+      return { before: dictText, ...splitWords(w.before, dictText), n: w.n + 1 };
+    });
+  }, [dictText]);
 
   // The model as the wait: seconds since the operator's turn closed, with nothing out and no reply.
   const [modelSecs, setModelSecs] = useState<number | null>(null);
@@ -607,6 +616,16 @@ export function FloatingRoom({ stage = false }: { stage?: boolean } = {}) {
               {label}
               {micOff && scene !== "listening" ? <span className="flt-label__mic"> · mic off</span> : null}
             </p>
+            {scene === "dictation" && (dictWords.older || dictWords.newest) && !dict.sentence && (
+              <p className="flt-dictation__words" aria-hidden>
+                <span className="flt-dictation__lines">
+                  {dictWords.older && <span className="flt-dictation__older">{dictWords.older} </span>}
+                  <span key={dictWords.n} className="flt-dictation__newest">
+                    {dictWords.newest}
+                  </span>
+                </span>
+              </p>
+            )}
             {scene === "dictation" && dict.sentence && <p className="flt-dictation__said">{dict.sentence}</p>}
             {!stage && scene !== "dictation" && <TimingLine className="flt-timing" />}
             {/* The first meeting: how to send Ghost back, said once, in Ghost's own words. */}
@@ -678,13 +697,6 @@ export function FloatingRoom({ stage = false }: { stage?: boolean } = {}) {
             </div>
           ) : null}
         </div>
-      )}
-
-      {/* A dictation's words so far, newest kept: shown here as they are read, never kept. */}
-      {forward && scene === "dictation" && dictWords && layout.captions && (
-        <p className="flt-captions flt-captions--dictation" aria-hidden style={{ left: layout.captions.x, top: layout.captions.y, width: layout.captions.w }}>
-          {dictWords}
-        </p>
       )}
 
       {forward && caption && layout.captions && (

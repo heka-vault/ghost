@@ -323,9 +323,30 @@ body {
   text-shadow: 0 1px 2px rgb(0 0 0 / 0.9), 0 0 6px rgb(0 0 0 / 0.8);
   animation: flt-arrive 300ms cubic-bezier(.16,.84,.24,1) both;
 }
-.flt-captions--dictation {
-  font-weight: 500;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--flt-tint) 45%, transparent);
+/* A dictation's words so far (ADR 0077 as amended 2026-11-25, the operator's choice of the
+   same day): under Wisp, in its glow, no box. Two lines at most, anchored at the bottom so the
+   newest stay and the oldest leave at the top, fading out there; the phrase just read fades
+   in, what was shown before is dimmer. A soft glow of the dictation's light behind the ink. */
+.flt-dictation__words {
+  margin: calc(14px * max(var(--flt-s), 0.85)) 0 0;
+  width: calc(520px * max(var(--flt-s), 0.85));
+  height: calc(2 * 1.35em);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  overflow: hidden;
+  text-align: center;
+  font: 500 calc(21px * max(var(--flt-s), 0.85)) / 1.35 var(--flt-display);
+  color: var(--flt-ink);
+  text-shadow: 0 0 18px color-mix(in srgb, var(--flt-tint) 55%, transparent), 0 1px 2px rgb(0 0 0 / 0.85), 0 0 8px rgb(0 0 0 / 0.6);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 55%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 55%);
+}
+.flt-dictation__older { opacity: 0.6; }
+.flt-dictation__newest { animation: flt-word-in 520ms cubic-bezier(.16,.84,.24,1) both; }
+@keyframes flt-word-in {
+  from { opacity: 0; filter: blur(6px); }
+  to { opacity: 1; filter: blur(0); }
 }
 
 /* ---------------------------------------------------------------- while the screen is shared (2026-11-13) */
@@ -483,7 +504,7 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .flt-ask, .flt-acts, .flt-node, .flt-sharecard, .flt-rest, .flt-shared__dot, .flt-dictation__said { animation: none; }
+  .flt-ask, .flt-acts, .flt-node, .flt-sharecard, .flt-rest, .flt-shared__dot, .flt-dictation__said, .flt-dictation__newest { animation: none; }
   .flt-line { transition: none; }
 }
 @media (forced-colors: active) {

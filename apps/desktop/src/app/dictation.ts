@@ -94,6 +94,21 @@ export function wordsShown(text: string | null | undefined, max = 160): string {
   return `…${space >= 0 ? tail.slice(space + 1) : tail}`;
 }
 
+/**
+ * The words so far, split for the floating room: what was already shown (`older`, dimmed and
+ * cut from the front to fit) and the phrase just read (`newest`, which fades in). `before` is
+ * the text the last time; when the new text doesn't continue it, all of it is new.
+ */
+export function splitWords(before: string | null | undefined, text: string | null | undefined, max = 120): { older: string; newest: string } {
+  const said = (text ?? "").replace(/\s+/g, " ").trim();
+  const prev = (before ?? "").replace(/\s+/g, " ").trim();
+  const continues = prev.length > 0 && said.startsWith(prev) && said.length > prev.length;
+  const newest = continues ? said.slice(prev.length).trim() : said;
+  const older = continues ? prev : "";
+  const room = Math.max(0, max - newest.length - 1);
+  return { older: older ? wordsShown(older, room) : "", newest };
+}
+
 /** A dictation as the page holds it: the last view, and when its end arrived (performance.now()). */
 export interface DictationSeen {
   view: DictationLiveView;

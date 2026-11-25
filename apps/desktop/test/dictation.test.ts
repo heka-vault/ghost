@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { GhostClient, type DictationKeyView, type DictationLiveView, type GhostEvent } from "@ghost/client-ts";
 import { createDictationLive } from "@ghost/ui";
 
-import { dictationSentence, dictationShown, dictationTitle, goneAt, isEnded, lingerMs, nextSeen, toneOf, wordsShown } from "../src/app/dictation";
+import { dictationSentence, dictationShown, dictationTitle, goneAt, isEnded, lingerMs, nextSeen, splitWords, toneOf, wordsShown } from "../src/app/dictation";
 import { MockDaemon } from "../src/design/mock/daemon";
 import { keyViewFor } from "../src/design/mock/dictation";
 import { composeFixtures } from "../src/design/mock/fixtures";
@@ -257,5 +257,26 @@ describe("Settings › Sound › Dictation", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("the words in the glow", () => {
+  it("fades in only the phrase just read, and dims what was already shown", () => {
+    expect(splitWords(null, "First part.")).toEqual({ older: "", newest: "First part." });
+    expect(splitWords("First part.", "First part. Second part.")).toEqual({ older: "First part.", newest: "Second part." });
+  });
+
+  it("shows all of it as new when the text doesn't continue the last", () => {
+    expect(splitWords("Something else", "First part.")).toEqual({ older: "", newest: "First part." });
+    expect(splitWords("Same", "Same")).toEqual({ older: "", newest: "Same" });
+  });
+
+  it("cuts the older words from the front to keep two lines", () => {
+    const before = "one two three four five six seven eight nine ten eleven twelve thirteen fourteen";
+    const { older, newest } = splitWords(before, `${before} and the newest phrase`, 50);
+    expect(newest).toBe("and the newest phrase");
+    expect(older.startsWith("…")).toBe(true);
+    expect(older.length + newest.length).toBeLessThanOrEqual(51);
+    expect(before.endsWith(older.slice(1))).toBe(true);
   });
 });
