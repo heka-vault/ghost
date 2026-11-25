@@ -19,6 +19,8 @@
 
 pub mod cleanup;
 pub mod clipboard;
+pub mod key;
+pub mod typing;
 
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
