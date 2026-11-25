@@ -1022,6 +1022,18 @@ pub fn describe(v: &DictationView) -> (String, i32) {
     }
 }
 
+/// What `ghostd dictate status` prints: where dictation is now, then, when nothing is going
+/// on, how the last one ended. `GET /dictation` carries the last result beside a dictation
+/// that is recording or being read; that result is not this one's, so it is left out then
+/// (#177). Exit 0 whenever the daemon answered.
+pub fn describe_status(v: &DictationView) -> (String, i32) {
+    let line = match (v.state, v.result) {
+        (DictationState::Idle, Some(r)) => format!("Not dictating. Last time: {}", r.sentence()),
+        _ => describe(&DictationView { result: None, ..*v }).0,
+    };
+    (line, 0)
+}
+
 /// `ghostd dictate start|stop|toggle|cancel|status`.
 pub async fn cli(
     args: &[String],
@@ -1030,6 +1042,7 @@ pub async fn cli(
     err: &mut dyn std::io::Write,
 ) -> i32 {
     let usage = "ghostd dictate start|stop|toggle|cancel|status";
+    let status = matches!(args.first().map(String::as_str), None | Some("status"));
     let reply = match args.first().map(String::as_str) {
         None | Some("status") => client.dictation(None).await,
         Some(verb @ ("start" | "stop" | "toggle" | "cancel")) => client.dictation(Some(verb)).await,
@@ -1049,7 +1062,11 @@ pub async fn cli(
             return 1;
         }
     };
-    let (line, code) = describe(&view);
+    let (line, code) = if status {
+        describe_status(&view)
+    } else {
+        describe(&view)
+    };
     let _ = writeln!(out, "{line}");
     code
 }
