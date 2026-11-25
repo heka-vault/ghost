@@ -83,16 +83,37 @@ pub trait PhoneEvents: Send + Sync {
     async fn send_server_message(&self, data: &Value);
 }
 
+/// The kinds of the desk's events the phone gets during a call, and nothing else: an allow
+/// list, so a new kind stays on the desk until it is added here on purpose (the dictation
+/// plan's review, 2026-11-15). What the phone protocol names (`status`, `turn`, `heard`,
+/// `pending`, `outcome`, `conversation`) and the lists it follows (`waiting`, `question`,
+/// `apps`). Left out: log lines; Ghost's voice level (twenty a second for the desktop's
+/// waveform, and the data channel shares the call); the session's `activity` (ADR 0055) and
+/// which words of a reply are heard (`saying`, ADR 0058), the desktop's conversation screen;
+/// `run` and `reach` (ADR 0060); raising the desktop's window (`show_app`, ADR 0059); the
+/// timing overlay and the microphone meter (ADR 0073); the Hearing test's levels (`hear`);
+/// and dictation's (ADR 0077). The operator's turn as it closed (`heard`) does go: the
+/// phone's captions show its words.
+pub const PHONE_EVENTS: [&str; 9] = [
+    "status",
+    "turn",
+    "heard",
+    "pending",
+    "outcome",
+    "conversation",
+    "waiting",
+    "question",
+    "apps",
+];
+
+fn for_the_phone(data: &Value) -> bool {
+    kind(data).is_some_and(|k| PHONE_EVENTS.contains(&k))
+}
+
 /// Forward the desk's events to the phone once its data channel says client-ready
-/// (`ready`): first what happened before the channel opened, minus log lines and stale
-/// statuses, then a fresh `status`, then live events, never a log line. The same JSON the
-/// control API's WebSocket sends, less the voice level (twenty a second for the desktop's
-/// waveform; nothing on the phone draws it, and the data channel shares the call) and the
-/// session's activity (ADR 0055: the desktop's conversation screen, not the phone's) and
-/// which words of a reply are heard (`saying`, ADR 0058: the desktop's highlight), and the
-/// request to raise the desktop's window (`show_app`, ADR 0059: the desk's own). The
-/// operator's turn as it closed (`heard`) does go: the phone's captions show its words.
-/// Returns when the bus closes.
+/// (`ready`): first what happened before the channel opened, minus stale statuses, then a
+/// fresh `status`, then live events; only the kinds in [`PHONE_EVENTS`]. Returns when the bus
+/// closes.
 pub async fn forward_events(
     mut events: broadcast::Receiver<String>,
     ready: impl Future<Output = ()>,
@@ -105,19 +126,8 @@ pub async fn forward_events(
         match events.try_recv() {
             Ok(text) => {
                 if let Some(data) = event_of(&text)
-                    && !matches!(
-                        kind(&data),
-                        Some(
-                            "log"
-                                | "status"
-                                | "voice"
-                                | "activity"
-                                | "saying"
-                                | "run"
-                                | "reach"
-                                | "show_app"
-                        )
-                    )
+                    && for_the_phone(&data)
+                    && kind(&data) != Some("status")
                 {
                     backlog.push(data);
                 }
@@ -136,12 +146,7 @@ pub async fn forward_events(
         match events.recv().await {
             Ok(text) => {
                 if let Some(data) = event_of(&text)
-                    && !matches!(
-                        kind(&data),
-                        Some(
-                            "log" | "voice" | "activity" | "saying" | "run" | "reach" | "show_app"
-                        )
-                    )
+                    && for_the_phone(&data)
                 {
                     sink.send_server_message(&data).await;
                 }
@@ -1451,8 +1456,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn events_reach_the_phone_after_client_ready_without_logs_levels_or_stale_statuses() {
-        let (tx, rx) = broadcast::channel::<String>(16);
+    async fn only_the_phones_kinds_reach_it_after_client_ready_and_no_stale_status() {
+        let (tx, rx) = broadcast::channel::<String>(32);
         for e in [
             json!({"type": "status", "status": {"old": true}}),
             json!({"type": "turn", "turn": {"n": 1}}),
@@ -1460,6 +1465,12 @@ mod tests {
             json!({"type": "pending", "pending": null}),
             json!({"type": "voice", "level": 0.4}),
             json!({"type": "activity", "activity": {"kind": "you_started"}}),
+            // Desk-only kinds the old deny list let through.
+            json!({"type": "meter", "meter": {"open": true, "level": 0.3}}),
+            json!({"type": "timing", "timing": {"total_ms": 900}}),
+            json!({"type": "hear", "hear": {"level": 0.2}}),
+            json!({"type": "dictation", "dictation": {"state": "recording"}}),
+            json!({"type": "something_new", "x": 1}),
         ] {
             tx.send(e.to_string()).unwrap();
         }
@@ -1488,6 +1499,15 @@ mod tests {
             .unwrap();
             tx.send(json!({"type": "waiting", "count": 2}).to_string())
                 .unwrap();
+            for e in [
+                json!({"type": "meter", "meter": {"open": true, "level": 0.5}}),
+                json!({"type": "timing", "timing": {"total_ms": 800}}),
+                json!({"type": "hear", "hear": {"level": 0.1}}),
+                json!({"type": "dictation", "dictation": {"state": "reading"}}),
+                json!({"type": "something_new", "x": 2}),
+            ] {
+                tx.send(e.to_string()).unwrap();
+            }
             tokio::time::sleep(Duration::from_millis(50)).await;
             drop(tx);
         };
