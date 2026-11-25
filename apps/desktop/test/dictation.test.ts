@@ -12,7 +12,7 @@ import { composeFixtures } from "../src/design/mock/fixtures";
 import { scenarioByName } from "../src/design/mock/scenarios";
 import { labelOf, sceneOf } from "../src/floating/scene";
 import { DictationRows } from "../src/screens/settings/Dictation";
-import { BINDING, HOLD_OR_TAP, keyBusy, keyName, keyNotes, keyShown, tidyLine } from "../src/screens/settings/dictation";
+import { ANOTHER_OPENROUTER, BINDING, HOLD_OR_TAP, OPENROUTER_MODELS, keyBusy, keyName, keyNotes, keyShown, tidyBody, tidyOptions, tidyValue, tidyWhere } from "../src/screens/settings/dictation";
 
 // settings/model.ts reads the address at load (its draft's key); Node has no window.
 vi.hoisted(() => {
@@ -145,9 +145,21 @@ describe("the floating scene of a dictation", () => {
 });
 
 describe("Settings › Sound › Dictation", () => {
-  const ready: DictationKeyView = { on: true, state: "ready", key: "Press F9", typing: "allowed", tidy: true, tidy_with: "Anthropic" };
-  const rows = (v: DictationKeyView, pending: "on" | "off" | "tidy" | "change" | null = null) =>
-    renderToStaticMarkup(createElement(DictationRows, { view: v, pending, online: true, onTurn: () => undefined, onTidy: () => undefined, onChange: () => undefined }));
+  const ready: DictationKeyView = {
+    on: true,
+    state: "ready",
+    key: "Press F9",
+    typing: "allowed",
+    tidy: true,
+    tidy_source: "subscription",
+    tidy_with: "Claude Code",
+    tidy_model: "haiku",
+    tidy_model_default: "anthropic/claude-haiku-5.5",
+    openrouter: false,
+    subscription: true,
+  };
+  const rows = (v: DictationKeyView, pending: "on" | "off" | "tidy" | "change" | null = null, keyControl: string | null = null) =>
+    renderToStaticMarkup(createElement(DictationRows, { view: v, pending, online: true, onTurn: () => undefined, onTidy: () => undefined, onChange: () => undefined, keyControl: keyControl && createElement("p", null, keyControl) }));
 
   it("shows the key in GNOME's words, short, with Change key, and hold or tap", () => {
     expect(keyName("Press F9")).toBe("F9");
@@ -173,10 +185,70 @@ describe("Settings › Sound › Dictation", () => {
     expect(html).not.toContain("Change key");
   });
 
-  it("says where the tidy sends the words, or that there is no model", () => {
-    expect(tidyLine("Anthropic")).toBe("Your words go to Anthropic to be tidied before they’re typed.");
-    expect(tidyLine(null)).toBe("No model is set up, so Ghost types what it heard.");
-    expect(rows({ ...ready, tidy_with: null })).toContain("No model is set up");
+  it("says where the tidy sends the words and about how long, never a password", () => {
+    expect(tidyWhere(ready)).toBe("Your words go to Anthropic through your Claude Code, about 3 s.");
+    expect(tidyWhere({ tidy_source: "openrouter", tidy_with: "OpenRouter", openrouter: true })).toBe("Your words go to OpenRouter, under a second.");
+    expect(tidyWhere({ tidy_source: "openrouter", tidy_with: null, openrouter: false })).toBe("Add your OpenRouter key below to tidy there. Until then Ghost types what it heard.");
+    expect(tidyWhere({ tidy_source: "off", tidy_with: null, openrouter: true })).toBe("Ghost types what it heard, as it heard it.");
+    expect(tidyWhere({ tidy_source: "subscription", tidy_with: "Anthropic", openrouter: false })).toBe("Your words go to Anthropic to be tidied, within 3 s.");
+    expect(tidyWhere({ tidy_source: "subscription", tidy_with: null, openrouter: false })).toBe("No model is set up, so Ghost types what it heard.");
+    for (const tidy_source of ["off", "subscription", "openrouter"] as const)
+      for (const openrouter of [true, false])
+        for (const tidy_with of [null, "Claude Code", "OpenRouter", "Anthropic"]) expect(tidyWhere({ tidy_source, tidy_with, openrouter }).toLowerCase()).not.toContain("password");
+    expect(rows({ ...ready, tidy_with: null, tidy_model: "", subscription: false })).toContain("No model is set up");
+  });
+
+  it("offers Off, your Claude Code's three and OpenRouter's, which wait for its key", () => {
+    const flat = (v: Parameters<typeof tidyOptions>[0]) => tidyOptions(v).flatMap((g) => g.options.map((o) => ({ ...o, group: g.label })));
+    const opts = flat(ready);
+    expect(opts.map((o) => o.value)).toEqual([
+      "off",
+      "subscription:haiku",
+      "subscription:sonnet",
+      "subscription:opus",
+      ...OPENROUTER_MODELS.map((m) => `openrouter:${m.id}`),
+      ANOTHER_OPENROUTER,
+    ]);
+    expect(opts.find((o) => o.value === "subscription:haiku")?.label).toBe("Claude Code · Haiku");
+    expect(opts.find((o) => o.value === "subscription:haiku")?.group).toBe("Your Claude Code, about 3 s");
+    // No key: OpenRouter's are there, disabled; with it, enabled.
+    expect(opts.filter((o) => o.value.startsWith("openrouter")).every((o) => o.disabled)).toBe(true);
+    expect(flat({ ...ready, openrouter: true }).filter((o) => o.value.startsWith("openrouter")).every((o) => !o.disabled)).toBe(true);
+    expect(tidyOptions({ ...ready, openrouter: true }).at(-1)?.label).toBe("OpenRouter, under a second");
+    // Without Claude Code on this computer, its options aren't offered.
+    const none = flat({ ...ready, subscription: false, tidy_source: "off", tidy_model: "" });
+    expect(none.some((o) => o.value.startsWith("subscription"))).toBe(false);
+    // A tidy kept from before, on Ghost's model of another kind, is shown as that.
+    const kept = flat({ ...ready, subscription: false, tidy_model: "", tidy_with: "Anthropic" });
+    expect(kept.find((o) => o.value === "subscription:")?.label).toBe("Ghost’s model (Anthropic)");
+    // OpenRouter's ids are as OpenRouter writes them.
+    for (const m of OPENROUTER_MODELS) expect(m.id).toMatch(/^[a-z0-9.-]+\/[a-z0-9.:-]+$/);
+  });
+
+  it("reads the daemon's choice into the select and sends a choice back", () => {
+    expect(tidyValue(ready)).toBe("subscription:haiku");
+    expect(tidyValue({ tidy_source: "off", tidy_model: "" })).toBe("off");
+    expect(tidyValue({ tidy_source: "openrouter", tidy_model: "anthropic/claude-haiku-5.5" })).toBe("openrouter:anthropic/claude-haiku-5.5");
+    expect(tidyValue({ tidy_source: "openrouter", tidy_model: "mistralai/ministral-8b" })).toBe(ANOTHER_OPENROUTER);
+    expect(tidyBody("off")).toEqual({ tidy_source: "off" });
+    expect(tidyBody("subscription:sonnet")).toEqual({ tidy_source: "subscription", tidy_model: "sonnet" });
+    expect(tidyBody("openrouter:meta-llama/llama-3.1-8b-instruct:nitro")).toEqual({ tidy_source: "openrouter", tidy_model: "meta-llama/llama-3.1-8b-instruct:nitro" });
+    expect(tidyBody(ANOTHER_OPENROUTER, " mistralai/ministral-8b ")).toEqual({ tidy_source: "openrouter", tidy_model: "mistralai/ministral-8b" });
+  });
+
+  it("draws the select, the typed id only for another model, and the key control while OpenRouter needs it", () => {
+    const html = rows(ready, null, "OPENROUTER KEY ROW");
+    expect(html).toContain("Tidy with");
+    expect(html).toContain("<optgroup");
+    expect(html).toContain("Claude Code · Sonnet");
+    expect(html).not.toContain("Model on OpenRouter");
+    expect(html).toContain("OPENROUTER KEY ROW"); // no key yet: right there
+    // Key set and Claude Code chosen: the key row stays out of the way.
+    expect(rows({ ...ready, openrouter: true }, null, "OPENROUTER KEY ROW")).not.toContain("OPENROUTER KEY ROW");
+    const another = rows({ ...ready, openrouter: true, tidy_source: "openrouter", tidy_with: "OpenRouter", tidy_model: "mistralai/ministral-8b" }, null, "OPENROUTER KEY ROW");
+    expect(another).toContain("Model on OpenRouter");
+    expect(another).toContain("mistralai/ministral-8b");
+    expect(another).toContain("OPENROUTER KEY ROW");
   });
 
   it("has a line for each state that needs one, in Ghost's words", () => {
@@ -206,11 +278,13 @@ describe("Settings › Sound › Dictation", () => {
     await client.dictationKey();
     await client.setDictationKey({ on: true });
     await client.setDictationKey({ tidy: false });
+    await client.setDictationTidy("subscription", "sonnet");
     await client.changeDictationKey();
     expect(calls.map((c) => [c.method, c.path, c.body])).toEqual([
       ["GET", "/dictation/key", ""],
       ["PUT", "/dictation/key", '{"on":true}'],
       ["PUT", "/dictation/key", '{"tidy":false}'],
+      ["PUT", "/dictation/key", '{"tidy_source":"subscription","tidy_model":"sonnet"}'],
       ["POST", "/dictation/key/change", ""],
     ]);
   });
@@ -232,7 +306,22 @@ describe("Settings › Sound › Dictation", () => {
       vi.useRealTimers();
     }
     expect(keyViewFor(new URLSearchParams("dictkey=unavailable")).on).toBe(false);
-    expect(keyViewFor(new URLSearchParams("dictkey=ready&typing=refused&tidy=none"))).toMatchObject({ key: "Press F9", typing: "refused", tidy_with: null });
+    expect(keyViewFor(new URLSearchParams("dictkey=ready&typing=refused&tidy=none"))).toMatchObject({ key: "Press F9", typing: "refused", tidy_with: null, subscription: false });
+    expect(keyViewFor(new URLSearchParams(""))).toMatchObject({ tidy_source: "subscription", tidy_model: "haiku", tidy_with: "Claude Code" });
+    expect(keyViewFor(new URLSearchParams("tidy=another"))).toMatchObject({ tidy_source: "openrouter", openrouter: true });
+  });
+
+  it("follows Tidy with in the mock, OpenRouter's key from the vault", async () => {
+    const s = scenarioByName("passive");
+    const d = new MockDaemon(s, composeFixtures(s), {});
+    const q = new URLSearchParams();
+    const set = (b: object) => d.handle("PUT", "/dictation/key", q, b) as Promise<DictationKeyView>;
+    expect(await set({ tidy_source: "subscription", tidy_model: "opus" })).toMatchObject({ tidy_source: "subscription", tidy_model: "opus", tidy_with: "Claude Code" });
+    const or = await set({ tidy_source: "openrouter", tidy_model: "google/gemini-3.5-flash-lite" });
+    expect(or).toMatchObject({ tidy_source: "openrouter", tidy_model: "google/gemini-3.5-flash-lite" });
+    expect(or.tidy_with).toBe(or.openrouter ? "OpenRouter" : null);
+    expect(await set({ tidy_source: "off" })).toMatchObject({ tidy: false, tidy_source: "off", tidy_with: null });
+    d.dispose();
   });
 
   it("plays each designed dictation as the daemon sends it, ending the way its scenario says", async () => {

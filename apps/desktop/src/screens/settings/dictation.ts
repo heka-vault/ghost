@@ -21,17 +21,79 @@ export function keyName(words: string | null | undefined): string | null {
   return m && !/\s(or|and)\s/i.test(m[1]) ? m[1] : w;
 }
 
-/** Under the tidy's switch: where the words go, or that nothing does. */
-export function tidyLine(tidyWith: string | null | undefined): string {
-  return tidyWith ? `Your words go to ${tidyWith} to be tidied before they’re typed.` : "No model is set up, so Ghost types what it heard.";
+/**
+ * "Tidy with" (ADR 0078 as amended): Off, the operator's own Claude Code with one of its models,
+ * or OpenRouter with one of a few quick models or another they name. OpenRouter's ids were
+ * checked against `https://openrouter.ai/api/v1/models` on 2026-11-25.
+ */
+export const OPENROUTER_MODELS: readonly { id: string; label: string }[] = [
+  { id: "anthropic/claude-haiku-5.5", label: "Claude Haiku 5.5" },
+  { id: "google/gemini-3.5-flash-lite", label: "Gemini 3.5 Flash Lite" },
+  { id: "meta-llama/llama-3.1-8b-instruct:nitro", label: "Llama 3.1 8B, fastest host" },
+];
+/** Claude Code's own names for its models, which its `--model` takes. */
+export const CLAUDE_CODE_MODELS: readonly { id: string; label: string }[] = [
+  { id: "haiku", label: "Haiku" },
+  { id: "sonnet", label: "Sonnet" },
+  { id: "opus", label: "Opus" },
+];
+/** The select's value for a model of OpenRouter's that isn't one of the listed. */
+export const ANOTHER_OPENROUTER = "openrouter:*";
+
+export type TidyChoiceView = Pick<DictationKeyView, "tidy_source" | "tidy_model" | "tidy_with" | "openrouter" | "subscription">;
+export type TidyOption = { value: string; label: string; disabled?: boolean };
+export type TidyGroup = { label: string | null; options: TidyOption[] };
+
+/** The select's value for what the daemon says now. */
+export function tidyValue(v: Pick<DictationKeyView, "tidy_source" | "tidy_model">): string {
+  const model = v.tidy_model ?? "";
+  if (v.tidy_source === "off") return "off";
+  if (v.tidy_source === "subscription") return `subscription:${model}`;
+  return OPENROUTER_MODELS.some((m) => m.id === model) ? `openrouter:${model}` : ANOTHER_OPENROUTER;
 }
 
-/** OpenRouter's row for the tidy (ADR 0078): where the words go, or what adding its password does. */
-export const OPENROUTER_TITLE = "Tidy with OpenRouter (fastest)";
-export function openRouterLine(v: Pick<DictationKeyView, "openrouter" | "tidy_model">): string {
-  return v.openrouter
-    ? `Your OpenRouter password is set, so the tidy asks ${v.tidy_model || "OpenRouter’s quick model"} there instead of your model. It has 3 seconds, like any tidy.`
-    : "Add an OpenRouter password and the tidy goes there instead of your model: a small, quick model answers well inside the tidy’s 3 seconds, where a program started for each dictation often can’t.";
+/**
+ * The select's options, grouped: Off; Claude Code's three when it can tidy (it is Ghost's model
+ * or on this computer) or is chosen now; OpenRouter's, disabled until its key is set. A
+ * subscription's tidy chosen before there was a choice, with Ghost's model of another kind, is
+ * shown as that.
+ */
+export function tidyOptions(v: TidyChoiceView): TidyGroup[] {
+  const groups: TidyGroup[] = [{ label: null, options: [{ value: "off", label: "Off" }] }];
+  const sub: TidyOption[] = [];
+  if (v.subscription || v.tidy_source === "subscription") {
+    for (const m of CLAUDE_CODE_MODELS) sub.push({ value: `subscription:${m.id}`, label: `Claude Code · ${m.label}` });
+  }
+  if (v.tidy_source === "subscription" && !v.tidy_model) sub.push({ value: "subscription:", label: v.tidy_with ? `Ghost’s model (${v.tidy_with})` : "Ghost’s model" });
+  if (sub.length) groups.push({ label: "Your Claude Code, about 3 s", options: sub });
+  const locked = !v.openrouter;
+  groups.push({
+    label: locked ? "OpenRouter, once its key is added" : "OpenRouter, under a second",
+    options: [
+      ...OPENROUTER_MODELS.map((m) => ({ value: `openrouter:${m.id}`, label: `OpenRouter · ${m.label}`, disabled: locked })),
+      { value: ANOTHER_OPENROUTER, label: "Another OpenRouter model…", disabled: locked },
+    ],
+  });
+  return groups;
+}
+
+/** What choosing `value` sends: the source and its model (`another` is the typed OpenRouter id). */
+export function tidyBody(value: string, another = ""): { tidy_source: "off" | "subscription" | "openrouter"; tidy_model?: string } {
+  if (value === "off") return { tidy_source: "off" };
+  if (value === ANOTHER_OPENROUTER) return { tidy_source: "openrouter", tidy_model: another.trim() };
+  const [source, ...rest] = value.split(":");
+  const model = rest.join(":");
+  return source === "subscription" ? { tidy_source: "subscription", tidy_model: model } : { tidy_source: "openrouter", tidy_model: model };
+}
+
+/** Under the select: where the words go and about how long, plainly. */
+export function tidyWhere(v: Pick<DictationKeyView, "tidy_source" | "tidy_with" | "openrouter">): string {
+  if (v.tidy_source === "off") return "Ghost types what it heard, as it heard it.";
+  if (v.tidy_source === "openrouter")
+    return v.openrouter ? "Your words go to OpenRouter, under a second." : "Add your OpenRouter key below to tidy there. Until then Ghost types what it heard.";
+  if (v.tidy_with === "Claude Code") return "Your words go to Anthropic through your Claude Code, about 3 s.";
+  if (v.tidy_with) return `Your words go to ${v.tidy_with} to be tidied, within 3 s.`;
+  return "No model is set up, so Ghost types what it heard.";
 }
 
 /** A model id as OpenRouter writes them; null when it may be saved. */

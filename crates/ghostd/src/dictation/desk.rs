@@ -12,7 +12,7 @@
 //! - Typing's restore token is a password (ADR 0036): in the vault as [`TYPING_TOKEN`], never
 //!   logged.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Instant;
 
@@ -20,8 +20,9 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use ghost_api::dictation::{
     DictationKeyBody, DictationKeyPort, DictationKeyState, DictationKeyView, DictationLiveView,
-    DictationReason, DictationState, DictationTyping,
+    DictationReason, DictationState, DictationTyping, TidySource,
 };
+use ghost_core::connection::{CLAUDE_CODE, ModelConnection, Target};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tracing::{info, warn};
@@ -44,15 +45,23 @@ cursor is. Turn it on in Settings › Sound.";
 /// The keys Ghost asks for, in order: the first the desktop doesn't already use.
 pub const PREFERRED: [&str; 5] = ["F9", "F10", "F8", "F7", "F6"];
 
-/// The operator's choices, kept in the store.
+/// The operator's choices, kept in the store. A choice kept before "Tidy with" (`on`, `tidy`
+/// and OpenRouter's `tidy_model` only) still reads, and means what it did then
+/// ([`Choice::source`]).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Choice {
     pub on: bool,
+    /// The tidy's switch from before "Tidy with": false is off. Kept equal to
+    /// `tidy_source != off` once there is a source.
     pub tidy: bool,
-    /// The model the tidy asks on OpenRouter when `OPENROUTER_API_KEY` is set; None is
-    /// [`OPENROUTER_TIDY_MODEL`].
+    /// "Tidy with"; None until the operator chooses, read by [`Choice::source`].
+    pub tidy_source: Option<TidySource>,
+    /// The model the tidy asks on OpenRouter; None is [`OPENROUTER_TIDY_MODEL`].
     pub tidy_model: Option<String>,
+    /// Claude Code's model for the subscription's tidy (one of [`CLAUDE_CODE_ALIASES`]); None
+    /// is Ghost's own model, the fast one when set.
+    pub tidy_alias: Option<String>,
 }
 
 impl Default for Choice {
@@ -60,9 +69,125 @@ impl Default for Choice {
         Self {
             on: false,
             tidy: true,
+            tidy_source: None,
             tidy_model: None,
+            tidy_alias: None,
         }
     }
+}
+
+impl Choice {
+    /// Where the tidy goes. A choice made before "Tidy with" reads as it behaved: off when its
+    /// switch was off, OpenRouter when its key is set, else the subscription (Ghost's model).
+    pub fn source(&self, openrouter_key: bool) -> TidySource {
+        match self.tidy_source {
+            Some(s) => s,
+            None if !self.tidy => TidySource::Off,
+            None if openrouter_key => TidySource::Openrouter,
+            None => TidySource::Subscription,
+        }
+    }
+
+    /// A change from Settings › Sound: the older switch first, then "Tidy with" and its model.
+    pub fn apply(&mut self, body: &DictationKeyBody) {
+        if let Some(t) = body.tidy {
+            if !t {
+                self.tidy_source = Some(TidySource::Off);
+            } else if self.tidy_source == Some(TidySource::Off) {
+                self.tidy_source = None; // back on as it was before there was a choice
+            }
+            self.tidy = t;
+        }
+        let model = body.tidy_model.as_deref().map(str::trim);
+        match body.tidy_source {
+            Some(source) => {
+                self.tidy_source = Some(source);
+                self.tidy = source != TidySource::Off;
+                match (source, model) {
+                    (TidySource::Openrouter, Some(m)) => self.set_openrouter_model(m),
+                    (TidySource::Subscription, Some("")) => self.tidy_alias = None,
+                    (TidySource::Subscription, Some(m)) if alias_ok(m) => {
+                        self.tidy_alias = Some(m.to_string())
+                    }
+                    _ => {}
+                }
+            }
+            // An older desktop names OpenRouter's model alone.
+            None => {
+                if let Some(m) = model {
+                    self.set_openrouter_model(m);
+                }
+            }
+        }
+    }
+
+    fn set_openrouter_model(&mut self, m: &str) {
+        if m.is_empty() || m == OPENROUTER_TIDY_MODEL {
+            self.tidy_model = None;
+        } else if tidy_model_ok(m) {
+            self.tidy_model = Some(m.to_string());
+        }
+    }
+}
+
+/// Claude Code's own names for its models, which `claude --model` takes.
+pub const CLAUDE_CODE_ALIASES: [&str; 3] = ["haiku", "sonnet", "opus"];
+
+pub fn alias_ok(m: &str) -> bool {
+    CLAUDE_CODE_ALIASES.contains(&m)
+}
+
+/// Claude Code asked with `alias`: Ghost's connection with its model replaced when Ghost runs
+/// Claude Code, else a Claude Code connection of its own. Its `--model` takes the alias.
+pub fn claude_code_target(env: &HashMap<String, String>, alias: &str) -> Target {
+    let ghost = ModelConnection::from_env(env);
+    if ghost.provider == CLAUDE_CODE {
+        let mut t = ghost.target(env);
+        t.model = alias.to_string();
+        return t;
+    }
+    let own: HashMap<&str, &str> = [
+        ("GHOST_LLM_PROVIDER", CLAUDE_CODE),
+        ("GHOST_LLM_MODEL", alias),
+    ]
+    .into_iter()
+    .collect();
+    ModelConnection::from_env(&own).target(&own)
+}
+
+/// Where the tidy goes for `choice`: OpenRouter with its key, Claude Code with the chosen
+/// alias, or Ghost's own model (`ghost`, asked only then). None when the tidy is off or has
+/// nothing to go to (OpenRouter without its key, no model set up): the text is typed as read.
+pub fn tidy_target(
+    choice: &Choice,
+    env: &HashMap<String, String>,
+    ghost: impl FnOnce() -> Option<Target>,
+) -> Option<Target> {
+    let openrouter = openrouter_target(env, choice.tidy_model.as_deref());
+    match choice.source(openrouter.is_some()) {
+        TidySource::Off => None,
+        TidySource::Openrouter => openrouter,
+        TidySource::Subscription => match choice.tidy_alias.as_deref().filter(|a| alias_ok(a)) {
+            Some(alias) => Some(claude_code_target(env, alias)),
+            None => ghost(),
+        },
+    }
+}
+
+/// Ghost's own model for the tidy: the fast one when set, else the main one; None when the
+/// connection isn't set up.
+fn ghost_target(
+    voice: &ghost_voice::config::VoiceSettings,
+    env: &HashMap<String, String>,
+) -> Option<Target> {
+    if !voice.llm_problems(Some(env)).is_empty() {
+        return None;
+    }
+    Some(
+        voice
+            .llm_fast_target(Some(env))
+            .unwrap_or_else(|| voice.llm_target(Some(env))),
+    )
 }
 
 /// The password that turns the tidy to OpenRouter (ADR 0078): the same one OpenRouter's
@@ -84,15 +209,12 @@ pub fn tidy_model_ok(m: &str) -> bool {
 
 /// Where the tidy goes on OpenRouter, when `env` holds its key: an OpenAI-protocol connection
 /// to [`OPENROUTER_URL`] with `model`. None without the key.
-pub fn openrouter_target(
-    env: &std::collections::HashMap<String, String>,
-    model: Option<&str>,
-) -> Option<ghost_core::connection::Target> {
+pub fn openrouter_target(env: &HashMap<String, String>, model: Option<&str>) -> Option<Target> {
     let key = env.get(OPENROUTER_KEY).filter(|k| !k.trim().is_empty())?;
     let model = model
         .filter(|m| tidy_model_ok(m))
         .unwrap_or(OPENROUTER_TIDY_MODEL);
-    let conn_env: std::collections::HashMap<&str, &str> = [
+    let conn_env: HashMap<&str, &str> = [
         ("GHOST_LLM_PROVIDER", "custom"),
         ("GHOST_LLM_PROTOCOL", "openai"),
         ("GHOST_LLM_BASE_URL", OPENROUTER_URL),
@@ -102,7 +224,7 @@ pub fn openrouter_target(
     ]
     .into_iter()
     .collect();
-    let mut target = ghost_core::connection::ModelConnection::from_env(&conn_env).target(&conn_env);
+    let mut target = ModelConnection::from_env(&conn_env).target(&conn_env);
     target.provider = "openrouter".into();
     Some(target)
 }
@@ -315,21 +437,12 @@ impl KeyDesk {
         }
     }
 
-    /// The provider the tidy's words go to, when a model is set: OpenRouter when its key is
-    /// set (ADR 0078), else the operator's model.
-    fn tidy_with(&self) -> Option<String> {
+    /// The provider the tidy's words go to, by the operator's choice; None when it is off or
+    /// has nothing to go to.
+    fn tidy_with(&self, choice: &Choice, env: &HashMap<String, String>) -> Option<String> {
         let d = self.d.upgrade()?;
-        let env = d.env();
-        if openrouter_target(&env, None).is_some() {
-            return Some("OpenRouter".into());
-        }
         let voice = d.voice();
-        if !voice.llm_problems(Some(&env)).is_empty() {
-            return None;
-        }
-        let target = voice
-            .llm_fast_target(Some(&env))
-            .unwrap_or_else(|| voice.llm_target(Some(&env)));
+        let target = tidy_target(choice, env, || ghost_target(&voice, env))?;
         Some(
             ghost_core::connection::provider(&target.provider)
                 .map(|p| p.title.to_string())
@@ -341,38 +454,50 @@ impl KeyDesk {
 impl KeyDesk {
     pub fn view(&self) -> DictationKeyView {
         let choice = self.choice();
+        let env = self.d.upgrade().map(|d| d.env()).unwrap_or_default();
+        let openrouter = openrouter_target(&env, None).is_some();
+        let source = choice.source(openrouter);
+        let ghost = ModelConnection::from_env(&env);
+        let on_claude_code = ghost.provider == CLAUDE_CODE;
+        let tidy_model = match source {
+            TidySource::Off => String::new(),
+            TidySource::Openrouter => choice
+                .tidy_model
+                .clone()
+                .unwrap_or_else(|| OPENROUTER_TIDY_MODEL.into()),
+            // No alias chosen: Ghost's own model, named when it is one of Claude Code's.
+            TidySource::Subscription => choice.tidy_alias.clone().unwrap_or_else(|| {
+                let m = ghost.wire_model();
+                if on_claude_code && alias_ok(&m) {
+                    m
+                } else {
+                    String::new()
+                }
+            }),
+        };
+        let subscription = on_claude_code
+            || ghost_core::subscriptions::which(ghost_core::other_tools::program::BINARY, &env)
+                .is_some();
+        let tidy_with = self.tidy_with(&choice, &env);
         let st = lock(&self.status);
         DictationKeyView {
             on: choice.on,
             state: st.state,
             key: st.key.clone(),
             typing: st.typing,
-            tidy: choice.tidy,
-            tidy_with: self.tidy_with(),
-            tidy_model: choice
-                .tidy_model
-                .clone()
-                .unwrap_or_else(|| OPENROUTER_TIDY_MODEL.into()),
+            tidy: source != TidySource::Off,
+            tidy_with,
+            tidy_source: source,
+            tidy_model,
             tidy_model_default: OPENROUTER_TIDY_MODEL.into(),
-            openrouter: self
-                .d
-                .upgrade()
-                .is_some_and(|d| openrouter_target(&d.env(), None).is_some()),
+            openrouter,
+            subscription,
         }
     }
 
     pub async fn set(self: &Arc<Self>, body: DictationKeyBody) -> DictationKeyView {
         let mut choice = self.choice();
-        if let Some(t) = body.tidy {
-            choice.tidy = t;
-        }
-        if let Some(m) = body.tidy_model.as_deref().map(str::trim) {
-            if m.is_empty() || m == OPENROUTER_TIDY_MODEL {
-                choice.tidy_model = None;
-            } else if tidy_model_ok(m) {
-                choice.tidy_model = Some(m.to_string());
-            }
-        }
+        choice.apply(&body);
         let turned = body.on.filter(|&on| on != choice.on);
         if let Some(on) = body.on {
             choice.on = on;
@@ -576,28 +701,11 @@ pub struct ModelReviewer {
 impl Reviewer for ModelReviewer {
     async fn review(&self, text: &str) -> Option<Zeroizing<String>> {
         let choice = self.desk.upgrade()?.choice();
-        if !choice.tidy {
-            return None;
-        }
         let d = self.d.upgrade()?;
         let env = d.env();
-        // OpenRouter when its key is set (ADR 0078): quicker than a program started per call,
-        // and the main model's connection left alone. The same budget and guard-rails apply.
-        if let Some(target) = openrouter_target(&env, choice.tidy_model.as_deref()) {
-            let model = ghost_llm::model::shared(&target).ok()?;
-            return model
-                .complete(review::SYSTEM, text, review::MAX_TOKENS)
-                .await
-                .ok()
-                .map(Zeroizing::new);
-        }
-        let voice = d.voice();
-        if !voice.llm_problems(Some(&env)).is_empty() {
-            return None;
-        }
-        let target = voice
-            .llm_fast_target(Some(&env))
-            .unwrap_or_else(|| voice.llm_target(Some(&env)));
+        // By the operator's "Tidy with" (ADR 0078): OpenRouter, Claude Code with the model they
+        // chose, or Ghost's own model. The same budget and guard-rails apply to each.
+        let target = tidy_target(&choice, &env, || ghost_target(&d.voice(), &env))?;
         let answer = if let Some(cc) = crate::daemon::claude_code_for(&target, &env) {
             cc.complete(review::SYSTEM, text).await.ok()
         } else {
@@ -761,7 +869,9 @@ mod tests {
             Choice {
                 on: false,
                 tidy: true,
+                tidy_source: None,
                 tidy_model: None,
+                tidy_alias: None,
             }
         );
         let old: Choice = serde_json::from_str("{}").unwrap();
@@ -771,8 +881,195 @@ mod tests {
     }
 
     #[test]
+    fn a_choice_kept_before_tidy_with_reads_as_it_behaved() {
+        let read = |json: &str| serde_json::from_str::<Choice>(json).unwrap();
+        // Off stays off, with the key or without.
+        let off = read(r#"{"on":true,"tidy":false}"#);
+        assert_eq!(off.source(true), TidySource::Off);
+        assert_eq!(off.source(false), TidySource::Off);
+        // On: OpenRouter when its key is set, else the subscription.
+        let on = read(r#"{"on":true,"tidy":true,"tidy_model":"google/gemini-3.5-flash-lite"}"#);
+        assert_eq!(on.source(true), TidySource::Openrouter);
+        assert_eq!(on.source(false), TidySource::Subscription);
+        assert_eq!(
+            on.tidy_model.as_deref(),
+            Some("google/gemini-3.5-flash-lite")
+        );
+        // A choice made is kept as made, whatever the key.
+        let chosen = read(r#"{"tidy":true,"tidy_source":"subscription","tidy_alias":"sonnet"}"#);
+        assert_eq!(chosen.source(true), TidySource::Subscription);
+        assert_eq!(chosen.tidy_alias.as_deref(), Some("sonnet"));
+        // And it goes back into the store the way it came out.
+        let json = serde_json::to_string(&chosen).unwrap();
+        assert!(json.contains(r#""tidy_source":"subscription""#), "{json}");
+        assert_eq!(read(&json), chosen);
+    }
+
+    #[test]
+    fn tidy_with_is_set_from_settings_and_the_older_switch_still_works() {
+        let body = |source: Option<TidySource>, model: Option<&str>| DictationKeyBody {
+            tidy_source: source,
+            tidy_model: model.map(String::from),
+            ..Default::default()
+        };
+        let mut c = Choice::default();
+        c.apply(&body(Some(TidySource::Subscription), Some("haiku")));
+        assert_eq!(
+            (c.tidy_source, c.tidy, c.tidy_alias.as_deref()),
+            (Some(TidySource::Subscription), true, Some("haiku"))
+        );
+        // Not one of Claude Code's names: kept as it was.
+        c.apply(&body(Some(TidySource::Subscription), Some("gpt-6")));
+        assert_eq!(c.tidy_alias.as_deref(), Some("haiku"));
+        c.apply(&body(
+            Some(TidySource::Openrouter),
+            Some("meta-llama/llama-3.1-8b-instruct:nitro"),
+        ));
+        assert_eq!(c.source(false), TidySource::Openrouter);
+        assert_eq!(
+            c.tidy_model.as_deref(),
+            Some("meta-llama/llama-3.1-8b-instruct:nitro")
+        );
+        assert_eq!(
+            c.tidy_alias.as_deref(),
+            Some("haiku"),
+            "each source keeps its own model"
+        );
+        c.apply(&body(Some(TidySource::Openrouter), Some("")));
+        assert_eq!(c.tidy_model, None, "empty is the default");
+        c.apply(&body(Some(TidySource::Off), None));
+        assert_eq!((c.source(true), c.tidy), (TidySource::Off, false));
+        // The older switch: on again is as before there was a choice.
+        c.apply(&DictationKeyBody {
+            tidy: Some(true),
+            ..Default::default()
+        });
+        assert_eq!((c.tidy_source, c.tidy), (None, true));
+        c.apply(&DictationKeyBody {
+            tidy: Some(false),
+            ..Default::default()
+        });
+        assert_eq!(c.source(false), TidySource::Off);
+        // An older desktop naming OpenRouter's model alone changes only that.
+        let mut c = Choice::default();
+        c.apply(&body(None, Some("google/gemini-3.8-flash")));
+        assert_eq!(
+            (c.tidy_source, c.tidy_model.as_deref()),
+            (None, Some("google/gemini-3.8-flash"))
+        );
+    }
+
+    #[test]
+    fn the_tidy_goes_where_the_choice_says() {
+        let key = (
+            OPENROUTER_KEY.to_string(),
+            "sk-or-fixture-0123456789".to_string(),
+        );
+        let with_key: HashMap<String, String> = [key.clone()].into();
+        let no_key: HashMap<String, String> = HashMap::new();
+        let on_cc: HashMap<String, String> = [
+            key,
+            ("GHOST_LLM_PROVIDER".to_string(), CLAUDE_CODE.to_string()),
+            ("GHOST_LLM_MODEL".to_string(), "opus".to_string()),
+            ("GHOST_LLM_TIMEOUT_SECS".to_string(), "40".to_string()),
+        ]
+        .into();
+        let ghosts = || {
+            let env: HashMap<&str, &str> = [
+                ("GHOST_LLM_PROVIDER", "anthropic"),
+                ("ANTHROPIC_API_KEY", "x"),
+            ]
+            .into();
+            Some(ModelConnection::from_env(&env).target(&env))
+        };
+        let never = || -> Option<Target> { panic!("Ghost's own model is not asked") };
+        let choice = |source: Option<TidySource>, alias: Option<&str>| Choice {
+            tidy_source: source,
+            tidy_alias: alias.map(String::from),
+            ..Choice::default()
+        };
+
+        // Off: nowhere.
+        assert!(tidy_target(&choice(Some(TidySource::Off), None), &with_key, never).is_none());
+        // OpenRouter: with its key only; without it, the text as read, never another model.
+        let t = tidy_target(
+            &choice(Some(TidySource::Openrouter), None),
+            &with_key,
+            never,
+        )
+        .unwrap();
+        assert_eq!(
+            (t.provider.as_str(), t.model.as_str()),
+            ("openrouter", OPENROUTER_TIDY_MODEL)
+        );
+        assert!(tidy_target(&choice(Some(TidySource::Openrouter), None), &no_key, never).is_none());
+        // The subscription with a chosen model: Claude Code with that alias, even beside
+        // OpenRouter's key and when Ghost's model is another provider.
+        let t = tidy_target(
+            &choice(Some(TidySource::Subscription), Some("haiku")),
+            &with_key,
+            never,
+        )
+        .unwrap();
+        assert_eq!(
+            (t.provider.as_str(), t.model.as_str()),
+            (CLAUDE_CODE, "haiku")
+        );
+        // When Ghost runs Claude Code: its connection, the model replaced.
+        let t = tidy_target(
+            &choice(Some(TidySource::Subscription), Some("sonnet")),
+            &on_cc,
+            never,
+        )
+        .unwrap();
+        assert_eq!(
+            (t.provider.as_str(), t.model.as_str(), t.timeout_secs),
+            (CLAUDE_CODE, "sonnet", Some(40.0))
+        );
+        // No model chosen: Ghost's own.
+        let t = tidy_target(
+            &choice(Some(TidySource::Subscription), None),
+            &with_key,
+            ghosts,
+        )
+        .unwrap();
+        assert_eq!(t.provider, "anthropic");
+        assert!(
+            tidy_target(
+                &choice(Some(TidySource::Subscription), None),
+                &no_key,
+                || None
+            )
+            .is_none()
+        );
+        // A choice kept from before: OpenRouter with the key, Ghost's model without.
+        assert_eq!(
+            tidy_target(&choice(None, None), &with_key, never)
+                .unwrap()
+                .provider,
+            "openrouter"
+        );
+        assert_eq!(
+            tidy_target(&choice(None, None), &no_key, ghosts)
+                .unwrap()
+                .provider,
+            "anthropic"
+        );
+        // An alias that isn't one is never put on the program's command line.
+        assert_eq!(
+            tidy_target(
+                &choice(Some(TidySource::Subscription), Some("--dangerous")),
+                &no_key,
+                ghosts
+            )
+            .unwrap()
+            .provider,
+            "anthropic"
+        );
+    }
+
+    #[test]
     fn the_tidy_goes_to_openrouter_only_with_its_key() {
-        use std::collections::HashMap;
         let none: HashMap<String, String> = HashMap::new();
         assert!(openrouter_target(&none, None).is_none());
         let blank: HashMap<String, String> = [(OPENROUTER_KEY.to_string(), " ".to_string())].into();

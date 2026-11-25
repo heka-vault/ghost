@@ -7,7 +7,7 @@
  * its own sign-in. Never "Sign in with Claude" or "Sign in with Google" as if Ghost were the one
  * signing in, nothing that says a vendor made or backs Ghost, nothing that says it is free.
  */
-import type { SubscriptionJobView, SubscriptionView } from "@ghost/client-ts";
+import type { ModelConnectionView, SubscriptionJobView, SubscriptionView } from "@ghost/client-ts";
 
 /** What the card's one button does. */
 export type CardAction =
@@ -120,4 +120,44 @@ export function endedWords(title: string, j: SubscriptionJobView): { title: stri
   if (j.state === "failed") return { title: j.kind === "install" ? `${title} didn’t install` : `${title} isn’t signed in`, tone: "danger" };
   if (j.state === "cancelled") return { title: "Cancelled", tone: undefined };
   return null;
+}
+
+/** One choice of a model select. */
+export type ModelOption = { value: string; label: string };
+
+/** Claude Code's own names for its models, which `claude --model` takes. */
+const CLAUDE_CODE_MODELS: readonly ModelOption[] = [
+  { value: "opus", label: "Opus" },
+  { value: "sonnet", label: "Sonnet" },
+  { value: "haiku", label: "Haiku" },
+];
+
+export const THINKS_WITH = "Ghost thinks with";
+export const THINKS_LINE = "Answers you and does the work.";
+export const QUICK_WITH = "Quick first replies with";
+export const QUICK_LINE = "Answers first while Ghost’s model takes over when it’s needed.";
+
+export interface ModelChoices {
+  thinks: { value: string; options: ModelOption[] };
+  quick: { value: string; options: ModelOption[]; disabled: boolean; note: string | null };
+}
+
+/**
+ * The two selects under the subscription Ghost uses (Claude Code for now): its model
+ * (`GHOST_LLM_MODEL`) and the quick first reply's (`GHOST_LLM_FAST_MODEL`, ADR 0050), from
+ * `/model`'s view. A model saved some other way is shown as itself. A program answers every
+ * call itself (ADR 0069), so the quick first reply waits for a provider that has one.
+ */
+export function modelChoices(conn: Pick<ModelConnectionView, "provider" | "wire_model" | "fast_model" | "fast_wire_model" | "providers">): ModelChoices {
+  const thinks = [...CLAUDE_CODE_MODELS];
+  if (conn.wire_model && !thinks.some((o) => o.value === conn.wire_model)) thinks.push({ value: conn.wire_model, label: conn.wire_model });
+  const program = !!conn.providers.find((p) => p.id === conn.provider)?.program;
+  const quick: ModelOption[] = [{ value: "", label: "None" }, CLAUDE_CODE_MODELS[2], CLAUDE_CODE_MODELS[1]];
+  const saved = program ? "" : (conn.fast_wire_model ?? "");
+  if (saved && !quick.some((o) => o.value === saved)) quick.push({ value: saved, label: saved });
+  const title = conn.providers.find((p) => p.id === conn.provider)?.title ?? conn.provider;
+  return {
+    thinks: { value: conn.wire_model, options: thinks },
+    quick: { value: saved, options: quick, disabled: program, note: program ? `Not with ${title} yet: it answers every turn itself.` : null },
+  };
 }

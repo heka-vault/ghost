@@ -308,6 +308,7 @@ export class MockDaemon {
       (e) => this.emit(e),
       typeof window !== "undefined" ? new URLSearchParams(window.location.search) : new URLSearchParams(),
       scenario.dictation ?? null,
+      () => this.passwords?.vault.state === "open" && !!this.passwords.passwords.find((x) => x.name === "OPENROUTER_API_KEY")?.set,
     );
     this.phone = f.settings.phone;
     const hoursAgo = (h: number) => new Date(Date.now() - h * 3600_000).toISOString();
@@ -359,6 +360,16 @@ export class MockDaemon {
     for (const [id, p] of Object.entries(f.session.results)) this.callResults.set(id, { ...p, id, session_id: f.session.sessionId ?? "" });
     this.questions = f.session.questions;
     this.settings = f.settings.settings;
+    // ?subs=in-use: Claude Code is Ghost's model (ADR 0078), with &llmmodel and &llmfast for its two models.
+    const q = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : new URLSearchParams();
+    if (q.get("subs") === "in-use") {
+      const values: Record<string, string> = { ...this.settings.values, GHOST_LLM_PROVIDER: "claude-code" };
+      for (const k of ["GHOST_LLM_ENDPOINT", "GHOST_LLM_PROTOCOL", "GHOST_LLM_BASE_URL", "GHOST_LLM_PASSWORD"]) delete values[k];
+      if (q.get("llmmodel")) values.GHOST_LLM_MODEL = q.get("llmmodel") ?? "";
+      else delete values.GHOST_LLM_MODEL;
+      if (q.get("llmfast")) values.GHOST_LLM_FAST_MODEL = q.get("llmfast") ?? "";
+      this.settings = { ...this.settings, values };
+    }
     this.subscriptions = new MockSubscriptions(
       typeof window !== "undefined" ? new URLSearchParams(window.location.search) : new URLSearchParams(),
       () => (this.settings.values.GHOST_LLM_PROVIDER ?? "").trim(),

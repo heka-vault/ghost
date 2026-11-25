@@ -1881,16 +1881,28 @@
             ]
           },
           "tidy": {
+            "description": "The older switch: false is `tidy_source: off`; true turns an off tidy back on as it\nwas before there was a choice.",
             "type": [
               "boolean",
               "null"
             ]
           },
           "tidy_model": {
-            "description": "The tidy's model on OpenRouter (`anthropic/claude-haiku-5.5`); empty is the default.",
+            "description": "The tidy's model for its source: an OpenRouter id (`anthropic/claude-haiku-5.5`) or\nClaude Code's alias (`haiku`); empty is the default.",
             "type": [
               "string",
               "null"
+            ]
+          },
+          "tidy_source": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TidySource",
+                "description": "\"Tidy with\". With it, `tidy_model` names that source's model (absent or empty: its\ndefault)."
+              },
+              {
+                "type": "null"
+              }
             ]
           }
         },
@@ -1923,26 +1935,34 @@
             "type": "boolean"
           },
           "openrouter": {
-            "description": "`OPENROUTER_API_KEY` is set: the tidy goes to OpenRouter. The name, never a value.",
+            "description": "`OPENROUTER_API_KEY` is set, so OpenRouter can tidy. The name, never a value.",
             "type": "boolean"
           },
           "state": {
             "$ref": "#/components/schemas/DictationKeyState"
           },
+          "subscription": {
+            "description": "Claude Code can tidy: it is Ghost's model, or it is on this computer.",
+            "type": "boolean"
+          },
           "tidy": {
-            "description": "\"Tidy with the model\": the text goes to the model before it is typed.",
+            "description": "The tidy is on: `tidy_source` is not `off`.",
             "type": "boolean"
           },
           "tidy_model": {
-            "description": "The model the tidy asks on OpenRouter.",
+            "description": "The model the tidy asks for its source: OpenRouter's model id, or Claude Code's alias\n(`opus`, `sonnet`, `haiku`); \"\" when the subscription's tidy uses Ghost's own model.",
             "type": "string"
           },
           "tidy_model_default": {
             "description": "OpenRouter's model when none is chosen.",
             "type": "string"
           },
+          "tidy_source": {
+            "$ref": "#/components/schemas/TidySource",
+            "description": "\"Tidy with\": off, the subscription, or OpenRouter. A choice made before there was one is\nread as it behaved: OpenRouter when its key is set, else the subscription."
+          },
           "tidy_with": {
-            "description": "Where the words go for the tidy: the provider's name (\"Anthropic\", \"Claude Code\"),\n\"OpenRouter\" when its password is set (ADR 0078), or None when no model is set (the\ntidy is skipped).",
+            "description": "Where the words go for the tidy: the provider's name (\"Claude Code\", \"Anthropic\",\n\"OpenRouter\"), or None when the tidy is off or has nothing to go to (no model set up,\nOpenRouter chosen without its key): the text is typed as read.",
             "type": [
               "string",
               "null"
@@ -1958,7 +1978,9 @@
           "key",
           "typing",
           "tidy",
-          "tidy_with"
+          "tidy_with",
+          "tidy_source",
+          "subscription"
         ],
         "type": "object"
       },
@@ -8469,6 +8491,15 @@
           "hold",
           "quiet",
           "timed"
+        ],
+        "type": "string"
+      },
+      "TidySource": {
+        "description": "Where the dictation key's tidy sends the words (Settings › Sound › Dictation, \"Tidy with\").",
+        "enum": [
+          "off",
+          "subscription",
+          "openrouter"
         ],
         "type": "string"
       },

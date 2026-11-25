@@ -76,6 +76,7 @@ export type PolicyUpdate = Schemas["PolicyUpdate"];
 export type PolicyResult = Schemas["PolicyResult"];
 export type SettingsView = Schemas["SettingsView"];
 export type SettingsUpdate = Schemas["SettingsUpdate"];
+export type SettingsResult = Schemas["SettingsResult"];
 /** Ghost's vault (ADR 0036): names and metadata only; a value never comes back. */
 export type PasswordsView = Schemas["PasswordsView"];
 export type PasswordInfo = Schemas["PasswordInfo"];
@@ -223,6 +224,7 @@ export type DictationScene = Schemas["DictationScene"];
 /** The dictation key in Settings › Sound: the switch, where it stands, GNOME's words for the key, the tidy. */
 export type DictationKeyView = Schemas["DictationKeyView"];
 export type DictationKeyBody = Schemas["DictationKeyBody"];
+export type TidySource = Schemas["TidySource"];
 /** A run started or ended (ADR 0060). */
 export type RunPhase = Schemas["RunEvent"]["phase"];
 /** `aec` is ghost.mic, after the echo canceller; `raw` the array under it. */
@@ -960,6 +962,10 @@ export class GhostClient {
   /** Turn the key on or off, or the tidy. Turning it on waits for GNOME's dialogs. */
   setDictationKey(body: DictationKeyBody) {
     return unwrap(this.api.PUT("/dictation/key", { body }));
+  }
+  /** "Tidy with": off, the subscription (Claude Code's `haiku`, `sonnet` or `opus`; empty is Ghost's own model) or OpenRouter (a model id; empty is its default). */
+  setDictationTidy(source: TidySource, model?: string) {
+    return this.setDictationKey(model == null ? { tidy_source: source } : { tidy_source: source, tidy_model: model });
   }
   /** Open GNOME's own picker for the key. */
   changeDictationKey() {

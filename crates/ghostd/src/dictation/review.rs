@@ -1,6 +1,7 @@
 //! The model's tidy (ADR 0077 as amended 2026-11-25): at the end of a dictation from the key,
-//! the text goes to the operator's configured model (the fast one when set) to fix obvious
-//! mistakes, by their switch ("Tidy with the model", on by default when a model is set). The
+//! the text goes to the model the operator chose under "Tidy with" (Claude Code with its
+//! alias, OpenRouter, or Ghost's own model; `desk::tidy_target`) to fix obvious mistakes, or
+//! nowhere when they chose Off (ADR 0078 as amended). The
 //! model is asked for the text only, with no tools; it has [`WAIT`] to answer, and its answer
 //! is taken only when it changed a small share of the words ([`accept`]). Otherwise, or on any
 //! failure, the text as Parakeet read it and the cleanup left it is typed. Nothing here is

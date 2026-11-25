@@ -28,12 +28,21 @@ its Today page shows the same.
 ## What to expect
 
 - **Up to two minutes** a time. At two minutes Ghost stops by itself and types what you said.
-- **Tidied by your model**, when one is set up and **Tidy with the model** is on (it is by
-  default): misheard words, punctuation and capitals are fixed before typing. If the model
-  takes more than three seconds, or changes more than small fixes, Ghost types what it heard.
-  With an OpenRouter password set (Settings › Sound › Dictation, **Tidy with OpenRouter**), the
-  tidy asks a small, quick model there instead of your model (ADR 0078): Claude Code started
-  for each dictation is often slower than three seconds.
+- **Tidied by a model**, by your choice under **Tidy with** (Settings › Sound › Dictation):
+  misheard words, punctuation and capitals are fixed before typing. If the model takes more
+  than three seconds, or changes more than small fixes, Ghost types what it heard. The choices:
+  - **Off**: Ghost types what it heard.
+  - **Claude Code · Haiku, Sonnet or Opus**: your own Claude Code with that model (offered
+    while it is Ghost's model or on this computer). About 3 seconds, most of it the program
+    starting, so some dictations come back untidied.
+  - **OpenRouter** · Claude Haiku 5.5 (`anthropic/claude-haiku-5.5`), Gemini 3.5 Flash Lite
+    (`google/gemini-3.5-flash-lite`), Llama 3.1 8B on the fastest host
+    (`meta-llama/llama-3.1-8b-instruct:nitro`), or another model id you type: under a second.
+    These need your OpenRouter key, added right there (it goes into Ghost's vault and never
+    comes back out); until it is, they are shown but can't be chosen.
+
+  A Ghost set up before there was a choice keeps doing what it did: OpenRouter when its key is
+  set, otherwise Ghost's own model (shown as "Ghost's model"), and Off if the tidy was off.
 - **Fillers go**: "um", "uh", "er", "hmm". A word said three times in a row ("I I I") is kept
   once. Line breaks, tabs and control characters are never typed: no Enter is ever sent, so
   typing into a terminal never runs a command.
@@ -96,10 +105,10 @@ quitting Ghost always works.
 - **To the window you're typing in**, or the clipboard when they can't be typed.
 - **To your own screen**, as you speak: Ghost's floating room or its window shows them, and
   keeps nothing.
-- **To your model, when Tidy with the model is on.** Settings › Sound says which: with a cloud
-  provider ("Anthropic", "Claude Code", "OpenRouter"), your dictated words leave this computer to
-be tidied.
-  Turn the switch off to keep them here.
+- **To the model you chose under Tidy with**, unless it is Off. Settings › Sound says where in
+  one line under it ("Your words go to Anthropic through your Claude Code, about 3 s." or
+  "Your words go to OpenRouter, under a second."): your dictated words leave this computer to be
+  tidied. Choose Off to keep them here.
 
 Ghost doesn't store them, log them (not even in debug mode), send them to the phone, or give
 them to an agent, a tool or an outside app. No tool of Ghost's can start dictation; only you

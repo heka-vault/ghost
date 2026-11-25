@@ -5,8 +5,12 @@
  *   ?dictkey=off|ready|unavailable|refused|failed   where the key stands (default off; `ready`
  *                    is F9, bound)
  *   &typing=refused  Ghost isn't allowed to type: the text goes to the clipboard
- *   &tidy=none       no model set up, so nothing to tidy with
+ *   &tidy=none       no model set up and no Claude Code, so nothing to tidy with
+ *   &tidy=off        "Tidy with" is Off
  *   &tidy=openrouter OPENROUTER_API_KEY set: the tidy goes to OpenRouter (ADR 0078)
+ *   &tidy=another    OpenRouter with a model of the operator's own (the id field shows)
+ *   &orkey=none      OpenRouter's key isn't set, whatever the vault says: its options are disabled
+ *   (default)        the operator's Claude Code with Haiku; OpenRouter's options as the vault says
  *
  * Scenarios (`?mock=dictation…`, on `floating.html` or the main window): `dictation` plays every
  * ending in turn, over and over; `dictation-listening` and `dictation-writing` hold that state;
@@ -14,6 +18,8 @@
  * that way, every few seconds.
  */
 import type { DictationKeyBody, DictationKeyView, DictationLiveView, DictationScene, GhostEvent } from "@ghost/client-ts";
+
+const OPENROUTER_DEFAULT = "anthropic/claude-haiku-5.5";
 
 export type DictationDesign = "loop" | "listening" | "writing" | "typed" | "clipboard" | "nothing_heard" | "stopped";
 
@@ -35,12 +41,18 @@ export function keyViewFor(params: URLSearchParams): DictationKeyView {
     state,
     key: state === "ready" ? "Press F9" : null,
     typing: params.get("typing") === "refused" ? "refused" : state === "ready" ? "allowed" : "unknown",
-    tidy: true,
-    tidy_with: params.get("tidy") === "none" ? null : params.get("tidy") === "openrouter" ? "OpenRouter" : "Anthropic",
-    tidy_model: "anthropic/claude-haiku-5.5",
-    tidy_model_default: "anthropic/claude-haiku-5.5",
-    openrouter: params.get("tidy") === "openrouter",
+    ...tidyFor(params.get("tidy"), params.get("tidy") === "openrouter" || params.get("tidy") === "another"),
   };
+}
+
+/** The tidy's part of the key's view, as the daemon resolves it (`desk::tidy_target`). */
+function tidyFor(tidy: string | null, openrouter: boolean): Pick<DictationKeyView, "tidy" | "tidy_source" | "tidy_with" | "tidy_model" | "tidy_model_default" | "openrouter" | "subscription"> {
+  const base = { tidy_model_default: OPENROUTER_DEFAULT, openrouter, subscription: tidy !== "none" };
+  if (tidy === "off") return { ...base, tidy: false, tidy_source: "off", tidy_with: null, tidy_model: "" };
+  if (tidy === "none") return { ...base, tidy: true, tidy_source: "subscription", tidy_with: null, tidy_model: "" };
+  if (tidy === "openrouter" || tidy === "another")
+    return { ...base, tidy: true, tidy_source: "openrouter", tidy_with: openrouter ? "OpenRouter" : null, tidy_model: tidy === "another" ? "mistralai/ministral-8b" : OPENROUTER_DEFAULT };
+  return { ...base, tidy: true, tidy_source: "subscription", tidy_with: "Claude Code", tidy_model: "haiku" };
 }
 
 export class MockDictation {
@@ -52,20 +64,38 @@ export class MockDictation {
     private readonly emit: (e: GhostEvent) => void,
     params: URLSearchParams,
     private readonly design: DictationDesign | null,
+    /** Whether the vault holds OpenRouter's key (never its value); none: as the address says. */
+    private readonly openRouterKey: () => boolean = () => false,
   ) {
     this.key = keyViewFor(params);
+    this.noKey = params.get("orkey") === "none";
+  }
+
+  private readonly noKey: boolean;
+
+  /** The view with OpenRouter's key as the vault has it now. */
+  private current(): DictationKeyView {
+    const openrouter = !this.noKey && (this.key.openrouter || this.openRouterKey());
+    const k = { ...this.key, openrouter };
+    if (k.tidy_source === "openrouter") k.tidy_with = openrouter ? "OpenRouter" : null;
+    return k;
   }
 
   handle(method: string, path: string, body: Record<string, unknown>): Promise<DictationKeyView> | DictationKeyView | undefined {
-    if (method === "GET" && path === "/dictation/key") return this.key;
+    if (method === "GET" && path === "/dictation/key") return this.current();
     if (method === "PUT" && path === "/dictation/key") return this.set(body as DictationKeyBody);
     if (method === "POST" && path === "/dictation/key/change") return this.wait(900).then(() => (this.key = { ...this.key, key: this.key.key === "Press F9" ? "Press Ctrl+Alt+D" : "Press F9" }));
     return undefined;
   }
 
   private async set(b: DictationKeyBody): Promise<DictationKeyView> {
-    if (b.tidy != null) this.key = { ...this.key, tidy: b.tidy };
-    if (b.tidy_model != null) this.key = { ...this.key, tidy_model: b.tidy_model.trim() || (this.key.tidy_model_default ?? "") };
+    if (b.tidy === false) this.key = { ...this.key, tidy: false, tidy_source: "off", tidy_with: null, tidy_model: "" };
+    const model = b.tidy_model?.trim();
+    if (b.tidy_source === "off") this.key = { ...this.key, tidy: false, tidy_source: "off", tidy_with: null, tidy_model: "" };
+    if (b.tidy_source === "subscription")
+      this.key = { ...this.key, tidy: true, tidy_source: "subscription", tidy_with: "Claude Code", tidy_model: model && ["haiku", "sonnet", "opus"].includes(model) ? model : "haiku" };
+    if (b.tidy_source === "openrouter") this.key = { ...this.key, tidy: true, tidy_source: "openrouter", tidy_model: model || OPENROUTER_DEFAULT };
+    if (b.tidy_source == null && model != null) this.key = { ...this.key, tidy_model: model || OPENROUTER_DEFAULT };
     if (b.on === false) this.key = { ...this.key, on: false, state: "off", key: null };
     if (b.on === true && !this.key.on) {
       // GNOME's two dialogs: the key, then typing. The switch waits for both.
@@ -73,7 +103,7 @@ export class MockDictation {
       await this.wait(2600);
       this.key = { ...this.key, state: "ready", key: "Press F9", typing: this.key.typing === "refused" ? "refused" : "allowed" };
     }
-    return this.key;
+    return this.current();
   }
 
   /** Start the scenario's dictation on the first subscriber. */

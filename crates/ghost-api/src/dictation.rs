@@ -327,6 +327,19 @@ pub enum DictationTyping {
     Refused,
 }
 
+/// Where the dictation key's tidy sends the words (Settings › Sound › Dictation, "Tidy with").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TidySource {
+    /// No tidy: the text is typed as Parakeet read it and the cleanup left it.
+    Off,
+    /// The operator's own subscription (Claude Code, ADR 0069) with the model they chose, or
+    /// Ghost's own model when none is chosen.
+    Subscription,
+    /// OpenRouter, with `OPENROUTER_API_KEY` from Ghost's vault (ADR 0078).
+    Openrouter,
+}
+
 /// The dictation key in Settings › Sound.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct DictationKeyView {
@@ -337,22 +350,36 @@ pub struct DictationKeyView {
     #[schema(required)]
     pub key: Option<String>,
     pub typing: DictationTyping,
-    /// "Tidy with the model": the text goes to the model before it is typed.
+    /// The tidy is on: `tidy_source` is not `off`.
     pub tidy: bool,
-    /// Where the words go for the tidy: the provider's name ("Anthropic", "Claude Code"),
-    /// "OpenRouter" when its password is set (ADR 0078), or None when no model is set (the
-    /// tidy is skipped).
+    /// Where the words go for the tidy: the provider's name ("Claude Code", "Anthropic",
+    /// "OpenRouter"), or None when the tidy is off or has nothing to go to (no model set up,
+    /// OpenRouter chosen without its key): the text is typed as read.
     #[schema(required)]
     pub tidy_with: Option<String>,
-    /// The model the tidy asks on OpenRouter.
+    /// "Tidy with": off, the subscription, or OpenRouter. A choice made before there was one is
+    /// read as it behaved: OpenRouter when its key is set, else the subscription.
+    #[serde(default = "tidy_source_default")]
+    #[schema(required)]
+    pub tidy_source: TidySource,
+    /// The model the tidy asks for its source: OpenRouter's model id, or Claude Code's alias
+    /// (`opus`, `sonnet`, `haiku`); "" when the subscription's tidy uses Ghost's own model.
     #[serde(default)]
     pub tidy_model: String,
     /// OpenRouter's model when none is chosen.
     #[serde(default)]
     pub tidy_model_default: String,
-    /// `OPENROUTER_API_KEY` is set: the tidy goes to OpenRouter. The name, never a value.
+    /// `OPENROUTER_API_KEY` is set, so OpenRouter can tidy. The name, never a value.
     #[serde(default)]
     pub openrouter: bool,
+    /// Claude Code can tidy: it is Ghost's model, or it is on this computer.
+    #[serde(default)]
+    #[schema(required)]
+    pub subscription: bool,
+}
+
+fn tidy_source_default() -> TidySource {
+    TidySource::Subscription
 }
 
 /// A change to the dictation key's switches; absent fields stay as they are.
@@ -360,9 +387,16 @@ pub struct DictationKeyView {
 pub struct DictationKeyBody {
     #[serde(default)]
     pub on: Option<bool>,
+    /// The older switch: false is `tidy_source: off`; true turns an off tidy back on as it
+    /// was before there was a choice.
     #[serde(default)]
     pub tidy: Option<bool>,
-    /// The tidy's model on OpenRouter (`anthropic/claude-haiku-5.5`); empty is the default.
+    /// "Tidy with". With it, `tidy_model` names that source's model (absent or empty: its
+    /// default).
+    #[serde(default)]
+    pub tidy_source: Option<TidySource>,
+    /// The tidy's model for its source: an OpenRouter id (`anthropic/claude-haiku-5.5`) or
+    /// Claude Code's alias (`haiku`); empty is the default.
     #[serde(default)]
     pub tidy_model: Option<String>,
 }

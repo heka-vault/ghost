@@ -2,9 +2,9 @@ import type { SubscriptionJobView, SubscriptionView } from "@ghost/client-ts";
 import { describe, expect, it, vi } from "vitest";
 
 import { MockSubscriptions } from "../src/design/mock/subscriptions";
-import { openRouterLine, tidyModelProblem } from "../src/screens/settings/dictation";
+import { tidyModelProblem } from "../src/screens/settings/dictation";
 import { otherProviderOf } from "../src/screens/settings/ModelPage";
-import { cardFace, codeProblem, endedWords, inUseLine, installWords, jobRunning } from "../src/screens/settings/subscriptions";
+import { QUICK_LINE, THINKS_LINE, cardFace, codeProblem, endedWords, inUseLine, installWords, jobRunning, modelChoices } from "../src/screens/settings/subscriptions";
 
 const sub = (o: Partial<SubscriptionView> = {}): SubscriptionView => ({
   id: "claude-code",
@@ -122,12 +122,41 @@ describe("the mock's subscriptions play out", () => {
 });
 
 describe("dictation's tidy on OpenRouter", () => {
-  it("says where the words go and checks a model id", () => {
-    expect(openRouterLine({ openrouter: true, tidy_model: "anthropic/claude-haiku-5.5" })).toContain("asks anthropic/claude-haiku-5.5 there");
-    expect(openRouterLine({ openrouter: false, tidy_model: "" })).toContain("Add an OpenRouter password");
+  it("checks a model id", () => {
     expect(tidyModelProblem("")).toBeNull();
     expect(tidyModelProblem("meta-llama/llama-3.1-8b-instruct:nitro")).toBeNull();
     expect(tidyModelProblem("not a model")).not.toBeNull();
+  });
+});
+
+describe("Ghost thinks with, and quick first replies with", () => {
+  const providers = [
+    { id: "claude-code", title: "Claude Code", program: true },
+    { id: "anthropic", title: "Anthropic", program: false },
+  ] as never;
+  const conn = (o: object) => ({ provider: "claude-code", wire_model: "haiku", fast_model: null, fast_wire_model: null, providers, ...o });
+
+  it("offers Claude Code's three models and shows the one Ghost uses now", () => {
+    const c = modelChoices(conn({ wire_model: "sonnet" }));
+    expect(c.thinks.options.map((o) => o.label)).toEqual(["Opus", "Sonnet", "Haiku"]);
+    expect(c.thinks.value).toBe("sonnet");
+    // A model saved some other way is shown as itself, not lost.
+    const other = modelChoices(conn({ wire_model: "claude-opus-5-5" }));
+    expect(other.thinks.value).toBe("claude-opus-5-5");
+    expect(other.thinks.options.at(-1)).toEqual({ value: "claude-opus-5-5", label: "claude-opus-5-5" });
+  });
+
+  it("offers None, Haiku or Sonnet first, and says why Claude Code has none", () => {
+    const c = modelChoices(conn({ fast_model: "haiku" }));
+    expect(c.quick.options.map((o) => o.label)).toEqual(["None", "Haiku", "Sonnet"]);
+    // Claude Code answers every turn itself (ADR 0069): None, and the select says why.
+    expect(c.quick).toMatchObject({ value: "", disabled: true });
+    expect(c.quick.note).toBe("Not with Claude Code yet: it answers every turn itself.");
+    // A provider with a fast model shows it, enabled.
+    const direct = modelChoices(conn({ provider: "anthropic", wire_model: "sonnet", fast_model: "haiku", fast_wire_model: "haiku" }));
+    expect(direct.quick).toMatchObject({ value: "haiku", disabled: false, note: null });
+    expect(THINKS_LINE).toBe("Answers you and does the work.");
+    expect(QUICK_LINE).toBe("Answers first while Ghost’s model takes over when it’s needed.");
   });
 });
 

@@ -119,6 +119,18 @@ system prompt, the same `accept` guard; the switch "Tidy with the model" still t
 `tidy_with` says "OpenRouter". The key is the same one OpenRouter's sign-in on the Model page
 keeps, so an operator who signed in there tidies on OpenRouter too.
 
+### Amended 2026-11-25: model selectors
+
+Settings › Model gains, under the subscription Ghost uses (Claude Code for now), **Ghost thinks
+with** (Opus, Sonnet, Haiku: Claude Code's own aliases, `GHOST_LLM_MODEL`) and **Quick first
+replies with** (None, Haiku, Sonnet: `GHOST_LLM_FAST_MODEL`, ADR 0050), saved through
+`PUT /settings` like any setting. The second stays disabled while the model is a program, since
+ADR 0069 keeps the fast model off for one. Dictation's tidy becomes an explicit choice, **Tidy
+with** (`tidy_source`: off, the subscription with Claude Code's alias, or OpenRouter with a
+listed or typed model; `desk::tidy_target`), replacing the rule above that OpenRouter's key
+alone turns the tidy there. A choice kept from before reads as it behaved. The guard-rails are
+unchanged: 3 seconds, `accept`, nothing kept or logged.
+
 ## Consequences
 
 - A newcomer with none of the three installs one, signs in and uses it without a terminal (but

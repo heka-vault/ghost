@@ -200,9 +200,38 @@ async fn codex_and_antigravity_are_coming_next_and_antigravity_signs_in_in_a_ter
         "{}",
         r.text
     );
+    // Antigravity not installed: said so, and no terminal is tried.
     let r = c.post("/subscriptions/antigravity/sign-in", None).await;
-    assert_eq!(r.status, 409);
-    assert!(r.text.contains("`agy`"), "{}", r.text);
+    assert_eq!(r.status, 404, "{}", r.text);
+    assert!(r.text.contains("isn't installed"), "{}", r.text);
+    // Installed: Ghost opens a terminal running it. A fake terminal first on the PATH
+    // records how it was asked, so no real window opens in a test.
+    put(s.dir.path(), "agy", "echo 'Please sign in'\nexit 1\n");
+    let asked = s.dir.path().join("terminal-asked");
+    put(
+        s.dir.path(),
+        "x-terminal-emulator",
+        &format!("echo \"$@\" > {}\n", asked.display()),
+    );
+    let r = c.post("/subscriptions/antigravity/sign-in", None).await;
+    assert_eq!(r.status, 200, "{}", r.text);
+    assert!(
+        r.text.contains("opened a terminal running agy"),
+        "{}",
+        r.text
+    );
+    let mut said = String::new();
+    for _ in 0..50 {
+        said = std::fs::read_to_string(&asked).unwrap_or_default();
+        if !said.is_empty() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert!(
+        said.starts_with("-e ") && said.trim_end().ends_with("/agy"),
+        "{said}"
+    );
     assert_eq!(
         c.post("/subscriptions/nope/install", None).await.status,
         404

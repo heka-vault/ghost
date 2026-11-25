@@ -39,7 +39,7 @@ const MODELS: Record<string, { id: string; name?: string }[]> = {
   "claude-code": [{ id: "default", name: "Default (recommended)" }, { id: "opus", name: "Opus" }, { id: "sonnet", name: "Sonnet" }, { id: "haiku", name: "Haiku" }],
 };
 
-const KEYS = ["GHOST_LLM_PROVIDER", "GHOST_LLM_MODEL", "GHOST_LLM_PROTOCOL", "GHOST_LLM_BASE_URL", "GHOST_LLM_PASSWORD", "GHOST_LLM_HEADERS", "GHOST_LLM_TIMEOUT_SECS"];
+const KEYS = ["GHOST_LLM_PROVIDER", "GHOST_LLM_MODEL", "GHOST_LLM_FAST_MODEL", "GHOST_LLM_PROTOCOL", "GHOST_LLM_BASE_URL", "GHOST_LLM_PASSWORD", "GHOST_LLM_HEADERS", "GHOST_LLM_TIMEOUT_SECS"];
 const toClaudeOnOpenRouter = (m: string) => (m.includes("/") ? m : `anthropic/${m.replace(/^(claude-[a-z]+)-(\d+)-(\d+)$/, "$1-$2.$3")}`);
 
 export class MockModel {
@@ -100,6 +100,9 @@ export class MockModel {
       base_url_override: values.GHOST_LLM_BASE_URL || null,
       model,
       wire_model: wire,
+      // A program answers every call itself (ADR 0069): no fast model beside it.
+      fast_model: values.GHOST_LLM_FAST_MODEL || null,
+      fast_wire_model: !spec.program && values.GHOST_LLM_FAST_MODEL && values.GHOST_LLM_FAST_MODEL !== wire ? values.GHOST_LLM_FAST_MODEL : null,
       password,
       password_set: set,
       headers: {},

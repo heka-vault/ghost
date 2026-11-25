@@ -3287,9 +3287,17 @@ export interface components {
         /** @description A change to the dictation key's switches; absent fields stay as they are. */
         DictationKeyBody: {
             on?: boolean | null;
+            /**
+             * @description The older switch: false is `tidy_source: off`; true turns an off tidy back on as it
+             *     was before there was a choice.
+             */
             tidy?: boolean | null;
-            /** @description The tidy's model on OpenRouter (`anthropic/claude-haiku-5.5`); empty is the default. */
+            /**
+             * @description The tidy's model for its source: an OpenRouter id (`anthropic/claude-haiku-5.5`) or
+             *     Claude Code's alias (`haiku`); empty is the default.
+             */
             tidy_model?: string | null;
+            tidy_source?: components["schemas"]["TidySource"] | null;
         };
         /**
          * @description Where the dictation key stands.
@@ -3302,19 +3310,29 @@ export interface components {
             key: string | null;
             /** @description The operator's switch, "Hold a key to dictate". */
             on: boolean;
-            /** @description `OPENROUTER_API_KEY` is set: the tidy goes to OpenRouter. The name, never a value. */
+            /** @description `OPENROUTER_API_KEY` is set, so OpenRouter can tidy. The name, never a value. */
             openrouter?: boolean;
             state: components["schemas"]["DictationKeyState"];
-            /** @description "Tidy with the model": the text goes to the model before it is typed. */
+            /** @description Claude Code can tidy: it is Ghost's model, or it is on this computer. */
+            subscription: boolean;
+            /** @description The tidy is on: `tidy_source` is not `off`. */
             tidy: boolean;
-            /** @description The model the tidy asks on OpenRouter. */
+            /**
+             * @description The model the tidy asks for its source: OpenRouter's model id, or Claude Code's alias
+             *     (`opus`, `sonnet`, `haiku`); "" when the subscription's tidy uses Ghost's own model.
+             */
             tidy_model?: string;
             /** @description OpenRouter's model when none is chosen. */
             tidy_model_default?: string;
             /**
-             * @description Where the words go for the tidy: the provider's name ("Anthropic", "Claude Code"),
-             *     "OpenRouter" when its password is set (ADR 0078), or None when no model is set (the
-             *     tidy is skipped).
+             * @description "Tidy with": off, the subscription, or OpenRouter. A choice made before there was one is
+             *     read as it behaved: OpenRouter when its key is set, else the subscription.
+             */
+            tidy_source: components["schemas"]["TidySource"];
+            /**
+             * @description Where the words go for the tidy: the provider's name ("Claude Code", "Anthropic",
+             *     "OpenRouter"), or None when the tidy is off or has nothing to go to (no model set up,
+             *     OpenRouter chosen without its key): the text is typed as read.
              */
             tidy_with: string | null;
             typing: components["schemas"]["DictationTyping"];
@@ -5481,6 +5499,11 @@ export interface components {
          * @enum {string}
          */
         TakeEnding: "hold" | "quiet" | "timed";
+        /**
+         * @description Where the dictation key's tidy sends the words (Settings › Sound › Dictation, "Tidy with").
+         * @enum {string}
+         */
+        TidySource: "off" | "subscription" | "openrouter";
         /** @description One turn of the live session, timed (ADR 0073, amended 2026-11-14). Numbers only. */
         TimingEvent: {
             timing: components["schemas"]["TimingView"];
@@ -6080,6 +6103,7 @@ export type SchemaSwitchesUpdate = components['schemas']['SwitchesUpdate'];
 export type SchemaSwitchesView = components['schemas']['SwitchesView'];
 export type SchemaSwitchView = components['schemas']['SwitchView'];
 export type SchemaTakeEnding = components['schemas']['TakeEnding'];
+export type SchemaTidySource = components['schemas']['TidySource'];
 export type SchemaTimingEvent = components['schemas']['TimingEvent'];
 export type SchemaTimingView = components['schemas']['TimingView'];
 export type SchemaTurn = components['schemas']['Turn'];

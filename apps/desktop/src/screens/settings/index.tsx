@@ -39,7 +39,7 @@
  * hold a state for review (`pairing` opens the Pair a phone dialog on Phone; the phone's own
  * states are `?phone=off|unpaired|paired|pairs|expires`, see Phone.tsx).
  */
-import type { DevicesView, ModelConnectionView, ModelsView, SettingsView } from "@ghost/client-ts";
+import type { DevicesView, ModelConnectionView, ModelsView, SettingsResult, SettingsView } from "@ghost/client-ts";
 import { useGhost } from "@ghost/ui";
 import { AudioWaveform, ChevronLeft, MoreHorizontal, ShieldCheck, Trash2 } from "lucide-react";
 import {
@@ -890,6 +890,13 @@ export default function SettingsScreen({ params: route }: RouteProps) {
     setRestartKeys((prev) => Array.from(new Set([...prev, ...names])));
     setRestartDismissed(false);
   };
+  // A model chosen on the Model page was saved on its own: take the settings back without
+  // leaving the page's draft behind them.
+  const modelSaved = (r: SettingsResult) => {
+    setS(r.settings);
+    setDraft((d) => ({ ...d, values: { ...d.values, GHOST_LLM_MODEL: r.settings.values.GHOST_LLM_MODEL ?? "" } }));
+    client.modelConnection().then(setConn, () => {});
+  };
   const passwordChanged = () => {
     client
       .settings()
@@ -1016,7 +1023,7 @@ export default function SettingsScreen({ params: route }: RouteProps) {
         )}
 
         {s && page === "model" && (
-          <ModelPage s={s} conn={conn} mock={mock} onUsed={passwordChanged}>
+          <ModelPage s={s} conn={conn} mock={mock} onUsed={passwordChanged} onSaved={modelSaved}>
           {/* The page's fields name this form (`form=`), since the key's row is a form of its
               own and forms can't nest: Enter in any of them saves, as on the other pages. */}
           <form id={MODEL_FORM_ID} onSubmit={submit} autoComplete="off" className="sr-only">

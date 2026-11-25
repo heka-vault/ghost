@@ -7,6 +7,8 @@
  *   ?subs=fresh       none installed
  *   ?subs=signed-out  Claude Code installed and signed out, Codex signed in, Antigravity signed out
  *   ?subs=old         a Claude Code too old for Ghost
+ *   ?subs=in-use      Claude Code signed in and Ghost's model, with its two selects under it
+ *                     (&llmmodel=opus|sonnet|haiku, &llmfast=haiku|sonnet)
  *   &subjob=install|sign-in|code|failed   Claude Code's job held in that state
  *
  * Install takes about three seconds; Claude Code's sign-in asks for a code after one, Codex's
