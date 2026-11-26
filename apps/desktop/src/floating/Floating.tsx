@@ -17,9 +17,14 @@
  * The frame loop runs only while Ghost is forward, at 30 frames a second (60 for the arrival),
  * and stops dead at rest, so the line costs nothing.
  *
- * While the screen is shared it does what the operator chose (the shell's `share.rs`): nothing
- * at all (the default), a small card asking Show or Hide, or Ghost in the share with a mark
- * that says the screen is being shared.
+ * While the screen is shared it does what the operator chose (the shell's `share.rs`): Ghost in
+ * the share with a mark that says the screen is being shared (the default since 2026-11-25),
+ * nothing at all, or a small card asking Show or Hide.
+ *
+ * A dictation (ADR 0077 as amended 2026-11-25) floats by the same posture rule: Wisp listening
+ * to the microphone's level, the words so far in the captions' band (the one place dictated
+ * words are shown, beside the work, never kept), the state in a few words, then Ghost's own
+ * sentence for how it ended, for a moment (`app/dictation.ts`). No beams, no cards, no buttons.
  *
  * `stage`: the same room in an ordinary window on its own backdrop (`stage.html`, ADR 0059 as
  * amended 2026-11-13), for showing Ghost to people. Opened on purpose and meant to be seen: it
@@ -34,6 +39,7 @@ import type { PendingProposal, QuestionView, Turn } from "@ghost/client-ts";
 import { agentName, splitSaid, useGhost, youSpeaking } from "@ghost/ui";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
+import { type DictationTone, splitWords, useDictation } from "../app/dictation";
 import { postureOf } from "../app/posture";
 import { useSaying, useSessionQuestions } from "../screens/session/live";
 import { Mascot } from "../ui/Mascot";
@@ -68,14 +74,22 @@ const TINT: Record<Scene, [number, number, number]> = {
   okay: [1.0, 0.7, 0.25],
   question: [0.66, 0.5, 1.0],
   ending: [0.35, 0.85, 1.0],
+  dictation: [0.3, 1.0, 0.72],
+};
+
+/** A dictation's light by its state: green while it hears, violet while it writes, cyan at the end. */
+const DICTATION_TINT: Record<DictationTone, [number, number, number]> = {
+  listening: [0.3, 1.0, 0.72],
+  writing: [0.66, 0.5, 1.0],
+  done: [0.35, 0.82, 1.0],
 };
 
 /** A scene's light as CSS, for Wisp's lit edge (the mark's light, `Mascot`'s `lit`). */
-const tintCss = (s: Scene) => `rgb(${TINT[s].map((v) => Math.round(v * 255)).join(" ")})`;
+const tintCss = (s: Scene, tone?: DictationTone) => `rgb(${(s === "dictation" && tone ? DICTATION_TINT[tone] : TINT[s]).map((v) => Math.round(v * 255)).join(" ")})`;
 
 const MOOD: Record<Scene, string | null> = {
   hidden: null, line: null, hold: "hold", you: "listening", listening: "listening", thinking: "thinking",
-  speaking: "speaking", okay: "listening", question: "listening", ending: "speaking",
+  speaking: "speaking", okay: "listening", question: "listening", ending: "speaking", dictation: "listening",
 };
 
 const ease = (from: number, to: number, rate: number, dt: number) => from + (to - from) * (1 - Math.exp(-rate * dt));
@@ -97,7 +111,7 @@ function useViewport(): { w: number; h: number } {
 }
 
 export function FloatingRoom({ stage = false }: { stage?: boolean } = {}) {
-  const { client, status, connected, turns, pending, activity, voice } = useGhost();
+  const { client, status, connected, turns, pending, activity, voice, dictation: dictationLive } = useGhost();
   const word = useShellWord();
   // The stage is its own window, meant to be seen: no share hides it, Ghost in the middle,
   // Ghost's words captioned for the people watching.
@@ -105,6 +119,10 @@ export function FloatingRoom({ stage = false }: { stage?: boolean } = {}) {
   const view = useViewport();
   const session = status?.session_id ?? null;
   const deskSession = connected && !!session && status?.session_origin !== "phone";
+  // A dictation on screen (ADR 0077 as amended 2026-11-25); a session's own scene wins over it.
+  // The stage is for showing a session to people: a dictation's words never go there.
+  const dict = useDictation();
+  const dictating = !stage && connected && dict.shown && !deskSession;
   const micOff = !!status?.not_listening;
   // ADR 0074: debug mode is on, so Ghost wears it, as it wears “Screen shared”.
   const debugOn = !!status?.debug_audio;
@@ -146,6 +164,7 @@ export function FloatingRoom({ stage = false }: { stage?: boolean } = {}) {
   // The one posture rule (posture.ts): floating, the main window not the one in use.
   const posture = postureOf({
     deskSession,
+    dictation: dictating,
     floating: shell.sharing === "none" || shell.sharing === "shown",
     windowActive: shell.mainActive,
     // The first run's wake beat (ADR 0059 as amended 2026-11-14): its moment floats over it.
@@ -162,6 +181,7 @@ export function FloatingRoom({ stage = false }: { stage?: boolean } = {}) {
     question: !!question,
     openCalls,
     gone,
+    dictating,
   });
 
   // A full-screen app on the only monitor: stay out of the way (the voice goes on).
@@ -196,7 +216,8 @@ export function FloatingRoom({ stage = false }: { stage?: boolean } = {}) {
       moved.current.arrive = performance.now();
       setTrigger((n) => n + 1);
       // The first run says the moment happened over the desktop.
-      if (!stage && shell.firstMeeting) forwarded();
+      // A dictation isn't the first meeting, even while its beat is open.
+      if (!stage && shell.firstMeeting && !dictating) forwarded();
       return;
     }
     if (!forwardWanted && wasForward.current) {
@@ -219,6 +240,17 @@ export function FloatingRoom({ stage = false }: { stage?: boolean } = {}) {
     void readSound().then(setSnd);
   }, [shell.captions, scene, reply?.at]);
   const captions = captionsShown(shell.captions, scene, snd);
+  // The words so far of a dictation, under Wisp in its glow: the phrase just read fades in,
+  // what was shown before dims. Made again from the event each time; never kept.
+  const dictText = scene === "dictation" ? (dict.view?.text ?? null) : null;
+  const [dictWords, setDictWords] = useState<{ before: string | null; older: string; newest: string; n: number }>({ before: null, older: "", newest: "", n: 0 });
+  useEffect(() => {
+    setDictWords((w) => {
+      if (dictText === w.before) return w;
+      if (!dictText) return { before: null, older: "", newest: "", n: w.n };
+      return { before: dictText, ...splitWords(w.before, dictText), n: w.n + 1 };
+    });
+  }, [dictText]);
 
   // The model as the wait: seconds since the operator's turn closed, with nothing out and no reply.
   const [modelSecs, setModelSecs] = useState<number | null>(null);
@@ -254,13 +286,13 @@ export function FloatingRoom({ stage = false }: { stage?: boolean } = {}) {
   const reaching = scene === "thinking" || scene === "speaking" || scene === "you" || scene === "listening";
   const places = reaching ? reach.places : [];
   const layout: Layout = useMemo(
-    () => layoutOf({ w: view.w, h: view.h, placement: shell.placement, side: side === "centre" ? null : side, places: places.length, card, captions }),
+    () => layoutOf({ w: view.w, h: view.h, placement: shell.placement, side: side === "centre" ? null : side, places: places.length, card, captions: captions || !!dictWords }),
     // `place.rs` says which side Ghost's stage sits on: away from the work; right when not known.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [view.w, view.h, shell.placement, side, places.length, card, captions],
+    [view.w, view.h, shell.placement, side, places.length, card, captions, !!dictWords],
   );
   const using = namesText(reach.places.filter((p) => p.open > 0).map((p) => p.name));
-  const label = labelOf(scene, { agent, using, asker: question?.asked_by ?? null, micOff, modelSecs: waitingOnModel ? modelSecs : null, typed });
+  const label = labelOf(scene, { agent, using, asker: question?.asked_by ?? null, micOff, modelSecs: waitingOnModel ? modelSecs : null, typed, dictation: dict.title });
 
   // ---------------------------------------------------------------- the frame loop
   const root = useRef<HTMLDivElement>(null);
@@ -269,8 +301,8 @@ export function FloatingRoom({ stage = false }: { stage?: boolean } = {}) {
   const nodeEls = useRef<(HTMLDivElement | null)[]>([]);
   const field = useRef<Field | null>(null);
   const raf = useRef(0);
-  const live = useRef({ scene, arriving, leaving, layout, places, waitingOnModel, turnClosedAt, modelSecs: null as number | null });
-  live.current = { ...live.current, scene, arriving, leaving, layout, places, waitingOnModel, turnClosedAt };
+  const live = useRef({ scene, arriving, leaving, layout, places, waitingOnModel, turnClosedAt, modelSecs: null as number | null, dictTone: dict.tone, dictCheck: dict.check });
+  live.current = { ...live.current, scene, arriving, leaving, layout, places, waitingOnModel, turnClosedAt, dictTone: dict.tone, dictCheck: dict.check };
   const anim = useRef({ dim: 0, glow: 0, ring: 0, okay: 0, you: 0, level: 0, tint: TINT.line, last: 0, since: 0, frames: 0, js: 0, from: 0, gaps: [] as number[] });
 
   const frame = useCallback(
@@ -299,10 +331,16 @@ export function FloatingRoom({ stage = false }: { stage?: boolean } = {}) {
       }
       const g = L.layout;
       const on = isForward(L.scene);
+      const dictating = L.scene === "dictation";
+      // A dictation's end goes after its moment on the frame clock too (timers are throttled here).
+      if (dictating) L.dictCheck(performance.now());
+      // A dictation listens to the microphone's level (its own event, never a session's).
+      const d = dictationLive.level();
+      const dictLevel = dictating && L.dictTone === "listening" && performance.now() - d.at < 400 ? d.level : 0;
       const target = {
-        dim: !on ? 0 : L.scene === "speaking" || L.scene === "ending" ? 0.5 : 0.6,
+        dim: !on ? 0 : L.scene === "speaking" || L.scene === "ending" ? 0.5 : dictating ? 0.45 : 0.6,
         glow: !on ? 0 : L.arriving ? 1.3 : 1,
-        ring: L.scene === "you" ? 1 : L.scene === "listening" ? 0.35 : 0,
+        ring: L.scene === "you" ? 1 : L.scene === "listening" ? 0.35 : dictating && L.dictTone === "listening" ? 0.3 + 0.7 * dictLevel : 0,
         okay: L.scene === "okay" ? 1 : 0,
       };
       const fast = L.leaving ? 9 : 5;
@@ -310,7 +348,7 @@ export function FloatingRoom({ stage = false }: { stage?: boolean } = {}) {
       A.glow = ease(A.glow, target.glow, fast, dt);
       A.ring = ease(A.ring, target.ring, 6, dt);
       A.okay = ease(A.okay, target.okay, 5, dt);
-      const tint = TINT[L.scene];
+      const tint = dictating ? DICTATION_TINT[L.dictTone] : TINT[L.scene];
       A.tint = [ease(A.tint[0], tint[0], 4, dt), ease(A.tint[1], tint[1], 4, dt), ease(A.tint[2], tint[2], 4, dt)];
       // The operator speaking is a sign, the same at any volume: a slow breath, never the mic.
       const breath = L.scene === "you" ? 0.45 + 0.25 * Math.sin(t * 2.4) : 0;
@@ -318,7 +356,7 @@ export function FloatingRoom({ stage = false }: { stage?: boolean } = {}) {
       // Ghost's own voice level, as the daemon reports it at the speaker.
       const v = voice.get();
       const fresh = performance.now() - v.at < 400;
-      const level = fresh ? v.level : 0;
+      const level = dictating ? dictLevel : fresh ? v.level : 0;
       A.level = ease(A.level, level, 22, dt);
       // The goodbye: leave once its voice has been quiet a moment, or after its time.
       const gb = goodbye.current;
@@ -376,7 +414,7 @@ export function FloatingRoom({ stage = false }: { stage?: boolean } = {}) {
       raf.current = requestAnimationFrame(frame);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [voice],
+    [voice, dictationLive],
   );
 
   const flush = (now: number) => {
@@ -503,6 +541,7 @@ export function FloatingRoom({ stage = false }: { stage?: boolean } = {}) {
       ref={root}
       className="flt-root"
       data-scene={scene}
+      data-dictation={scene === "dictation" ? dict.tone : undefined}
       data-shown={shown ? "1" : "0"}
       data-mic={micOff ? "off" : "on"}
       data-placement={shell.placement}
@@ -513,7 +552,7 @@ export function FloatingRoom({ stage = false }: { stage?: boolean } = {}) {
 
       {/* One sentence a screen reader hears per change: the state, and Ghost's reply whole when it starts. */}
       <p className="flt-sr" role="status" aria-live="polite">
-        {scene === "hidden" ? "" : forward ? [label, scene === "speaking" && reply ? splitSaid(reply.text, reply.text.length).said : ""].filter(Boolean).join(". ") : micOff ? "Ghost is not listening." : ""}
+        {scene === "hidden" ? "" : forward ? [label, scene === "speaking" && reply ? splitSaid(reply.text, reply.text.length).said : "", scene === "dictation" ? (dict.sentence ?? "") : ""].filter(Boolean).join(". ") : micOff ? "Ghost is not listening." : ""}
       </p>
 
       {/* At rest: the line says Ghost hears for its name; struck and red when it can't (ADR 0057). */}
@@ -561,7 +600,13 @@ export function FloatingRoom({ stage = false }: { stage?: boolean } = {}) {
       {shown && (
         <div className="flt-stage" style={{ left: layout.core[0], top: layout.core[1] }}>
           <div ref={wisp} className="flt-wisp" aria-hidden>
-            {DRAW_WISP && <Mascot size={layout.wisp} mood={leaving ? null : scene === "listening" && typed ? "passive" : MOOD[scene]} trigger={trigger} level={voice} idle maxFps={fpsOf(scene, arriving) || 60} lit={tintCss(scene)} />}
+            {DRAW_WISP &&
+              (scene === "dictation" ? (
+                // A dictation's Wisp: smaller, listening (thinking while it writes), lit by its state.
+                <Mascot size={Math.round(layout.wisp * 0.75)} mood={leaving ? null : dict.tone === "writing" ? "thinking" : "listening"} trigger={trigger} idle maxFps={30} lit={tintCss(scene, dict.tone)} />
+              ) : (
+                <Mascot size={layout.wisp} mood={leaving ? null : scene === "listening" && typed ? "passive" : MOOD[scene]} trigger={trigger} level={voice} idle maxFps={fpsOf(scene, arriving) || 60} lit={tintCss(scene)} />
+              ))}
           </div>
           <div className="flt-under">
             {sharedMark && <SharedMark />}
@@ -571,10 +616,21 @@ export function FloatingRoom({ stage = false }: { stage?: boolean } = {}) {
               {label}
               {micOff && scene !== "listening" ? <span className="flt-label__mic"> · mic off</span> : null}
             </p>
-            {!stage && <TimingLine className="flt-timing" />}
+            {scene === "dictation" && (dictWords.older || dictWords.newest) && !dict.sentence && (
+              <p className="flt-dictation__words" aria-hidden>
+                <span className="flt-dictation__lines">
+                  {dictWords.older && <span className="flt-dictation__older">{dictWords.older} </span>}
+                  <span key={dictWords.n} className="flt-dictation__newest">
+                    {dictWords.newest}
+                  </span>
+                </span>
+              </p>
+            )}
+            {scene === "dictation" && dict.sentence && <p className="flt-dictation__said">{dict.sentence}</p>}
+            {!stage && scene !== "dictation" && <TimingLine className="flt-timing" />}
             {/* The first meeting: how to send Ghost back, said once, in Ghost's own words. */}
-            {forward && !stage && shell.firstMeeting && <p className="flt-hint">Say “that’s all” to send me back</p>}
-            {forward && !stage && (
+            {forward && !stage && shell.firstMeeting && scene !== "dictation" && <p className="flt-hint">Say “that’s all” to send me back</p>}
+            {forward && !stage && scene !== "dictation" && (
               <p className="flt-acts">
                 <button type="button" data-hit className="flt-pill" onClick={openApp}>
                   Open in Ghost

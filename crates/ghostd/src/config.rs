@@ -192,16 +192,11 @@ pub struct GhostdSettings {
     /// while no session is open, at most once an hour; `ask` (the default) leaves a note
     /// with Repair.
     pub input_repair_auto: bool,
-
-    /// Coexist with nerd-dictation (F9): its toggle script writes this file while active.
-    pub nerd_dictation_flag: PathBuf,
 }
 
 impl Default for GhostdSettings {
     fn default() -> Self {
         let home = home();
-        let runtime = std::env::var_os("XDG_RUNTIME_DIR")
-            .map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
         Self {
             data_dir: home.join(".local/share/ghost"),
             policy_path: home.join(".config/ghost/policy.toml"),
@@ -226,12 +221,15 @@ impl Default for GhostdSettings {
             phone_listen: String::new(),
             hooks_listen: String::new(),
             mcp_listen: ghost_core::ghost_app::clients::DEFAULT_LISTEN.into(),
-            wake_mode: "transcript".into(),
+            // The shipped detector (#190, ADR 0025); transcript wake when it can't load.
+            wake_mode: "onnx".into(),
             wake_phrases: String::new(),
             wake_fuzzy: 0.9,
             wake_model_path: None,
             wake_threshold: None,
-            wake_verify: true,
+            // The detector alone at 0.7: every desk "hey ghost" and no false wake in 6.1 h of
+            // read speech (2026-10-22); Parakeet's check is what lost wakes ("He goes.").
+            wake_verify: false,
             wake_cooldown_secs: 2.0,
             wake_check_threshold: Some(0.3),
             wake_address_model_path: None,
@@ -243,7 +241,6 @@ impl Default for GhostdSettings {
             pause_players: true,
             input_repair_auto: false,
             chime: true,
-            nerd_dictation_flag: runtime.join("dictation-audio-duck.state"),
         }
     }
 }
@@ -466,7 +463,6 @@ impl GhostdSettings {
         let mut repair = String::new();
         env.string("GHOST_INPUT_REPAIR", &mut repair);
         s.input_repair_auto = repair.trim().eq_ignore_ascii_case("auto");
-        env.path("GHOST_DICTATION_FLAG", &mut s.nerd_dictation_flag);
         Ok(s)
     }
 
@@ -489,8 +485,11 @@ impl GhostdSettings {
         (!n.is_empty() && n != crate::wake_detectors::SHIPPED).then_some(n)
     }
 
+    /// Parakeet checks an opener model's hit unless the operator said otherwise: alone the
+    /// openers heard 63% of trained openers, checked from 0.3 88% with no false wake
+    /// (2026-10-23), whatever "hey ghost" does on its own (#190).
     pub fn address_verify(&self) -> bool {
-        self.wake_address_verify.unwrap_or(self.wake_verify)
+        self.wake_address_verify.unwrap_or(true)
     }
 
     pub fn address_threshold(&self) -> f64 {
@@ -531,8 +530,14 @@ mod tests {
     fn the_detector_threshold_follows_the_check() {
         // With Parakeet's check the threshold only decides how often it runs; without it the
         // threshold is the whole decision, so it sits higher unless the operator set one.
+        // The shipped default is the detector alone (#190).
         let s = GhostdSettings::default();
-        assert_eq!(s.detector_threshold(), 0.3);
+        assert_eq!(s.detector_threshold(), 0.7);
+        let checked = GhostdSettings {
+            wake_verify: true,
+            ..Default::default()
+        };
+        assert_eq!(checked.detector_threshold(), 0.3);
         let unchecked = GhostdSettings {
             wake_verify: false,
             ..Default::default()
@@ -544,7 +549,13 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(set.detector_threshold(), 0.5);
-        assert_eq!(unchecked.address_threshold(), 0.7);
+        // The openers stay checked by Parakeet whatever "hey ghost" does (#190).
+        assert_eq!(unchecked.address_threshold(), 0.3);
+        let unchecked_openers = GhostdSettings {
+            wake_address_verify: Some(false),
+            ..Default::default()
+        };
+        assert_eq!(unchecked_openers.address_threshold(), 0.7);
         let address = GhostdSettings {
             wake_address_threshold: Some(0.6),
             ..Default::default()
@@ -572,9 +583,9 @@ mod tests {
         assert_eq!(s.jev_deadline_secs, 0.5);
         assert_eq!(s.signin_port, 47823);
         assert_eq!(s.turn_retention_days, 0);
-        assert_eq!(s.wake_mode, "transcript");
+        assert_eq!(s.wake_mode, "onnx");
         assert_eq!(s.wake_fuzzy, 0.9);
-        assert!(s.wake_verify);
+        assert!(!s.wake_verify, "the detector alone (#190)");
         assert_eq!(s.wake_cooldown_secs, 2.0);
         assert_eq!(s.duck_apps, vec!["spotify"]);
         assert_eq!(s.duck_level, 0.25);
@@ -596,10 +607,6 @@ mod tests {
         assert_eq!(s.clients_dir(), home.join(".local/share/ghost/clients"));
         let off = GhostdSettings::from_env(&env(&[("GHOST_MCP_LISTEN", "")])).unwrap();
         assert_eq!(off.mcp_listen, "");
-        assert!(
-            s.nerd_dictation_flag
-                .ends_with("dictation-audio-duck.state")
-        );
     }
 
     #[test]

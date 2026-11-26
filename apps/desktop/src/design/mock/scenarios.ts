@@ -4,6 +4,8 @@
  */
 import type { Phase } from "@ghost/client-ts";
 
+import type { DictationDesign } from "./dictation";
+
 export interface Scenario {
   name: string;
   label: string;
@@ -91,6 +93,12 @@ export interface Scenario {
   /** The realtime voice chosen (ADR 0063), its key in the vault, a day of use and a check. */
   realtime?: boolean;
   /**
+   * A dictation (ADR 0077 as amended 2026-11-25, `mock/dictation.ts`): `loop` every ending in
+   * turn, over and over; `listening` or `writing` held; or a short dictation ending that way,
+   * every few seconds. On `floating.html` it floats; in the main window, Today's strip shows it.
+   */
+  dictation?: DictationDesign;
+  /**
    * The AI tools already on this computer (ADR 0068): none (today's first run), Claude Code and
    * Cursor with five apps and Ollama running (`found`), or Cursor with a file Ghost can't read.
    */
@@ -134,6 +142,13 @@ export const SCENARIOS: Scenario[] = [
   { name: "floating", label: "Floating", description: "Ghost floating, the whole sequence, over and over: the wake, your turn, calls, the reply, a yes, a question, goodbye.", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: true, data: "normal", floating: true },
   { name: "floating-tour", label: "Floating, the tour", description: "The README's pictures: one whole turn in 12 s with six places, then a change waiting for a yes, then an agent's question, once.", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: true, data: "normal", floatingTour: true },
   { name: "floating-site", label: "Floating, the site", description: "The site's hero: one turn with six places, a reply, a change waiting for a yes, the yes and the goodbye, on the clock of the site's sound (every 24.6 s).", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: true, data: "normal", floatingSite: true },
+  { name: "dictation", label: "Dictating", description: "A dictation by the key, over and over: listening with the words as they are read, writing it down, then each ending in turn (typed, on the clipboard, nothing heard, stopped).", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: true, data: "normal", dictation: "loop" },
+  { name: "dictation-listening", label: "Dictating, listening", description: "A dictation held listening: the level and the words so far.", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: true, data: "normal", dictation: "listening" },
+  { name: "dictation-writing", label: "Dictating, writing", description: "A dictation held while Ghost writes it down.", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: true, data: "normal", dictation: "writing" },
+  { name: "dictation-typed", label: "Dictated, typed", description: "A short dictation that Ghost types, every few seconds.", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: true, data: "normal", dictation: "typed" },
+  { name: "dictation-clipboard", label: "Dictated, on the clipboard", description: "A short dictation that couldn't be typed and is on the clipboard, every few seconds.", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: true, data: "normal", dictation: "clipboard" },
+  { name: "dictation-nothing", label: "Dictated, nothing heard", description: "A dictation that heard nothing, every few seconds.", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: true, data: "normal", dictation: "nothing_heard" },
+  { name: "dictation-stopped", label: "Dictation stopped", description: "A dictation stopped by a session opening, every few seconds.", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: true, data: "normal", dictation: "stopped" },
   { name: "realtime", label: "Realtime voice", description: "The operator chose the realtime voice: Settings › Sound shows the provider, today’s spend, the cap and a check.", daemon: true, phase: "passive", modelsReady: true, session: null, pending: false, configured: true, data: "normal", realtime: true },
   { name: "busy", label: "Busy", description: "Months of use: many lines, 200 audit rows, seven apps, one of them not connecting.", daemon: true, phase: "listening", modelsReady: true, session: "legal", pending: false, configured: true, data: "busy" },
 ];

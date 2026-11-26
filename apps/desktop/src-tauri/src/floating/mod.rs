@@ -2,7 +2,8 @@
 //! light at a screen's bottom edge until its name is called, then comes forward over the
 //! desktop with no application chrome, and goes back to the line when the session ends.
 //!
-//! Off until the operator turns it on (Settings › General, the tray). It runs as a second
+//! On unless the operator turned it off (Settings › General, the rail, the tray; 2026-11-25: on
+//! for an install that never chose, an explicit off kept). It runs as a second
 //! process of this app, `heka-ghost-desktop --floating`, with `GDK_BACKEND=x11`: on X11 and
 //! XWayland a window can keep itself above the others, stay off the taskbar and every
 //! workspace's switcher, pass clicks through except where Ghost is drawn and never take the
@@ -45,10 +46,11 @@ pub const CHECK_ARG: &str = "--floating-check";
 
 /// The operator's choices, kept beside the window's own state
 /// (`~/.config/dev.heka.ghost/floating.json`): how this desk shows Ghost, not Ghost's setting.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
-    /// The floating room is on. Off by default.
+    /// The floating room is on. On by default since 2026-11-25: an install with no file (or one
+    /// that never wrote the field) floats; a file that says `"on": false` stays off.
     pub on: bool,
     /// Which monitor it comes forward on.
     pub monitor: MonitorPref,
@@ -56,25 +58,25 @@ pub struct Settings {
     pub placement: Placement,
     /// Ghost's words on screen, for when the sound can't carry them. Off by default.
     pub captions: Captions,
-    /// While the screen is shared: hide Ghost (default), show it, or ask each time.
+    /// While the screen is shared: show it (default since 2026-11-25), hide it, or ask each time.
     pub while_shared: WhileShared,
-    /// The first run has offered it (ADR 0059 as amended 2026-11-14): its wake beat turns the
-    /// floating room on once, where the desktop can float, and never again, so an operator
-    /// who turned it off keeps it off. Absent from an older file: not offered.
+    /// The first run offered it, from 2026-11-14 to 2026-11-25 (ADR 0059 as amended): read and
+    /// kept so older files round-trip, and nothing decides on it now. Floating is on by default
+    /// and the first run's wake beat only shows its switch.
     pub offered: bool,
 }
 
-/// The first run's offer: on, once, where this desktop can float; recorded as offered either
-/// way. None when it was offered before: the operator's choice since then stands.
-pub fn offer(s: &Settings, supported: bool) -> Option<Settings> {
-    if s.offered {
-        return None;
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            on: true,
+            monitor: MonitorPref::default(),
+            placement: Placement::default(),
+            captions: Captions::default(),
+            while_shared: WhileShared::default(),
+            offered: false,
+        }
     }
-    Some(Settings {
-        on: s.on || supported,
-        offered: true,
-        ..s.clone()
-    })
 }
 
 /// Where on the monitor the floating room comes forward (docs/design-system.md, the layout
@@ -410,21 +412,6 @@ impl Host {
         }
     }
 
-    /// The first run's offer (`offer`): on once, kept, and the surface started.
-    pub fn first_run_offer(self: &Arc<Self>) -> Result<Status, String> {
-        let (now, supported) = {
-            let i = self.lock();
-            (
-                i.status.settings.clone(),
-                !matches!(i.status.support, Support::No { .. }),
-            )
-        };
-        match offer(&now, supported) {
-            Some(next) => self.set(next),
-            None => Ok(self.status()),
-        }
-    }
-
     /// The first run's wake beat opened or closed.
     pub fn first_meeting(&self, on: bool) {
         {
@@ -645,12 +632,6 @@ pub fn floating_set(
     host.inner().set(settings)
 }
 
-/// The first run's wake beat: the floating room on, once (`offer`).
-#[tauri::command]
-pub fn floating_first_run(host: tauri::State<'_, Arc<Host>>) -> Result<Status, String> {
-    host.inner().first_run_offer()
-}
-
 /// The first run's wake beat opened (`on`) or closed.
 #[tauri::command]
 pub fn floating_first_meeting(host: tauri::State<'_, Arc<Host>>, on: bool) {
@@ -693,11 +674,13 @@ mod tests {
     }
 
     #[test]
-    fn it_is_off_until_turned_on_and_keeps_the_choice() {
+    fn it_is_on_until_turned_off_and_keeps_the_choice() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("cfg/floating.json");
+        // An install that never chose (no file): on, shown in a share.
         assert_eq!(load(&path), Settings::default());
-        assert!(!load(&path).on);
+        assert!(load(&path).on);
+        assert_eq!(load(&path).while_shared, WhileShared::Show);
         let s = Settings {
             on: true,
             monitor: MonitorPref::Named("HDMI-3".into()),
@@ -708,18 +691,27 @@ mod tests {
         };
         save(&path, &s).unwrap();
         assert_eq!(load(&path), s);
-        // A file this build can't read is the default: off.
+        // An explicit off stays off, whatever else the file says or lacks.
+        std::fs::write(&path, r#"{"on":false,"monitor":"other"}"#).unwrap();
+        assert!(!load(&path).on);
+        let off = Settings {
+            on: false,
+            ..Settings::default()
+        };
+        save(&path, &off).unwrap();
+        assert!(!load(&path).on);
+        // A file this build can't read is the default: on.
         std::fs::write(&path, "{nonsense").unwrap();
         assert_eq!(load(&path), Settings::default());
         // A file from a later build with more fields keeps what it knows.
         std::fs::write(&path, r#"{"on":true,"monitor":"here","later":1}"#).unwrap();
         assert_eq!(load(&path).monitor, MonitorPref::Here);
         // A file from before the placement, captions and the share choice: beside the work, no
-        // captions, hidden while shared.
+        // captions, shown while shared (the default since 2026-11-25).
         let old = load(&path);
         assert_eq!(
             (old.placement, old.captions, old.while_shared),
-            (Placement::Beside, Captions::Off, WhileShared::Hide)
+            (Placement::Beside, Captions::Off, WhileShared::Show)
         );
         let line = serde_json::to_string(&s).unwrap();
         assert!(
@@ -731,33 +723,19 @@ mod tests {
     }
 
     #[test]
-    fn the_first_run_turns_it_on_once_and_never_overrides_the_choice_after() {
-        // A fresh install on a desktop that floats: on, and offered.
-        let fresh = Settings::default();
-        let on = offer(&fresh, true).expect("offered the first time");
-        assert!(on.on && on.offered);
-        // The operator turned it off afterwards: the first run, opened again, leaves it off.
-        let off = Settings { on: false, ..on };
-        assert_eq!(offer(&off, true), None);
-        // A desktop that can't float: offered, still off, and not offered again later.
-        let refused = offer(&fresh, false).unwrap();
-        assert!(!refused.on && refused.offered);
-        assert_eq!(offer(&refused, true), None);
-        // An install from before the offer (no `offered` in its file) that turned it on
-        // keeps everything else it chose.
-        let mine = Settings {
-            on: true,
-            placement: Placement::Corner,
-            ..Settings::default()
-        };
-        let after = offer(&mine, true).unwrap();
-        assert_eq!(after.placement, Placement::Corner);
-        assert!(after.on);
-        // An older file reads as not offered.
+    fn the_first_runs_old_offer_is_read_and_kept_and_decides_nothing() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("floating.json");
+        // A file the first run wrote while it offered: the operator's off since then stands.
+        std::fs::write(&path, r#"{"on":false,"offered":true}"#).unwrap();
+        let s = load(&path);
+        assert!(!s.on && s.offered);
+        save(&path, &s).unwrap();
+        assert_eq!(load(&path), s);
+        // An older file without the field reads as not offered, and nothing turns it on.
         std::fs::write(&path, r#"{"on":false,"monitor":"other"}"#).unwrap();
-        assert!(!load(&path).offered);
+        let s = load(&path);
+        assert!(!s.offered && !s.on);
     }
 
     #[test]

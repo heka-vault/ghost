@@ -6,11 +6,12 @@
  * (ADR 0059's amendment of that date).
  *
  * One rule decides it, here and nowhere else, so the main window, the floating surface and the
- * tests agree: a live session at this desk (not the phone's) floats when the operator turned
- * the floating room on and it can show now (the platform has it, nothing it is kept out of is
- * capturing the screen), unless the main window is the one the operator is using: the window is
- * the place you open on purpose. The first run's wake beat is the one exception: its moment
- * floats over the window. Everything else is the desk.
+ * tests agree: a live session at this desk (not the phone's), or a dictation going on (ADR 0077
+ * as amended 2026-11-25), floats when the floating room is on and can show now (the platform
+ * has it, nothing it is kept out of is capturing the screen), unless the main window is the one
+ * the operator is using: the window is the place you open on purpose, and a dictation there is
+ * seen in Today's live strip. The first run's wake beat is the one exception: its moment floats
+ * over the window. Everything else is the desk.
  *
  * Plain TypeScript: the floating surface feeds it the shell's state.
  */
@@ -20,6 +21,11 @@ export type Posture = "desk" | "float";
 export interface PostureInput {
   /** A live session whose audio is at this desk (not the paired phone's). */
   deskSession: boolean;
+  /**
+   * A dictation is going on (ADR 0077 as amended 2026-11-25): starting, listening, writing, or
+   * its end still on screen for its moment. Absent: none.
+   */
+  dictation?: boolean;
   /**
    * The floating room is on and can show now: the operator's switch, a platform that has it,
    * and no screen capture or focused full-screen app hiding it. Absent: off.
@@ -37,7 +43,7 @@ export interface PostureInput {
 }
 
 export function postureOf(i: PostureInput): Posture {
-  if (i.deskSession && i.floating && (i.windowActive === false || i.introducing)) return "float";
+  if ((i.deskSession || i.dictation) && i.floating && (i.windowActive === false || i.introducing)) return "float";
   return "desk";
 }
 

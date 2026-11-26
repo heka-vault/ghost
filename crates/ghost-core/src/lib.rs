@@ -54,6 +54,7 @@ pub mod skill_catalog;
 pub mod skills;
 pub mod source;
 pub mod store;
+pub mod subscriptions;
 pub mod targets;
 pub mod time;
 pub mod waiting;

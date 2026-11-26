@@ -756,7 +756,8 @@ pub fn waiting_place(source: &str, key: &str) -> Option<WaitingPlace> {
         | (_, "models:missing")
         | (_, "input:degraded")
         | (_, "output:unavailable")
-        | (_, "voice:unavailable") => WaitingPlace::Sound,
+        | (_, "voice:unavailable")
+        | (_, "dictation:key") => WaitingPlace::Sound,
         (_, "ghost:outside-listener") => WaitingPlace::OutsideTools,
         ("passwords", _) => WaitingPlace::Passwords,
         ("app", _) => WaitingPlace::Apps,
@@ -2566,6 +2567,10 @@ mod tests {
         );
         assert_eq!(
             waiting_place("ghost", "models:missing"),
+            Some(WaitingPlace::Sound)
+        );
+        assert_eq!(
+            waiting_place("ghost", "dictation:key"),
             Some(WaitingPlace::Sound)
         );
         assert_eq!(

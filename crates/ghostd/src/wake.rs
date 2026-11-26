@@ -730,10 +730,27 @@ impl WakeListener {
 /// The "hey ghost" model and the "Ghost, …" ones there are, as set or in the voice cache.
 pub fn wake_model_paths(cfg: &GhostdSettings, voice: &VoiceSettings) -> (PathBuf, Vec<PathBuf>) {
     let wake_dir = voice.cache_dir.join("wake");
-    let hey = cfg
-        .wake_model_path
-        .clone()
-        .unwrap_or_else(|| wake_dir.join(DEFAULT_MODEL_NAME));
+    // The operator's setting; else a detector of their own in the cache's wake folder (one
+    // trained before ADR 0065's cards, or copied there by hand); else the shipped one (#190):
+    // the bundle's beside this program, else the cache's models folder, whose path names
+    // what is missing. Over the voice settings' cache, not the process's environment.
+    let own = wake_dir.join(DEFAULT_MODEL_NAME);
+    let hey = cfg.wake_model_path.clone().unwrap_or_else(|| {
+        if own.is_file() {
+            return own.clone();
+        }
+        let bundled = std::env::current_exe()
+            .ok()
+            .and_then(|exe| ghost_infer::models::bundle_dir(&exe))
+            .map(|d| d.join(ghost_infer::models::HEY_GHOST))
+            .filter(|p| p.is_file());
+        bundled.unwrap_or_else(|| {
+            voice
+                .cache_dir
+                .join(ghost_infer::models::FOLDER)
+                .join(ghost_infer::models::HEY_GHOST)
+        })
+    });
     let address: Vec<PathBuf> = match &cfg.wake_address_model_path {
         Some(p) => vec![p.clone()],
         None => {
@@ -745,6 +762,21 @@ pub fn wake_model_paths(cfg: &GhostdSettings, voice: &VoiceSettings) -> (PathBuf
                 })
                 .unwrap_or_default();
             found.sort();
+            // None of the operator's own: the shipped openers (#190), the bundle's or the
+            // cache's models folder, each found on its own.
+            if found.is_empty() {
+                let bundle = std::env::current_exe()
+                    .ok()
+                    .and_then(|exe| ghost_infer::models::bundle_dir(&exe));
+                let cache = voice.cache_dir.join(ghost_infer::models::FOLDER);
+                for name in ghost_infer::models::OPENER_MODELS {
+                    let in_bundle = bundle
+                        .as_ref()
+                        .map(|d| d.join(name))
+                        .filter(|p| p.is_file());
+                    found.push(in_bundle.unwrap_or_else(|| cache.join(name)));
+                }
+            }
             found
         }
     };

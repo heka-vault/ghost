@@ -82,7 +82,6 @@ use crate::check::{
 use crate::config::{GhostdSettings, runtime_dir};
 use crate::deciders::{Completer, model_decider};
 use crate::hooks_listener::HooksListener;
-use crate::nerd_dictation;
 use crate::passwords::{
     Opened, VAULT_RETRY, in_use, open_passwords, operator_keyring, problems as password_problems,
     wait_for_vault,
@@ -245,7 +244,8 @@ pub fn claude_code_for(
     if target.provider != ghost_core::connection::CLAUDE_CODE {
         return None;
     }
-    let binary = ghost_core::other_tools::program::which(env.get("PATH").map(String::as_str))
+    // On the PATH, else in ~/.local/bin, where its installer puts it (ADR 0078).
+    let binary = ghost_core::subscriptions::which(ghost_core::other_tools::program::BINARY, env)
         .unwrap_or_default();
     // Only what the clean environment is built from: none of the vault's values.
     let started: HashMap<String, String> = ["HOME", "PATH", "USER", "LANG"]
@@ -285,6 +285,8 @@ pub struct Ports {
     pub clipboard: Arc<dyn crate::dictation::Clipboard>,
     /// What the operator sees of a dictation with no terminal: a desktop notification.
     pub dictation_notes: Arc<dyn crate::dictation::Notifier>,
+    /// The default output muted while dictating (`pactl`), or a test's nothing.
+    pub dictation_mute: Arc<dyn crate::dictation::Muter>,
 }
 
 /// No sound stack to repair: a test's.
@@ -354,6 +356,7 @@ impl Ports {
             dictation_media: None,
             clipboard: Arc::new(crate::dictation::XClipboard::default()),
             dictation_notes: Arc::new(crate::dictation::DesktopNotes::default()),
+            dictation_mute: Arc::new(crate::dictation::desk::SinkMute::new()),
         }
     }
 
@@ -386,6 +389,7 @@ impl Ports {
             })),
             clipboard: Arc::new(crate::dictation::NoClipboard),
             dictation_notes: Arc::new(crate::dictation::NoNotes),
+            dictation_mute: Arc::new(crate::dictation::NoMute),
         }
     }
 }
@@ -465,6 +469,8 @@ pub struct Late {
     pub debug_audio: OnceLock<Arc<crate::debug_audio::DebugAudio>>,
     /// Ghost's own dictation (ADR 0077).
     pub dictation: OnceLock<Arc<crate::dictation::Dictation>>,
+    /// The dictation key (ADR 0077 as amended 2026-11-25).
+    pub dictation_key: OnceLock<Arc<crate::dictation::desk::KeyDesk>>,
 }
 
 /// What a session with any agent reaches (ADR 0034, ADR 0035).
@@ -778,15 +784,33 @@ impl Daemon {
         self.late
             .dictation
             .get_or_init(|| {
-                crate::dictation::Dictation::new(
+                let desk = Arc::downgrade(&self.dictation_key());
+                crate::dictation::Dictation::with_parts(
                     Arc::new(crate::dictation::DaemonHost {
                         d: Arc::downgrade(self),
                     }),
                     self.ports.clipboard.clone(),
                     self.ports.dictation_notes.clone(),
+                    crate::dictation::Parts {
+                        typer: Arc::new(crate::dictation::desk::PortalTyper(desk.clone())),
+                        reviewer: Arc::new(crate::dictation::desk::ModelReviewer {
+                            d: Arc::downgrade(self),
+                            desk,
+                        }),
+                        live: Arc::new(crate::dictation::desk::DeskLive(Arc::downgrade(self))),
+                        muter: self.ports.dictation_mute.clone(),
+                    },
                     crate::dictation::LIMIT,
                 )
             })
+            .clone()
+    }
+
+    /// The dictation key (ADR 0077 as amended 2026-11-25): made once, over this daemon.
+    pub fn dictation_key(self: &Arc<Self>) -> Arc<crate::dictation::desk::KeyDesk> {
+        self.late
+            .dictation_key
+            .get_or_init(|| crate::dictation::desk::KeyDesk::new(Arc::downgrade(self)))
             .clone()
     }
 
@@ -1013,7 +1037,6 @@ impl Daemon {
             && self.state.phase() == Phase::Passive
             && self.phone_q_empty()
             && self.raise_q_empty()
-            && !nerd_dictation::running(&self.cfg().nerd_dictation_flag)
     }
 
     /// The phone's own session is running, or is about to start: the phone route does
@@ -1764,6 +1787,8 @@ impl Daemon {
                 v
             }
         };
+        // ADR 0077 as amended 2026-11-25: the dictation key, bound quietly when it is on.
+        d.dictation_key().start().await;
         let signins = Arc::new(
             SignIns::new(cfg.data_dir.join("apps"))
                 .with_port(cfg.signin_port)
@@ -1998,6 +2023,11 @@ impl Daemon {
                         // ADR 0077: dictation's microphone did not close; the wake is off.
                         if let Some(note) = lock(&d.dictation_note).clone() {
                             out.push((DICTATION_NOTE_KEY.to_string(), note));
+                        }
+                        // ADR 0077 as amended 2026-11-25: the dictation key, once, until it
+                        // is turned on or dismissed; it leads to Settings › Sound.
+                        if let Some(note) = d.dictation_key().intro_note() {
+                            out.push((crate::dictation::desk::INTRO_KEY.to_string(), note));
                         }
                         // ADR 0074: debug mode is on, and until when.
                         if let Some(note) = d.late.debug_audio.get().and_then(|x| x.note()) {
@@ -2692,11 +2722,7 @@ impl Daemon {
                 phone = d.take_phone(); // accepted in the same tick
             }
             if let Some(r) = raised.take() {
-                if phone.is_some()
-                    || woke.is_some()
-                    || d.stop.is_cancelled()
-                    || nerd_dictation::running(&d.cfg().nerd_dictation_flag)
-                {
+                if phone.is_some() || woke.is_some() || d.stop.is_cancelled() {
                     let _ = r.reply.send(ghost_core::routes::Delivery::Unavailable); // the operator came first
                 } else {
                     raised = Some(r);
@@ -2786,11 +2812,6 @@ impl Daemon {
             let Some(first) = woke else {
                 continue; // settings changed: rebuild the listener
             };
-            if nerd_dictation::running(&d.cfg().nerd_dictation_flag) {
-                info!("wake ignored: nerd-dictation is active");
-                d.restore_early_chime();
-                continue;
-            }
             let start_in = lock(&d.start_in).clone();
             // Typed in the desktop app (`say`) rather than a wake or a Call: no microphone.
             let typed = std::mem::replace(&mut *lock(&d.first_via), TurnVia::Voice)
@@ -3185,6 +3206,9 @@ impl Daemon {
             other_tools: Some(Arc::new(ghost_api::deps::LiveOtherTools {
                 started_env: self.started_env.clone(),
             })),
+            subscriptions: Some(Arc::new(ghost_core::subscriptions::Jobs::new(
+                self.started_env.clone(),
+            ))),
             debug_audio: Some(Arc::new(crate::debug_audio::DebugAudioDesk(debug_audio))),
             diagnose: Some(Arc::new(crate::diagnose::DiagnoseDesk {
                 daemon: Arc::downgrade(self),
@@ -3192,6 +3216,9 @@ impl Daemon {
             meter: Some(Arc::new(crate::meter::MeterDesk::new(self))),
             checks: Some(Arc::new(crate::check::ChecksDesk::this_process())),
             dictation: Some(Arc::new(crate::dictation::DictationDesk(self.dictation()))),
+            dictation_key: Some(Arc::new(crate::dictation::desk::KeyPort(
+                self.dictation_key(),
+            ))),
         });
         self.late.deps.set(deps.clone()).ok();
         let listener = match ghost_api::server::bind(&socket).await {
@@ -3697,7 +3724,6 @@ pub(crate) mod tests {
             env_path: tmp.join("config/env"),
             vault_env_path: tmp.join("no-heka"),
             infra_dir: tmp.join("infra"),
-            nerd_dictation_flag: tmp.join("rt/dictation"),
             mcp_listen: String::new(), // never the operator's port from a test
             ..GhostdSettings::default()
         };

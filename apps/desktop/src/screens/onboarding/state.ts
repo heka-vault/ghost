@@ -365,7 +365,7 @@ export interface Saved {
   metAt: string | null;
   /** Where Ghost answered: over the desktop (the floating room) or in this window. */
   metWhere: "floating" | "window" | null;
-  /** The first run turned the floating room on once (the shell keeps the same, `floating::offer`). */
+  /** The first run turned the floating room on once, 2026-11-14 to 2026-11-25; read from older saves, decides nothing now. */
   floatOffered: boolean;
   /** They went on to Make it yours while Ghost's ears downloaded: come back when they're here. */
   waitingForEars: boolean;

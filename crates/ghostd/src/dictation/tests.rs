@@ -121,10 +121,10 @@ struct Fake {
 
 #[async_trait]
 impl Host for Fake {
-    fn refusal(&self) -> Option<DictationReason> {
+    fn refusal(&self, _origin: Origin) -> Option<DictationReason> {
         *self.refusal.lock().unwrap()
     }
-    fn still_allowed(&self) -> Option<DictationReason> {
+    fn still_allowed(&self, _origin: Origin) -> Option<DictationReason> {
         *self.refusal.lock().unwrap()
     }
     async fn take_mic(&self) -> Result<MicHold, DictationReason> {

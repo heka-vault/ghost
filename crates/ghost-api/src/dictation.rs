@@ -39,6 +39,9 @@ pub enum DictationState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DictationOutcome {
+    /// Typed into the window that has the keyboard (the dictation key only, ADR 0077 as
+    /// amended 2026-11-25).
+    Typed,
     /// The text is on the clipboard.
     OnClipboard,
     /// Parakeet read nothing, or nothing was left after the fillers.
@@ -93,6 +96,12 @@ pub enum DictationReason {
     TooLong,
     /// Something in Ghost failed while dictating (a fault in the recording or the read).
     Failed,
+    /// The text has a character the keyboard cannot type (an accent, another script, an
+    /// emoji): it went to the clipboard instead, whole.
+    NoKeys,
+    /// Typing into the window failed (no typing permission, or the desktop refused): it went
+    /// to the clipboard instead.
+    TypingFailed,
 }
 
 /// What a dictation, or a request, ended with: kinds and numbers, never words.
@@ -144,6 +153,19 @@ impl DictationResult {
         use DictationOutcome as O;
         use DictationReason as R;
         match (self.outcome, self.reason) {
+            (O::Typed, Some(R::Limit)) => {
+                format!("Stopped at the limit. Typed {} characters.", self.chars)
+            }
+            (O::Typed, _) => format!("Typed {} characters.", self.chars),
+            (O::OnClipboard, Some(R::NoKeys)) => format!(
+                "Some characters can't be typed here. On your clipboard: {} characters. Press \
+                 Ctrl+V.",
+                self.chars
+            ),
+            (O::OnClipboard, Some(R::TypingFailed)) => format!(
+                "Ghost couldn't type it. On your clipboard: {} characters. Press Ctrl+V.",
+                self.chars
+            ),
             (O::OnClipboard, Some(R::Limit)) => format!(
                 "Stopped at the limit. On your clipboard: {} characters. Press Ctrl+V.",
                 self.chars
@@ -213,6 +235,52 @@ pub struct DictationView {
     pub result: Option<DictationResult>,
 }
 
+/// Where a dictation is, for the scene the operator watches (ADR 0077 as amended
+/// 2026-11-25). Finer than [`DictationState`]: it also says how it ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DictationScene {
+    /// The microphone is opening.
+    Starting,
+    /// Recording: the words so far and the level.
+    Listening,
+    /// The last piece is being read, tidied and typed.
+    Writing,
+    /// Typed into the window that has the keyboard.
+    Typed,
+    /// On the clipboard: "Press Ctrl+V".
+    Clipboard,
+    /// Nothing was heard.
+    NothingHeard,
+    /// It did not start, or stopped without a result: `sentence` says why.
+    Stopped,
+}
+
+/// The live view of a dictation, for the operator's own desktop only: the one view of
+/// dictation that carries the words, shown as they are read and never kept. It travels on
+/// its own channel, merged into the `/events` WebSocket the desktop opens, never on the event
+/// bus, so the phone, an outside client and the daemon's own taps never see it. About fifteen
+/// a second while recording (the level), and one at each change.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct DictationLiveView {
+    pub scene: DictationScene,
+    /// From the dictation key (true) or a command (`ghostd dictate`, the API).
+    pub key: bool,
+    /// The microphone's level, 0.0 to 1.0 (the RMS of the last 50 ms, -50 dBFS to 0 dBFS),
+    /// while listening.
+    #[schema(required)]
+    pub level: Option<f32>,
+    /// The words so far, as each piece is read.
+    #[schema(required)]
+    pub text: Option<String>,
+    /// Seconds recorded so far, and the limit.
+    pub seconds: f64,
+    pub limit_secs: f64,
+    /// Ghost's own sentence for how it ended (`DictationResult::sentence`), at the end.
+    #[schema(required)]
+    pub sentence: Option<String>,
+}
+
 /// What the daemon does for dictation (`ghostd::dictation`).
 #[async_trait]
 pub trait DictationPort: Send + Sync {
@@ -226,6 +294,156 @@ pub trait DictationPort: Send + Sync {
     async fn toggle(&self) -> DictationView;
     /// Drop it, recorded or being read; nothing reaches the clipboard.
     async fn cancel(&self) -> DictationView;
+}
+
+/// Where the dictation key stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DictationKeyState {
+    /// The switch is off.
+    Off,
+    /// Asking the desktop for the key (GNOME's dialog may be open).
+    Binding,
+    /// The key is bound: hold or tap it to dictate.
+    Ready,
+    /// This desktop has no shortcut portal (X11, Hyprland, Sway, no portal backend): use a
+    /// shortcut of the desktop's own that runs `ghostd dictate toggle`.
+    Unavailable,
+    /// The operator said no at GNOME's dialog.
+    Refused,
+    /// Something went wrong asking for it.
+    Failed,
+}
+
+/// Whether Ghost may type into the window that has the keyboard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DictationTyping {
+    /// Not asked yet.
+    Unknown,
+    /// Allowed: the text is typed.
+    Allowed,
+    /// Refused or unavailable: the text goes to the clipboard.
+    Refused,
+}
+
+/// Where the dictation key's tidy sends the words (Settings › Sound › Dictation, "Tidy with").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TidySource {
+    /// No tidy: the text is typed as Parakeet read it and the cleanup left it.
+    Off,
+    /// The operator's own subscription (Claude Code, ADR 0069) with the model they chose, or
+    /// Ghost's own model when none is chosen.
+    Subscription,
+    /// OpenRouter, with `OPENROUTER_API_KEY` from Ghost's vault (ADR 0078).
+    Openrouter,
+}
+
+/// The dictation key in Settings › Sound.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct DictationKeyView {
+    /// The operator's switch, "Hold a key to dictate".
+    pub on: bool,
+    pub state: DictationKeyState,
+    /// The desktop's own words for the key ("Press F9"), once bound.
+    #[schema(required)]
+    pub key: Option<String>,
+    pub typing: DictationTyping,
+    /// The tidy is on: `tidy_source` is not `off`.
+    pub tidy: bool,
+    /// Where the words go for the tidy: the provider's name ("Claude Code", "Anthropic",
+    /// "OpenRouter"), or None when the tidy is off or has nothing to go to (no model set up,
+    /// OpenRouter chosen without its key): the text is typed as read.
+    #[schema(required)]
+    pub tidy_with: Option<String>,
+    /// "Tidy with": off, the subscription, or OpenRouter. A choice made before there was one is
+    /// read as it behaved: OpenRouter when its key is set, else the subscription.
+    #[serde(default = "tidy_source_default")]
+    #[schema(required)]
+    pub tidy_source: TidySource,
+    /// The model the tidy asks for its source: OpenRouter's model id, or Claude Code's alias
+    /// (`opus`, `sonnet`, `haiku`); "" when the subscription's tidy uses Ghost's own model.
+    #[serde(default)]
+    pub tidy_model: String,
+    /// OpenRouter's model when none is chosen.
+    #[serde(default)]
+    pub tidy_model_default: String,
+    /// `OPENROUTER_API_KEY` is set, so OpenRouter can tidy. The name, never a value.
+    #[serde(default)]
+    pub openrouter: bool,
+    /// Claude Code can tidy: it is Ghost's model, or it is on this computer.
+    #[serde(default)]
+    #[schema(required)]
+    pub subscription: bool,
+}
+
+fn tidy_source_default() -> TidySource {
+    TidySource::Subscription
+}
+
+/// A change to the dictation key's switches; absent fields stay as they are.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct DictationKeyBody {
+    #[serde(default)]
+    pub on: Option<bool>,
+    /// The older switch: false is `tidy_source: off`; true turns an off tidy back on as it
+    /// was before there was a choice.
+    #[serde(default)]
+    pub tidy: Option<bool>,
+    /// "Tidy with". With it, `tidy_model` names that source's model (absent or empty: its
+    /// default).
+    #[serde(default)]
+    pub tidy_source: Option<TidySource>,
+    /// The tidy's model for its source: an OpenRouter id (`anthropic/claude-haiku-5.5`) or
+    /// Claude Code's alias (`haiku`); empty is the default.
+    #[serde(default)]
+    pub tidy_model: Option<String>,
+}
+
+/// What the daemon does for the dictation key (`ghostd::dictation::desk`).
+#[async_trait]
+pub trait DictationKeyPort: Send + Sync {
+    fn view(&self) -> DictationKeyView;
+    /// Turn the key on (GNOME's dialogs, the key then typing) or off, and the tidy.
+    async fn set(&self, body: DictationKeyBody) -> DictationKeyView;
+    /// GNOME's own place to change the key.
+    async fn change(&self) -> DictationKeyView;
+}
+
+fn key_port(deps: &SharedDeps) -> ApiResult<&dyn DictationKeyPort> {
+    deps.dictation_key
+        .as_deref()
+        .ok_or_else(|| ApiError::unavailable("the dictation key is not available in this daemon"))
+}
+
+/// The dictation key: the switch, the key, typing and the tidy.
+#[utoipa::path(get, path = "/dictation/key", operation_id = "dictation_key_get",
+    tag = "dictation", summary = "The dictation key",
+    responses((status = 200, description = "Successful Response", body = DictationKeyView)))]
+async fn dictation_key_get(State(deps): State<SharedDeps>) -> ApiResult<Json<DictationKeyView>> {
+    Ok(Json(key_port(&deps)?.view()))
+}
+
+/// Turn the dictation key on or off, or the tidy. Turning it on asks the desktop for the key
+/// and for typing (GNOME's dialogs) and answers once they are settled.
+#[utoipa::path(put, path = "/dictation/key", operation_id = "dictation_key_set",
+    tag = "dictation", summary = "Set the dictation key",
+    request_body = DictationKeyBody,
+    responses((status = 200, description = "Successful Response", body = DictationKeyView)))]
+async fn dictation_key_set(
+    State(deps): State<SharedDeps>,
+    Json(body): Json<DictationKeyBody>,
+) -> ApiResult<Json<DictationKeyView>> {
+    Ok(Json(key_port(&deps)?.set(body).await))
+}
+
+/// Open the desktop's own place to change the dictation key.
+#[utoipa::path(post, path = "/dictation/key/change", operation_id = "dictation_key_change",
+    tag = "dictation", summary = "Change the dictation key",
+    responses((status = 200, description = "Successful Response", body = DictationKeyView)))]
+async fn dictation_key_change(State(deps): State<SharedDeps>) -> ApiResult<Json<DictationKeyView>> {
+    Ok(Json(key_port(&deps)?.change().await))
 }
 
 fn port(deps: &SharedDeps) -> ApiResult<&dyn DictationPort> {
@@ -282,6 +500,8 @@ pub fn router() -> OpenApiRouter<SharedDeps> {
         .routes(routes!(dictation_stop))
         .routes(routes!(dictation_toggle))
         .routes(routes!(dictation_cancel))
+        .routes(routes!(dictation_key_get, dictation_key_set))
+        .routes(routes!(dictation_key_change))
 }
 
 #[cfg(test)]
@@ -289,14 +509,15 @@ mod tests {
     use super::*;
     use serde_json::Value;
 
-    const OUTCOMES: [DictationOutcome; 5] = [
+    const OUTCOMES: [DictationOutcome; 6] = [
+        DictationOutcome::Typed,
         DictationOutcome::OnClipboard,
         DictationOutcome::NothingHeard,
         DictationOutcome::NotOnClipboard,
         DictationOutcome::Cancelled,
         DictationOutcome::Refused,
     ];
-    const REASONS: [DictationReason; 19] = [
+    const REASONS: [DictationReason; 21] = [
         DictationReason::NotListening,
         DictationReason::Busy,
         DictationReason::HearingTest,
@@ -316,6 +537,8 @@ mod tests {
         DictationReason::ClipboardFailed,
         DictationReason::TooLong,
         DictationReason::Failed,
+        DictationReason::NoKeys,
+        DictationReason::TypingFailed,
     ];
 
     fn kinds() -> Vec<String> {

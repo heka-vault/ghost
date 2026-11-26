@@ -60,6 +60,7 @@ import { pairLink } from "@ghost/client-ts";
 import { DESKTOP_BUILD, DESKTOP_VERSION } from "../../app/version";
 import { HttpError } from "./errors";
 import { type HearDesign, MockHear } from "./hear";
+import { MockDictation } from "./dictation";
 import { MockReports } from "./reports";
 import { uninstallView } from "./uninstall";
 import { MockDeveloper } from "./developer";
@@ -67,6 +68,7 @@ import { MockLive, type MeterRoom } from "./live";
 import { MockWakeTakes } from "./wakeTakes";
 import { isConnectionKey, isModelOnly, MockModel } from "./model";
 import { MockOtherTools } from "./otherTools";
+import { MockSubscriptions } from "./subscriptions";
 import { MockSchedules, askedSchedule } from "./schedules";
 import { type AppFixture, type CatalogSeed, DEFAULT_LIMITS, GENERIC_TOOLS, TOOLS_BY_CATALOG, githubDeviceSignIn, gmailNeedsClient, needsClientSentence } from "./fixtures/apps";
 import type { AgentRecord } from "./fixtures/conversations";
@@ -289,6 +291,10 @@ export class MockDaemon {
   private otherTools: MockOtherTools;
   /** Each call an agent made, as counts and sizes (ADR 0060). */
   private reach: MockReach;
+  /** The dictation key and a dictation's live view (ADR 0077 as amended 2026-11-25). */
+  private dictation: MockDictation;
+  /** The operator's own subscriptions (ADR 0078): their programs, installs and sign-ins. */
+  private subscriptions!: MockSubscriptions;
   private reachTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(scenario: Scenario, f: Fixtures, options: MockOptions = {}) {
@@ -298,6 +304,12 @@ export class MockDaemon {
       () => this.pushStatus({ debug_audio: this.developer.mark() }),
     );
     this.devLive = new MockLive(options.meterRoom ?? "quiet", (e) => this.emit(e), () => this.status);
+    this.dictation = new MockDictation(
+      (e) => this.emit(e),
+      typeof window !== "undefined" ? new URLSearchParams(window.location.search) : new URLSearchParams(),
+      scenario.dictation ?? null,
+      () => this.passwords?.vault.state === "open" && !!this.passwords.passwords.find((x) => x.name === "OPENROUTER_API_KEY")?.set,
+    );
     this.phone = f.settings.phone;
     const hoursAgo = (h: number) => new Date(Date.now() - h * 3600_000).toISOString();
     const cursor: ClientView = { name: "cursor", title: "Cursor", created_at: hoursAgo(24 * 3), last_used_at: null };
@@ -348,6 +360,24 @@ export class MockDaemon {
     for (const [id, p] of Object.entries(f.session.results)) this.callResults.set(id, { ...p, id, session_id: f.session.sessionId ?? "" });
     this.questions = f.session.questions;
     this.settings = f.settings.settings;
+    // ?subs=in-use: Claude Code is Ghost's model (ADR 0078), with &llmmodel and &llmfast for its two models.
+    const q = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : new URLSearchParams();
+    if (q.get("subs") === "in-use") {
+      const values: Record<string, string> = { ...this.settings.values, GHOST_LLM_PROVIDER: "claude-code" };
+      for (const k of ["GHOST_LLM_ENDPOINT", "GHOST_LLM_PROTOCOL", "GHOST_LLM_BASE_URL", "GHOST_LLM_PASSWORD"]) delete values[k];
+      if (q.get("llmmodel")) values.GHOST_LLM_MODEL = q.get("llmmodel") ?? "";
+      else delete values.GHOST_LLM_MODEL;
+      if (q.get("llmfast")) values.GHOST_LLM_FAST_MODEL = q.get("llmfast") ?? "";
+      this.settings = { ...this.settings, values };
+    }
+    this.subscriptions = new MockSubscriptions(
+      typeof window !== "undefined" ? new URLSearchParams(window.location.search) : new URLSearchParams(),
+      () => (this.settings.values.GHOST_LLM_PROVIDER ?? "").trim(),
+      (provider) => {
+        for (const k of ["GHOST_LLM_MODEL", "GHOST_LLM_PROTOCOL", "GHOST_LLM_BASE_URL", "GHOST_LLM_PASSWORD", "GHOST_LLM_HEADERS", "GHOST_LLM_TIMEOUT_SECS"]) delete this.settings.values[k];
+        this.settings.values.GHOST_LLM_PROVIDER = provider;
+      },
+    );
     this.passwords = structuredClone(f.settings.passwords);
     if (options.vault === "locked") this.passwords.vault = { ...this.passwords.vault, state: "locked", problem: "Your keyring is locked" };
     if (options.vault === "broken")
@@ -528,6 +558,7 @@ export class MockDaemon {
     this.playFloating();
     this.playFloatingTour();
     this.playFloatingSite();
+    this.dictation.play();
     return () => this.listeners.delete(l);
   }
   /**
@@ -2021,6 +2052,14 @@ export class MockDaemon {
       const answer = this.developer.handle(method, path, b);
       if (answer !== undefined) return answer;
     }
+    if (path.startsWith("/subscriptions")) {
+      const answer = this.subscriptions.handle(method, path, b);
+      if (answer !== undefined) return answer;
+    }
+    if (path.startsWith("/dictation/key")) {
+      const answer = await this.dictation.handle(method, path, b);
+      if (answer !== undefined) return answer;
+    }
     if (path.startsWith("/reports")) {
       const answer = this.reports.handle(method, path, b);
       if (answer !== undefined) return answer;
@@ -2441,6 +2480,7 @@ export class MockDaemon {
 
   dispose() {
     this.hear.dispose();
+    this.dictation.dispose();
     for (const t of this.timers) clearTimeout(t);
     if (this.voiceTimer) clearInterval(this.voiceTimer);
     if (this.reachTimer) clearInterval(this.reachTimer);

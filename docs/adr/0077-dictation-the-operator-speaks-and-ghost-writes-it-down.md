@@ -234,3 +234,63 @@ own. It goes once Ghost's dictation has the key.
   restoring the clipboard, the destination checked), hold to talk (the GlobalShortcuts portal),
   the indicator and Settings › Sound › Dictation, dictation beside a session, past 30 s in
   pieces, X11 keys, KDE and Hyprland.
+
+## Amended 2026-11-25: hold the key, see your words, Ghost types them
+
+Decided with the operator (the grilling of 2026-11-25; spikes in `.scratch/ptt-spike/`, issues
+#182 to #187). It takes slices 2 to 4 and part of 6 together, in one branch.
+
+- **The key.** The daemon owns a GlobalShortcuts portal session, registered as
+  `heka-ghost-desktop` (`dictation::portal`). GNOME 50.1, measured: the key is bound after one
+  dialog and quietly after that; `Activated` repeats every 30 ms after 500 ms while held and
+  one `Deactivated` comes at the release; Shift+F9 does not trigger it. Ghost asks for the
+  first of F9, F10, F8, F7, F6 that GNOME's own bindings don't use, reading them and never
+  writing them; GNOME's dialog and its Change key pick any other. Hold or tap
+  (`dictation::key`, one pure machine): a hold of 300 ms or more is push-to-talk, a shorter
+  tap locks recording until the next press; repeats while held are ignored, a release is
+  decided after 50 ms, a press within 30 ms of a stop is a bounce. No cancel key yet.
+- **The switch.** "Hold a key to dictate" in Settings › Sound, off until the operator turns
+  it on; turning it on asks for the key, then for typing. A one-time note on the waiting
+  list (`dictation:key`, place Sound) says the key exists while the switch is off.
+- **Not listening.** A real key press through the portal opens the microphone for that
+  dictation only (ADR 0057 as amended today). `ghostd dictate` and `POST /dictation/*` are
+  still refused while not listening.
+- **Pieces while speaking.** Each pause of half a second after speech ends a piece (Silero on
+  dictation's own frames, `PAUSE`, at least 0.6 s of audio), read on the shared Parakeet
+  while recording goes on; the rest is read at the end and the pieces joined. Two minutes at
+  the most, held or locked or from a command (`LIMIT`); at the limit it stops and reads.
+- **The live view.** The words read so far, the level and the state reach the operator's own
+  desktop (`DictationLiveView`, the `dictation` event): on its own channel, merged into the
+  `/events` WebSocket only, never the event bus, so the phone, outside clients and the
+  daemon's taps never see it; shown, never kept. The scene floats (ADR 0059 as amended today).
+- **The model's tidy.** From the key, the text goes to the operator's configured model (the
+  fast model when one is set) to fix obvious mistakes, by the switch "Tidy with the model",
+  on by default when a model is set and saying where the words go. No tools; three seconds;
+  taken only when it changed under a quarter of the words, case and punctuation aside;
+  otherwise, and on any failure, what was read is typed. Nothing of it is kept or logged.
+  **This sends dictated words off the computer** when the model is a cloud one, by the
+  operator's switch.
+- **Typed, not pasted.** From the key, the final text is typed once into the window that has
+  the keyboard, through a keyboard-only RemoteDesktop session opened for the moment and
+  closed after, restored by a token kept in the vault (`GHOST_DICTATION_TYPING`). Measured:
+  about 1,600 characters a second, terminals included. GNOME types only keysyms the layout
+  has and drops the rest silently, so before typing: controls and line breaks stripped (no
+  Enter, ever), typographic punctuation made plain, and if anything outside printable ASCII
+  is left, the whole text goes to the clipboard ("Press Ctrl+V", `NoKeys`); typing that fails
+  does the same (`TypingFailed`). A command never types: it ends on the clipboard as before.
+- **English only** (the operator's choice after an 86 s dictation at the desk went whole to
+  the clipboard because Parakeet v3 read three sounds as Cyrillic and one as "ä"). Parakeet
+  chooses only tokens of printable ASCII (`Parakeet::english_only`, `GHOST_STT_ENGLISH_ONLY`,
+  on; 3,022 of v3's 8,193 tokens left out; the parity's own decode keeps them all), for
+  sessions and dictation alike. Typing folds what is left: accents off (NFKD, and the Latin
+  letters with no decomposition), a fraction's slash kept (½ is 1/2, never 12), anything else
+  left out; the clipboard only when nothing typable is left. This replaces "one untypable
+  character sends the whole text to the clipboard" above.
+- **Sound.** The default output is muted while recording and put back after, however it
+  ends, and after a crash at the next start (`SinkMute`).
+- **Notifications.** From the key, only what went wrong and the clipboard's "Press Ctrl+V";
+  the scene says the rest. From a command, as before.
+- **nerd-dictation** is no longer watched for: F9 is Ghost's.
+
+Still refused: dictation during a conversation (its own slice, behind the audio barrier's
+tests). Still later: a cancel key, X11, KDE and Hyprland, past two minutes.

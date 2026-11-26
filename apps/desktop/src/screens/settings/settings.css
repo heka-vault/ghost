@@ -237,6 +237,7 @@
 .set-disclosure { display: grid; gap: var(--space-2); color: var(--text-2); font-size: var(--text-sm); line-height: var(--leading-sm); }
 .set-disclosure__line { display: block; padding-left: var(--space-3); border-left: 2px solid var(--border); }
 .set-wake-takes { display: inline-flex; align-items: center; gap: var(--space-3); }
+.set-dictation__asking { display: inline-flex; align-items: center; gap: var(--space-1_5); }
 
 /* The floating room's choices (FloatingSettings.tsx): one width, so the column of selects lines up. */
 .float-select { width: 13rem; }
@@ -344,3 +345,22 @@ line.meter-trace__line { stroke: var(--text-3); }
 .float-options { padding: var(--space-3) var(--space-4); }
 .float-options__rows { display: flex; flex-direction: column; margin: var(--space-2) calc(var(--space-4) * -1) calc(var(--space-3) * -1); }
 .float-options__rows > * + * { border-top: 1px solid var(--border-subtle); }
+
+/* Choose your subscription (ADR 0078): one card per program, its install or sign-in under it. */
+.set-subs { display: grid; gap: var(--space-3); }
+.set-subs__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.set-subs__card.is-in-use { box-shadow: inset 3px 0 0 var(--accent); }
+.set-subs__job { display: grid; gap: var(--space-2); padding: 0 var(--space-4) var(--space-3) calc(var(--space-4) + 28px); }
+.set-subs__command {
+  margin: 0; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm);
+  background: var(--bg-sunken); font-family: var(--font-mono); font-size: var(--text-sm);
+  font-feature-settings: normal; color: var(--text-1); overflow-wrap: anywhere;
+}
+.set-subs__lines {
+  margin: 0; max-height: 180px; overflow: auto; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm);
+  background: var(--bg-sunken); font-family: var(--font-mono); font-size: var(--text-xs); line-height: var(--leading-sm);
+  color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.set-subs__code { display: grid; gap: var(--space-1); }
+.set-subs__code-row { display: flex; gap: var(--space-2); align-items: center; }
+.set-subs__code-row .g-input { flex: 1; min-width: 0; }

@@ -202,7 +202,7 @@ export function App() {
                 </span>
               ) : (
                 <span>
-                  <strong>Ghost needs a model password before it can answer.</strong> Add the Anthropic password or a model endpoint.
+                  <strong>Ghost needs a model before it can answer.</strong> Choose your Claude Code, OpenAI Codex or Antigravity subscription and sign in.
                 </span>
               )}
               <Button size="sm" className="shell-banner__action" href={setupHref}>

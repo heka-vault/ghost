@@ -94,6 +94,9 @@ pub struct VoiceSettings {
     /// `int8`, the quantized ones the parity fixtures were recorded with.
     pub stt_quantization: Option<String>,
     pub stt_threads: usize,
+    /// `GHOST_STT_ENGLISH_ONLY` (on): Parakeet chooses only English (ASCII) tokens, so an
+    /// English speaker's reading never comes out in another script or with stray accents.
+    pub stt_english_only: bool,
     /// `GHOST_STT_DIR`: where Parakeet's files are; unset, Ghost's cache
     /// (`models/parakeet-tdt-0.6b-v3/`, `scripts/models.sh parakeet`), and for int8 the
     /// Hugging Face cache.
@@ -390,6 +393,7 @@ impl VoiceSettings {
                 .map(|v| v.trim().to_string())
                 .filter(|v| !v.is_empty() && v != "none"),
             stt_threads: usize_or("GHOST_STT_THREADS", 4)?,
+            stt_english_only: flag("GHOST_STT_ENGLISH_ONLY", true),
             stt_dir: path("GHOST_STT_DIR"),
             stt_early_read_after_secs: f64_or("GHOST_STT_EARLY_READ_AFTER_SECS", 0.0)?,
             stt_early_read: match text("GHOST_STT_EARLY_READ")

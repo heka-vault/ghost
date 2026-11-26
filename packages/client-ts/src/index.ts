@@ -76,6 +76,7 @@ export type PolicyUpdate = Schemas["PolicyUpdate"];
 export type PolicyResult = Schemas["PolicyResult"];
 export type SettingsView = Schemas["SettingsView"];
 export type SettingsUpdate = Schemas["SettingsUpdate"];
+export type SettingsResult = Schemas["SettingsResult"];
 /** Ghost's vault (ADR 0036): names and metadata only; a value never comes back. */
 export type PasswordsView = Schemas["PasswordsView"];
 export type PasswordInfo = Schemas["PasswordInfo"];
@@ -125,6 +126,12 @@ export type FoundModelView = Schemas["FoundModelView"];
 export type ClaudeCodeView = Schemas["ClaudeCodeView"];
 export type OtherImportResult = Schemas["OtherImportResult"];
 export type OtherLinkResult = Schemas["OtherLinkResult"];
+/** The operator's own AI subscriptions (ADR 0078): Claude Code, OpenAI Codex, Google Antigravity. */
+export type SubscriptionsView = Schemas["SubscriptionsView"];
+export type SubscriptionView = Schemas["SubscriptionView"];
+/** An install or a sign-in, as it goes. Never the pasted code. */
+export type SubscriptionJobView = Schemas["SubscriptionJobView"];
+export type SubscriptionUseResult = Schemas["SubscriptionUseResult"];
 /** What connecting a tool answers, once: its token and what to paste into the tool. */
 export type ClientCreated = Schemas["ClientCreated"];
 export type SkillInfo = Schemas["SkillInfo"];
@@ -207,6 +214,17 @@ export type CallPreview = Schemas["CallPreview"];
 export type ReachCall = Schemas["ReachCall"];
 export type ReachTotalView = Schemas["ReachTotalView"];
 export type ReachView = Schemas["ReachView"];
+/**
+ * A dictation as the operator watches it (ADR 0077 as amended 2026-11-25): its scene, the
+ * microphone's level, the words read so far and Ghost's sentence at the end. The one view that
+ * carries dictated words: shown, never kept or logged.
+ */
+export type DictationLiveView = Schemas["DictationLiveView"];
+export type DictationScene = Schemas["DictationScene"];
+/** The dictation key in Settings › Sound: the switch, where it stands, GNOME's words for the key, the tidy. */
+export type DictationKeyView = Schemas["DictationKeyView"];
+export type DictationKeyBody = Schemas["DictationKeyBody"];
+export type TidySource = Schemas["TidySource"];
 /** A run started or ended (ADR 0060). */
 export type RunPhase = Schemas["RunEvent"]["phase"];
 /** `aec` is ghost.mic, after the echo canceller; `raw` the array under it. */
@@ -243,7 +261,9 @@ export type GhostEvent =
   /** One turn of the live session, timed, at its end: Developer's timing overlay. Numbers only. Desktop only. */
   | Schemas["TimingEvent"]
   /** Developer's microphone meter, ~15/s while it is open, then one with `open` false. Levels and kinds only. Desktop only. */
-  | Schemas["MeterEvent"];
+  | Schemas["MeterEvent"]
+  /** A dictation, ~15/s while it listens and once at each change: its scene, level and the words so far. The operator's own desktop only; never kept. */
+  | Schemas["DictationEvent"];
 
 export type Unsubscribe = () => void;
 
@@ -728,6 +748,36 @@ export class GhostClient {
     return unwrap(this.api.DELETE("/other-tools/{tool}/link", { params: { path: { tool } } }));
   }
 
+  // --- the operator's own subscriptions (ADR 0078) -------------------------------------------
+  /** Claude Code, OpenAI Codex and Google Antigravity, as each program says it is. */
+  subscriptions() {
+    return unwrap(this.api.GET("/subscriptions"));
+  }
+  /** One subscription's install or sign-in, running or the last one; null when none. */
+  subscriptionJob(id: string) {
+    return unwrap(this.api.GET("/subscriptions/{id}/job", { params: { path: { id } } }));
+  }
+  /** Run the vendor's own install command, exactly as shown in `install_command`. */
+  installSubscription(id: string) {
+    return unwrap(this.api.POST("/subscriptions/{id}/install", { params: { path: { id } } }));
+  }
+  /** Start the program's own sign-in: it opens the browser itself. */
+  signInSubscription(id: string) {
+    return unwrap(this.api.POST("/subscriptions/{id}/sign-in", { params: { path: { id } } }));
+  }
+  /** Give the waiting sign-in the code its page showed. Never returned or kept. */
+  subscriptionCode(id: string, code: string) {
+    return unwrap(this.api.POST("/subscriptions/{id}/sign-in/code", { params: { path: { id } }, body: { code } }));
+  }
+  /** Stop the install or the sign-in. */
+  cancelSubscription(id: string) {
+    return unwrap(this.api.POST("/subscriptions/{id}/cancel", { params: { path: { id } } }));
+  }
+  /** Make it Ghost's model (Claude Code); 409 for the ones Ghost can't run yet. */
+  useSubscription(id: string) {
+    return unwrap(this.api.PUT("/subscriptions/{id}/use", { params: { path: { id } } }));
+  }
+
   // --- skills (ADR 0023, ADR 0035) -----------------------------------------------------------
   /** Every SKILL.md folder Ghost reads for itself: its own and the operator's, with the apps
    *  each needs, which of those aren't connected, and any problem that keeps it from being offered. */
@@ -903,6 +953,23 @@ export class GhostClient {
   /** Save a diagnostic report as a file. Nothing is uploaded. */
   diagnose(body: DiagnoseRequest) {
     return unwrap(this.api.POST("/diagnose", { body }));
+  }
+  // ------------------------------------------------------------------ dictation (ADR 0077)
+  /** The dictation key: the switch, where it stands with GNOME, the key, typing, the tidy. */
+  dictationKey() {
+    return unwrap(this.api.GET("/dictation/key"));
+  }
+  /** Turn the key on or off, or the tidy. Turning it on waits for GNOME's dialogs. */
+  setDictationKey(body: DictationKeyBody) {
+    return unwrap(this.api.PUT("/dictation/key", { body }));
+  }
+  /** "Tidy with": off, the subscription (Claude Code's `haiku`, `sonnet` or `opus`; empty is Ghost's own model) or OpenRouter (a model id; empty is its default). */
+  setDictationTidy(source: TidySource, model?: string) {
+    return this.setDictationKey(model == null ? { tidy_source: source } : { tidy_source: source, tidy_model: model });
+  }
+  /** Open GNOME's own picker for the key. */
+  changeDictationKey() {
+    return unwrap(this.api.POST("/dictation/key/change"));
   }
   // ------------------------------------------------------------------ removing Ghost (#147)
   /** What Ghost left on this computer, by kind, with sizes. The removal is the app's (`remove_ghost`). */

@@ -98,3 +98,17 @@ says it to agents.
   which it is, and the desktop says "Typing with Ghost" rather than "Listening". Its music
   is ducked only while a spoken reply plays, and comes back once the reply has finished,
   not 20 s later (`ghostd::reply_duck`); a voice session still holds it start to end.
+
+## Amended 2026-11-25: the dictation key
+
+Not listening means Ghost doesn't listen on its own: for its name, or for anything else. The
+operator's own dictation key is the one exception (ADR 0077 as amended today): a real key
+press seen through the desktop's shortcut portal opens the microphone for that dictation
+only, to Ghost's own Parakeet and nowhere else, and closes it at the release (or the second
+tap, or two minutes). Nothing else opens it: `ghostd dictate` and `POST /dictation/*` are
+still refused, a session is not opened, the wake is not armed, and turning listening off
+during a dictation still cancels it. Where the product says "Mic off" it now means "Ghost
+isn't listening"; the dictation scene shows when the microphone is open for the key.
+
+Ctrl+Shift+M works in Ghost's window only (a key of the window, not a global one): the
+desktop and the docs say "in the app". Making it global is #188.

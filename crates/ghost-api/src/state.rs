@@ -113,6 +113,10 @@ pub struct DaemonState {
     calls: Mutex<VecDeque<crate::models::CallPreview>>,
     started: Instant,
     pub bus: EventBus,
+    /// Dictation's live view (ADR 0077 as amended 2026-11-25), the one view of it with the
+    /// words: its own channel, not the bus, so only the operator's `/events` WebSocket
+    /// carries it, and the phone, outside clients and the daemon's taps never see it.
+    dictation_live: broadcast::Sender<String>,
     provider: RwLock<Option<StatusProvider>>,
     /// The first run's moment is open (ADR 0059 as amended 2026-11-14): the next session
     /// with Ghost at this desk opens with Ghost's own first line. Memory only, taken once.
@@ -162,6 +166,7 @@ impl DaemonState {
             calls: Mutex::new(VecDeque::new()),
             started: Instant::now(),
             bus: EventBus::default(),
+            dictation_live: broadcast::channel(BUS_CAPACITY).0,
             provider: RwLock::new(None),
             first_meeting: std::sync::atomic::AtomicBool::new(false),
         }
@@ -514,6 +519,22 @@ impl DaemonState {
     /// A reading of Developer's microphone meter (`Event::Meter`), only while it is open.
     pub fn publish_meter(&self, meter: crate::live::MeterView) {
         self.bus.publish(&Event::Meter { meter });
+    }
+
+    /// Dictation's live view, to the operator's desktop only: `{"type": "dictation", ...}` on
+    /// the `/events` WebSocket. Nothing when no desktop is open; never on the bus, never
+    /// kept.
+    pub fn publish_dictation(&self, view: &crate::dictation::DictationLiveView) {
+        if self.dictation_live.receiver_count() == 0 {
+            return;
+        }
+        let payload = serde_json::json!({ "type": "dictation", "dictation": view });
+        let _ = self.dictation_live.send(payload.to_string());
+    }
+
+    /// Dictation's live views, for the `/events` WebSocket and nothing else.
+    pub fn dictation_live(&self) -> broadcast::Receiver<String> {
+        self.dictation_live.subscribe()
     }
 
     /// A run started or has ended (`Event::Run`, ADR 0060).

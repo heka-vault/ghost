@@ -1599,6 +1599,8 @@ async fn events(ws: WebSocketUpgrade, State(deps): State<SharedDeps>) -> Respons
 
 async fn event_stream(mut socket: WebSocket, deps: SharedDeps) {
     let mut rx = deps.state.bus.subscribe();
+    // Dictation's live view (the words as they are read): the operator's own socket only.
+    let mut dictation = deps.state.dictation_live();
     // first message: a plain Status
     let Ok(first) = serde_json::to_string(&status_snapshot(&deps)) else {
         return;
@@ -1615,6 +1617,15 @@ async fn event_stream(mut socket: WebSocket, deps: SharedDeps) {
                     }
                 }
                 Err(RecvError::Lagged(_)) => continue, // the oldest were dropped, as the queue did
+                Err(RecvError::Closed) => break,
+            },
+            live = dictation.recv() => match live {
+                Ok(payload) => {
+                    if socket.send(Message::Text(payload.into())).await.is_err() {
+                        break;
+                    }
+                }
+                Err(RecvError::Lagged(_)) => continue,
                 Err(RecvError::Closed) => break,
             },
             incoming = socket.recv() => match incoming {
@@ -1663,6 +1674,7 @@ pub fn create_app(deps: SharedDeps) -> (axum::Router, utoipa::openapi::OpenApi) 
         .merge(crate::schedules::router())
         .merge(crate::clients::router())
         .merge(crate::other_tools::router())
+        .merge(crate::subscriptions::router())
         .merge(crate::questions::router())
         .merge(crate::calls::router())
         .merge(crate::reach::router())

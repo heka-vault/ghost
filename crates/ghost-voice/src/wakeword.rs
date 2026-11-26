@@ -1021,8 +1021,8 @@ mod tests {
     #[tokio::test]
     async fn test_a_misspelled_name_passes_when_the_opener_follows() {
         let recognize = Recognizer::new(&[
-            "Coach, I need you to work on",
-            "I need you to work on some of the things.",
+            "Coach, can you work on",
+            "can you work on some of the things.",
         ]);
         let events = run(
             detector(
@@ -1040,10 +1040,7 @@ mod tests {
         .await;
         assert_eq!(
             events,
-            vec![
-                "heard",
-                "match:ghost|I need you to work on some of the things."
-            ]
+            vec!["heard", "match:ghost|can you work on some of the things."]
         );
     }
 
@@ -1425,7 +1422,7 @@ mod tests {
         // The model heard "Ghost, …" but Parakeet wrote something else: shaped like the
         // name with an opener after it, the request is what follows; otherwise it is all
         // of it, rather than a greeting that drops what the operator asked.
-        let recognize = Recognizer::new(&["Coast, let's work on the wake word."]);
+        let recognize = Recognizer::new(&["Coast, what is the wake word?"]);
         let events = run(
             detector(
                 FakeScorer::with(&[3], 0.9, "ghost_address"),
@@ -1440,11 +1437,8 @@ mod tests {
             ]),
         )
         .await;
-        assert_eq!(
-            events,
-            vec!["heard", "match:ghost|let's work on the wake word."]
-        );
-        let recognize = Recognizer::new(&["Toast, can you check the build."]);
+        assert_eq!(events, vec!["heard", "match:ghost|what is the wake word?"]);
+        let recognize = Recognizer::new(&["Toast, check the build."]);
         let events = run(
             detector(
                 FakeScorer::with(&[3], 0.9, "ghost_address"),
@@ -1459,10 +1453,7 @@ mod tests {
             ]),
         )
         .await;
-        assert_eq!(
-            events,
-            vec!["heard", "match:ghost|Toast, can you check the build."]
-        );
+        assert_eq!(events, vec!["heard", "match:ghost|Toast, check the build."]);
     }
 
     #[tokio::test]

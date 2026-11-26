@@ -14,7 +14,7 @@ in the [README](../README.md#over-your-desktop).*
 ## Turning it on
 
 Settings › General › Floating › **Where Ghost appears** (**Over your work** or **In the window**), the rail's floating
-switch above the microphone, or the tray's **Float over the desktop**. Off by default, until the first run's wake beat turns it on once (below). Under it, **Ghost appears on**: the other monitor (default), a
+switch above the microphone, or the tray's **Float over the desktop**. On by default since 2026-11-25: an install that never chose floats, and one that turned it off (`"on": false` in its file) stays off. Under it, **Ghost appears on**: the other monitor (default), a
 named monitor, or where I am; **Where on the screen**: beside your work (default: the owner,
 seeing it come forward on the other monitor in a column rather than over the whole screen, "I
 liked Ghost showing up without taking the full screen"), in the corner, or in the centre; and **Captions**: off (default), when the sound is off, or always.
@@ -31,10 +31,9 @@ by itself.
 ## The first run's moment (2026-11-14)
 
 The first run's third beat, “Say “Hey Ghost””, is where a newcomer first sees the floating view
-(ADR 0059 as amended 2026-11-14). When that beat first opens the shell turns Floating
-on, once (`floating::offer`; `offered` in `floating.json`), and the beat shows the switch with one
-line, so the choice is visible and can be undone right there; it is never turned on again after
-that, and an install that finished the first run before this is not offered it.
+(ADR 0059 as amended 2026-11-14). Floating is on by default (2026-11-25), so the beat no longer
+turns it on: it shows the switch with one line, so the choice is visible and can be undone right
+there. `offered` in an older `floating.json` is read and kept, and decides nothing now.
 
 While the beat is open the window arms the moment twice: on Ghost (`PUT /first-meeting`), so the
 next desk session opens with Ghost's own first line (`ghostd::first_meeting`: “Hi, I'm Ghost. Good
@@ -50,7 +49,7 @@ microphone) gets the same.
 
 In the mock: `floating.html?mock=floating&first=1&main=active` comes forward though the main
 window is in use; `?mock=firstrun&heyghost=2500#/welcome` plays the whole moment on the wizard, and with
-`&floating=refused` or `&floating=on&capture=yes` the moment in the window.
+`&floating=refused`, `&floating=off` or `&capture=yes&while_shared=hide` the moment in the window.
 
 ## Where it works
 
@@ -98,6 +97,19 @@ It never takes the keyboard (the window refuses input focus and is never mapped 
 everything it shows is what the window would show, under the same rules (#73: never your
 words while you speak).
 
+**A dictation** (ADR 0077 as amended 2026-11-25) floats by the same rule as a session
+(`postureOf`'s `dictation`): while the main window isn't the one you're using, Ghost comes
+forward beside your work, smaller, listening to the microphone's level (green), with the
+words read so far in the captions' band, the newest kept. This is the one exception to "no
+transcript": they are the words you are dictating, shown as they are read so you can see them,
+never kept. Under Wisp, “Listening”, then “Writing it down” (violet), then how it ended
+(“Typed”; “On your clipboard” with Ghost's sentence and Press Ctrl+V; “Nothing heard”;
+“Stopped” and why). It goes a second after it typed or heard nothing, three after the
+clipboard or a stop. No beams, no cards, no buttons: nothing on it takes a click. A session's
+own scene wins over a dictation. When the main window has the keyboard, Today's live strip
+shows the same. In the mock: `?mock=dictation` plays every ending in turn;
+`dictation-listening`, `-writing`, `-typed`, `-clipboard`, `-nothing`, `-stopped` one each.
+
 **Nothing runs off the screen** (`src/floating/layout.ts`, tested on 1920×1080, 1280×720,
 1024×600, portrait and 4K): everything is inside a safe area (48 px from the top, 28 px from the
 other edges) and within a share of the monitor (36% beside the work, 16% in the corner, 45% in
@@ -136,12 +148,11 @@ turns Floating off at once.
 What it does then is the operator's choice, Settings › General › Floating › **While my screen
 is shared** (`floating.json`'s `while_shared`, `src-tauri/src/floating/share.rs`):
 
-- **Hide Ghost** (the default, and what it always did): the surface draws nothing at all, not
-  even the line, and a spoken session shows in the window. Nothing changes for anyone who
-  doesn't choose otherwise.
-- **Show Ghost**: Ghost floats in the share as anywhere else, wearing a **Screen shared** mark
-  (a red recording dot on a dark pill, above the label under Wisp, and above the line at rest)
-  so the operator always knows the audience sees it.
+- **Show Ghost** (the default since 2026-11-25): Ghost floats in the share as anywhere else,
+  wearing a **Screen shared** mark (a red recording dot on a dark pill, above the label under
+  Wisp, and above the line at rest) so the operator always knows the audience sees it.
+- **Hide Ghost** (the default until 2026-11-25): the surface draws nothing at all, not even the
+  line, and a spoken session shows in the window.
 - **Ask each time**: when a share starts, a small card low on the surface's monitor asks “Your
   screen is being shared. Show Ghost in it?” with **Show** and **Hide**, and nothing else of
   Ghost is drawn. The card is itself in the share, so it says nothing more and leaves after

@@ -594,6 +594,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/dictation/key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The dictation key */
+        get: operations["dictation_key_get"];
+        /** Set the dictation key */
+        put: operations["dictation_key_set"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/dictation/key/change": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Change the dictation key */
+        post: operations["dictation_key_change"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/dictation/start": {
         parameters: {
             query?: never;
@@ -2099,6 +2134,138 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/subscriptions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Subscriptions
+         * @description Claude Code, OpenAI Codex and Google Antigravity, each as its own program says it is:
+         *     installed, its version, signed in, and whether it is Ghost's model. Asks the programs, in an
+         *     environment with no keys; reads none of their files.
+         */
+        get: operations["subscriptions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/subscriptions/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel a subscription's job */
+        post: operations["subscription_cancel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/subscriptions/{id}/install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Install a subscription's program
+         * @description Run the vendor's own install command (`install_command`), exactly as given, as you and
+         *     never as root. Its output is the job's lines.
+         */
+        post: operations["subscription_install"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/subscriptions/{id}/job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Subscription job */
+        get: operations["subscription_job_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/subscriptions/{id}/sign-in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sign in to a subscription
+         * @description Run the program's own sign-in. It opens your browser itself; the job carries the address in
+         *     case it didn't, and says when the program waits for the code its page shows.
+         */
+        post: operations["subscription_sign_in"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/subscriptions/{id}/sign-in/code": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Paste a sign-in code */
+        post: operations["subscription_sign_in_code"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/subscriptions/{id}/use": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Use a subscription as Ghost's model */
+        put: operations["subscription_use"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/uninstall": {
         parameters: {
             query?: never;
@@ -3106,15 +3273,109 @@ export interface components {
             path: string;
         };
         /**
+         * @description Dictation's live view (ADR 0077 as amended 2026-11-25): the words as they are read, to the
+         *     operator's own `/events` WebSocket only, from its own channel, never the bus.
+         */
+        DictationEvent: {
+            dictation: components["schemas"]["DictationLiveView"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "dictation";
+        };
+        /** @description A change to the dictation key's switches; absent fields stay as they are. */
+        DictationKeyBody: {
+            on?: boolean | null;
+            /**
+             * @description The older switch: false is `tidy_source: off`; true turns an off tidy back on as it
+             *     was before there was a choice.
+             */
+            tidy?: boolean | null;
+            /**
+             * @description The tidy's model for its source: an OpenRouter id (`anthropic/claude-haiku-5.5`) or
+             *     Claude Code's alias (`haiku`); empty is the default.
+             */
+            tidy_model?: string | null;
+            tidy_source?: components["schemas"]["TidySource"] | null;
+        };
+        /**
+         * @description Where the dictation key stands.
+         * @enum {string}
+         */
+        DictationKeyState: "off" | "binding" | "ready" | "unavailable" | "refused" | "failed";
+        /** @description The dictation key in Settings › Sound. */
+        DictationKeyView: {
+            /** @description The desktop's own words for the key ("Press F9"), once bound. */
+            key: string | null;
+            /** @description The operator's switch, "Hold a key to dictate". */
+            on: boolean;
+            /** @description `OPENROUTER_API_KEY` is set, so OpenRouter can tidy. The name, never a value. */
+            openrouter?: boolean;
+            state: components["schemas"]["DictationKeyState"];
+            /** @description Claude Code can tidy: it is Ghost's model, or it is on this computer. */
+            subscription: boolean;
+            /** @description The tidy is on: `tidy_source` is not `off`. */
+            tidy: boolean;
+            /**
+             * @description The model the tidy asks for its source: OpenRouter's model id, or Claude Code's alias
+             *     (`opus`, `sonnet`, `haiku`); "" when the subscription's tidy uses Ghost's own model.
+             */
+            tidy_model?: string;
+            /** @description OpenRouter's model when none is chosen. */
+            tidy_model_default?: string;
+            /**
+             * @description "Tidy with": off, the subscription, or OpenRouter. A choice made before there was one is
+             *     read as it behaved: OpenRouter when its key is set, else the subscription.
+             */
+            tidy_source: components["schemas"]["TidySource"];
+            /**
+             * @description Where the words go for the tidy: the provider's name ("Claude Code", "Anthropic",
+             *     "OpenRouter"), or None when the tidy is off or has nothing to go to (no model set up,
+             *     OpenRouter chosen without its key): the text is typed as read.
+             */
+            tidy_with: string | null;
+            typing: components["schemas"]["DictationTyping"];
+        };
+        /**
+         * @description The live view of a dictation, for the operator's own desktop only: the one view of
+         *     dictation that carries the words, shown as they are read and never kept. It travels on
+         *     its own channel, merged into the `/events` WebSocket the desktop opens, never on the event
+         *     bus, so the phone, an outside client and the daemon's own taps never see it. About fifteen
+         *     a second while recording (the level), and one at each change.
+         */
+        DictationLiveView: {
+            /** @description From the dictation key (true) or a command (`ghostd dictate`, the API). */
+            key: boolean;
+            /**
+             * Format: float
+             * @description The microphone's level, 0.0 to 1.0 (the RMS of the last 50 ms, -50 dBFS to 0 dBFS),
+             *     while listening.
+             */
+            level: number | null;
+            /** Format: double */
+            limit_secs: number;
+            scene: components["schemas"]["DictationScene"];
+            /**
+             * Format: double
+             * @description Seconds recorded so far, and the limit.
+             */
+            seconds: number;
+            /** @description Ghost's own sentence for how it ended (`DictationResult::sentence`), at the end. */
+            sentence: string | null;
+            /** @description The words so far, as each piece is read. */
+            text: string | null;
+        };
+        /**
          * @description How a dictation, or a request about one, ended.
          * @enum {string}
          */
-        DictationOutcome: "on_clipboard" | "nothing_heard" | "not_on_clipboard" | "cancelled" | "refused";
+        DictationOutcome: "typed" | "on_clipboard" | "nothing_heard" | "not_on_clipboard" | "cancelled" | "refused";
         /**
          * @description Why, when the outcome needs one.
          * @enum {string}
          */
-        DictationReason: "not_listening" | "busy" | "hearing_test" | "no_speech_model" | "no_microphone" | "microphone_failed" | "already_dictating" | "still_reading" | "not_dictating" | "limit" | "microphone_ended" | "operator" | "listening_turned_off" | "session_opened" | "stopping" | "no_display" | "clipboard_failed" | "too_long" | "failed";
+        DictationReason: "not_listening" | "busy" | "hearing_test" | "no_speech_model" | "no_microphone" | "microphone_failed" | "already_dictating" | "still_reading" | "not_dictating" | "limit" | "microphone_ended" | "operator" | "listening_turned_off" | "session_opened" | "stopping" | "no_display" | "clipboard_failed" | "too_long" | "failed" | "no_keys" | "typing_failed";
         /** @description What a dictation, or a request, ended with: kinds and numbers, never words. */
         DictationResult: {
             /** @description Characters put on the clipboard (after the cleanup). */
@@ -3144,10 +3405,21 @@ export interface components {
             seconds: number;
         };
         /**
+         * @description Where a dictation is, for the scene the operator watches (ADR 0077 as amended
+         *     2026-11-25). Finer than [`DictationState`]: it also says how it ended.
+         * @enum {string}
+         */
+        DictationScene: "starting" | "listening" | "writing" | "typed" | "clipboard" | "nothing_heard" | "stopped";
+        /**
          * @description Where a dictation is.
          * @enum {string}
          */
         DictationState: "idle" | "starting" | "recording" | "reading";
+        /**
+         * @description Whether Ghost may type into the window that has the keyboard.
+         * @enum {string}
+         */
+        DictationTyping: "unknown" | "allowed" | "refused";
         /** @description The state now, and a result: what this request ended with, or for `GET` the last one. */
         DictationView: {
             /**
@@ -5092,6 +5364,93 @@ export interface components {
              */
             type: "status";
         };
+        /** @description The code the program's page showed, pasted. Written to the program and never kept. */
+        SubscriptionCode: {
+            code: string;
+        };
+        /** @description What a job is doing, as shown. Never the pasted code. */
+        SubscriptionJobView: {
+            /** @description The command as shown: the vendor's install command, or the sign-in's. */
+            command: string;
+            /** @description A code the program shows for you to type on its page. */
+            device_code: string | null;
+            /** Format: date-time */
+            ended_at: string | null;
+            /** @description install or sign_in. */
+            kind: string;
+            /**
+             * @description What the program printed: escapes out, each line bounded and redacted, an address
+             *     shown only to its path. Someone else's text, shown as data.
+             */
+            lines: string[];
+            /** @description How it ended, or what it waits for, in a sentence. */
+            message: string | null;
+            /** @description Asked of the program when a sign-in ended. */
+            signed_in: boolean | null;
+            /** Format: date-time */
+            started_at: string;
+            /**
+             * @description running, needs_code (the program waits for the code its page showed), done, failed or
+             *     cancelled.
+             */
+            state: string;
+            /**
+             * @description The sign-in address, on the vendor's own domains only, for a link in case the browser
+             *     didn't open.
+             */
+            url: string | null;
+        };
+        SubscriptionsView: {
+            /** @description The one Ghost uses as its model now, by id; None when its model is none of them. */
+            in_use: string | null;
+            subscriptions: components["schemas"]["SubscriptionView"][];
+        };
+        /** @description The result of making one Ghost's model. */
+        SubscriptionUseResult: {
+            /** @description What was done, in a sentence. */
+            done: string;
+            /** @description Ghost picks it up at its next start, not now. */
+            restart_required: boolean;
+            subscriptions: components["schemas"]["SubscriptionsView"];
+        };
+        /** @description One subscription, as its program says it is. */
+        SubscriptionView: {
+            /** @description Ghost can run it as its model at all; false: "Coming next". */
+            ghost_can_use: boolean;
+            /** @description claude-code, codex or antigravity. */
+            id: string;
+            /** @description It is Ghost's model now. */
+            in_use: boolean;
+            /** @description The vendor's own install command, exactly as Ghost would run it. */
+            install_command: string;
+            /** @description Where the vendor documents it. */
+            install_source: string;
+            /** @description The program is on this computer. */
+            installed: boolean;
+            job: components["schemas"]["SubscriptionJobView"] | null;
+            /** @description What to say about it in a sentence: how it is signed in, or what stops Ghost. */
+            line: string | null;
+            /** @description A version Ghost was not measured with, said once. */
+            note: string | null;
+            /** @description Its program's name (`claude`, `codex`, `agy`). */
+            program: string;
+            /** @description The program's own sign-in command, as shown. */
+            sign_in_command: string;
+            /**
+             * @description Ghost runs the sign-in (true), or the operator runs it in a terminal: the program's
+             *     sign-in has choices that are theirs (Antigravity).
+             */
+            sign_in_here: boolean;
+            /** @description The program says it is signed in. */
+            signed_in: boolean;
+            title: string;
+            /**
+             * @description Ghost can run it as its model now (signed in, and for Claude Code a version with every
+             *     switch Ghost needs).
+             */
+            usable: boolean;
+            version: string | null;
+        };
         SwitchesResult: {
             /** @description The names a running Ghost took at once. */
             applied: string[];
@@ -5140,6 +5499,11 @@ export interface components {
          * @enum {string}
          */
         TakeEnding: "hold" | "quiet" | "timed";
+        /**
+         * @description Where the dictation key's tidy sends the words (Settings › Sound › Dictation, "Tidy with").
+         * @enum {string}
+         */
+        TidySource: "off" | "subscription" | "openrouter";
         /** @description One turn of the live session, timed (ADR 0073, amended 2026-11-14). Numbers only. */
         TimingEvent: {
             timing: components["schemas"]["TimingView"];
@@ -5556,10 +5920,17 @@ export type SchemaDiagnosePart = components['schemas']['DiagnosePart'];
 export type SchemaDiagnosePreview = components['schemas']['DiagnosePreview'];
 export type SchemaDiagnoseRequest = components['schemas']['DiagnoseRequest'];
 export type SchemaDiagnoseSaved = components['schemas']['DiagnoseSaved'];
+export type SchemaDictationEvent = components['schemas']['DictationEvent'];
+export type SchemaDictationKeyBody = components['schemas']['DictationKeyBody'];
+export type SchemaDictationKeyState = components['schemas']['DictationKeyState'];
+export type SchemaDictationKeyView = components['schemas']['DictationKeyView'];
+export type SchemaDictationLiveView = components['schemas']['DictationLiveView'];
 export type SchemaDictationOutcome = components['schemas']['DictationOutcome'];
 export type SchemaDictationReason = components['schemas']['DictationReason'];
 export type SchemaDictationResult = components['schemas']['DictationResult'];
+export type SchemaDictationScene = components['schemas']['DictationScene'];
 export type SchemaDictationState = components['schemas']['DictationState'];
+export type SchemaDictationTyping = components['schemas']['DictationTyping'];
 export type SchemaDictationView = components['schemas']['DictationView'];
 export type SchemaFirstMeetingRequest = components['schemas']['FirstMeetingRequest'];
 export type SchemaFirstMeetingView = components['schemas']['FirstMeetingView'];
@@ -5722,11 +6093,17 @@ export type SchemaSpeechModelsFetchState = components['schemas']['SpeechModelsFe
 export type SchemaSpeechModelsView = components['schemas']['SpeechModelsView'];
 export type SchemaStatus = components['schemas']['Status'];
 export type SchemaStatusEvent = components['schemas']['StatusEvent'];
+export type SchemaSubscriptionCode = components['schemas']['SubscriptionCode'];
+export type SchemaSubscriptionJobView = components['schemas']['SubscriptionJobView'];
+export type SchemaSubscriptionsView = components['schemas']['SubscriptionsView'];
+export type SchemaSubscriptionUseResult = components['schemas']['SubscriptionUseResult'];
+export type SchemaSubscriptionView = components['schemas']['SubscriptionView'];
 export type SchemaSwitchesResult = components['schemas']['SwitchesResult'];
 export type SchemaSwitchesUpdate = components['schemas']['SwitchesUpdate'];
 export type SchemaSwitchesView = components['schemas']['SwitchesView'];
 export type SchemaSwitchView = components['schemas']['SwitchView'];
 export type SchemaTakeEnding = components['schemas']['TakeEnding'];
+export type SchemaTidySource = components['schemas']['TidySource'];
 export type SchemaTimingEvent = components['schemas']['TimingEvent'];
 export type SchemaTimingView = components['schemas']['TimingView'];
 export type SchemaTurn = components['schemas']['Turn'];
@@ -6922,6 +7299,70 @@ export interface operations {
             };
         };
     };
+    dictation_key_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DictationKeyView"];
+                };
+            };
+        };
+    };
+    dictation_key_set: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DictationKeyBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DictationKeyView"];
+                };
+            };
+        };
+    };
+    dictation_key_change: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DictationKeyView"];
+                };
+            };
+        };
+    };
     dictation_start: {
         parameters: {
             query?: never;
@@ -6997,7 +7438,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StatusEvent"] | components["schemas"]["TurnEvent"] | components["schemas"]["PendingEvent"] | components["schemas"]["OutcomeEvent"] | components["schemas"]["LogEvent"] | components["schemas"]["ConversationEvent"] | components["schemas"]["WaitingEvent"] | components["schemas"]["QuestionEvent"] | components["schemas"]["AppsEvent"] | components["schemas"]["VoiceEvent"] | components["schemas"]["ActivityEvent"] | components["schemas"]["HeardEvent"] | components["schemas"]["SayingEvent"] | components["schemas"]["HearEvent"] | components["schemas"]["RunEvent"] | components["schemas"]["ReachEvent"] | components["schemas"]["ShowAppEvent"] | components["schemas"]["TimingEvent"] | components["schemas"]["MeterEvent"];
+                    "application/json": components["schemas"]["StatusEvent"] | components["schemas"]["TurnEvent"] | components["schemas"]["PendingEvent"] | components["schemas"]["OutcomeEvent"] | components["schemas"]["LogEvent"] | components["schemas"]["ConversationEvent"] | components["schemas"]["WaitingEvent"] | components["schemas"]["QuestionEvent"] | components["schemas"]["AppsEvent"] | components["schemas"]["VoiceEvent"] | components["schemas"]["ActivityEvent"] | components["schemas"]["HeardEvent"] | components["schemas"]["SayingEvent"] | components["schemas"]["HearEvent"] | components["schemas"]["RunEvent"] | components["schemas"]["ReachEvent"] | components["schemas"]["ShowAppEvent"] | components["schemas"]["TimingEvent"] | components["schemas"]["MeterEvent"] | components["schemas"]["DictationEvent"];
                 };
             };
         };
@@ -9726,6 +10167,213 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Status"];
                 };
+            };
+        };
+    };
+    subscriptions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubscriptionsView"];
+                };
+            };
+        };
+    };
+    subscription_cancel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubscriptionJobView"];
+                };
+            };
+            /** @description Nothing running */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    subscription_install: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubscriptionJobView"];
+                };
+            };
+            /** @description Already installed, or busy */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    subscription_job_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubscriptionJobView"] | null;
+                };
+            };
+            /** @description No such subscription */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    subscription_sign_in: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubscriptionJobView"];
+                };
+            };
+            /** @description Busy, or signed in in a terminal */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    subscription_sign_in_code: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SubscriptionCode"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubscriptionJobView"];
+                };
+            };
+            /** @description Not waiting for a code */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    subscription_use: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubscriptionUseResult"];
+                };
+            };
+            /** @description Ghost can't use it as its model yet, or it isn't ready */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

@@ -143,6 +143,10 @@ impl Daemon {
                     warn!("the Hearing test asked for the mic while Ghost is not listening");
                     drop(lease); // the recorder is told no
                 }
+                // ADR 0057 as amended 2026-11-25: the dictation key, a real key press, opens
+                // the microphone for that dictation only. A command was refused before it
+                // asked (`DaemonHost::refusal`), so only the key's lease comes here.
+                lease = self.dictation_mic.next() => return Won::Dictate(lease),
             }
             self.waiting_flag.store(true, Ordering::SeqCst);
         }

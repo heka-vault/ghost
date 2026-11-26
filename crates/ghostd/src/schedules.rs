@@ -254,7 +254,6 @@ mod tests {
             env_path: tmp.join("config/env"),
             vault_env_path: tmp.join("no-heka"),
             infra_dir: tmp.join("infra"),
-            nerd_dictation_flag: tmp.join("rt/dictation"),
             ..GhostdSettings::default()
         }
     }

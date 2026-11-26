@@ -1,8 +1,9 @@
-//! Where the four small model files are (heka-vault/ghost#39, W10): Silero VAD
-//! (`silero_vad.onnx`), Smart Turn v3.2 (`smart-turn-v3.2-cpu.onnx`) and the wake front
-//! end's two graphs (`melspectrogram.onnx`, `embedding_model.onnx`). The Python wheels
-//! shipped them; `scripts/models.sh` fetches them from their upstream releases, pinned by
-//! SHA-256 to the wheels' bytes. Each is looked for, in order, as `runtime` looks for ONNX
+//! Where the small model files are (heka-vault/ghost#39, W10): Silero VAD
+//! (`silero_vad.onnx`), Smart Turn v3.2 (`smart-turn-v3.2-cpu.onnx`), the wake front end's
+//! two graphs (`melspectrogram.onnx`, `embedding_model.onnx`) and, since 2026-11-26 (#190),
+//! Ghost's own trained "hey ghost" detector (`hey_ghost.onnx`, ADR 0025). The Python wheels
+//! shipped the first four; `scripts/models.sh` fetches them from their upstream releases,
+//! pinned by SHA-256 to the wheels' bytes, and the detector from Ghost's own release. Each is looked for, in order, as `runtime` looks for ONNX
 //! Runtime:
 //!
 //! 1. `GHOST_MODELS_DIR`, when set: a folder of the operator's or a test's, taken as given.
@@ -13,9 +14,10 @@
 //!    `scripts/models.sh` puts them for `cargo nextest`, `make dev` and a daemon run from
 //!    the checkout.
 //!
-//! Otherwise an error that names the script and the variable. Parakeet, Kokoro and the
-//! operator's trained wake classifiers are not here: they stay in the Hugging Face cache,
-//! `~/.cache/ghost/kokoro/` and `~/.cache/ghost/wake/` (docs/releasing.md).
+//! Otherwise an error that names the script and the variable. Parakeet and Kokoro are not
+//! here (the speech models' download, `~/.cache/ghost/kokoro/`), nor the operator's own
+//! retrained detectors and opener models (`~/.cache/ghost/wake/`, ADR 0065), which are
+//! preferred over the shipped detector when present (docs/releasing.md).
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -31,8 +33,24 @@ pub const SMART_TURN: &str = "smart-turn-v3.2-cpu.onnx";
 pub const MELSPECTROGRAM: &str = "melspectrogram.onnx";
 /// openWakeWord's speech embedding, beside it.
 pub const EMBEDDING: &str = "embedding_model.onnx";
-/// The four, in the order `scripts/models.sh` fetches them.
-pub const FILES: [&str; 4] = [SILERO, SMART_TURN, MELSPECTROGRAM, EMBEDDING];
+/// Ghost's trained "hey ghost" detector (ADR 0025), the shipped one.
+pub const HEY_GHOST: &str = "hey_ghost.onnx";
+/// The shipped opener models: Ghost addressed by name, "Ghost, can you …" and "Ghost,
+/// what …" (2026-11-26).
+pub const GHOST_CAN_YOU: &str = "ghost_can_you.onnx";
+pub const GHOST_WHAT: &str = "ghost_what.onnx";
+/// The shipped opener models, in order.
+pub const OPENER_MODELS: [&str; 2] = [GHOST_CAN_YOU, GHOST_WHAT];
+/// The seven, in the order `scripts/models.sh` fetches them.
+pub const FILES: [&str; 7] = [
+    SILERO,
+    SMART_TURN,
+    MELSPECTROGRAM,
+    EMBEDDING,
+    HEY_GHOST,
+    GHOST_CAN_YOU,
+    GHOST_WHAT,
+];
 /// The operator's or a test's own folder of them, honoured first.
 pub const ENV_VAR: &str = "GHOST_MODELS_DIR";
 /// What fetches them into the cache.
@@ -202,18 +220,21 @@ mod tests {
 
     #[test]
     fn each_file_is_found_on_its_own() {
-        // A bundle with two of the four and a cache with the other two: each resolves
-        // where it is, and nothing is assumed from a sibling.
+        // A bundle with some of the files and a cache with the others: each resolves where
+        // it is, and nothing is assumed from a sibling.
         let l = layout();
         let a = put(&l.bundle, SILERO);
         let b = put(&l.bundle, SMART_TURN);
         let c = put(&l.home_cache, MELSPECTROGRAM);
         let d = put(&l.home_cache, EMBEDDING);
+        let e = put(&l.bundle, HEY_GHOST);
+        let f = put(&l.home_cache, GHOST_CAN_YOU);
+        let g = put(&l.bundle, GHOST_WHAT);
         let got: Vec<PathBuf> = FILES
             .iter()
             .map(|f| resolve(f, env(&[]), Some(&l.exe), Some(&l.home)).unwrap())
             .collect();
-        assert_eq!(got, vec![a, b, c, d]);
+        assert_eq!(got, vec![a, b, c, d, e, f, g]);
     }
 
     #[test]
@@ -298,7 +319,10 @@ mod tests {
                 "silero_vad.onnx",
                 "smart-turn-v3.2-cpu.onnx",
                 "melspectrogram.onnx",
-                "embedding_model.onnx"
+                "embedding_model.onnx",
+                "hey_ghost.onnx",
+                "ghost_can_you.onnx",
+                "ghost_what.onnx"
             ]
         );
     }

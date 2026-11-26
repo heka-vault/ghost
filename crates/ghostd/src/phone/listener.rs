@@ -1126,6 +1126,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_phone_cannot_install_or_sign_in_another_tool() {
+        // ADR 0078: installing a subscription's program, its sign-in and the code its page
+        // shows are the operator's at the desk only.
+        let p = phone();
+        let (creds, _) = pair(&p, "Pixel 9").await;
+        for (method, path) in [
+            ("GET", "/subscriptions"),
+            ("GET", "/subscriptions/claude-code/job"),
+            ("POST", "/subscriptions/claude-code/install"),
+            ("POST", "/subscriptions/claude-code/sign-in"),
+            ("POST", "/subscriptions/claude-code/sign-in/code"),
+            ("POST", "/subscriptions/claude-code/cancel"),
+            ("PUT", "/subscriptions/claude-code/use"),
+        ] {
+            let body = json!({"code": "not-a-code"});
+            let (r, _) = signed(&p.app, &creds, method, path, Some(body)).await;
+            assert_eq!(r.status, StatusCode::NOT_FOUND, "{method} {path}");
+        }
+    }
+
+    #[tokio::test]
     async fn the_phone_cannot_choose_the_model_or_reach_claude_code() {
         // ADR 0069: choosing Claude Code as the model, listing its models and testing it
         // are the operator's at the desk only, and its relay is no route of the phone's.

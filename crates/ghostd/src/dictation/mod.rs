@@ -1,6 +1,9 @@
-//! Ghost's own dictation (ADR 0077): the operator starts it, speaks, stops it, and the
-//! Parakeet Ghost already has reads the audio; in this slice the text ends on the clipboard.
-//! Not nerd-dictation, the operator's outside tool, which `nerd_dictation` only notices.
+//! Ghost's own dictation (ADR 0077, amended 2026-11-25): the operator holds or taps the
+//! dictation key (`key`, through the desktop's shortcut portal, `portal`) or runs `ghostd
+//! dictate`, speaks, and the Parakeet Ghost already has reads the audio, a piece at each
+//! pause while they speak. From the key the text is tidied by the model when the operator
+//! allows it (`review`) and typed into the window that has the keyboard (`typing`); from a
+//! command, and whenever typing can't be done, it ends on the clipboard.
 //!
 //! - [`Dictation`] is the one coordinator: start, stop, toggle and cancel are serialized
 //!   (`ops`), each dictation has a generation, and a read that finishes after its dictation
@@ -12,13 +15,20 @@
 //!   own capture has closed. So no dictated frame reaches the wake detector, the passive VAD,
 //!   Parakeet's wake check, a session's speech-to-text or the realtime uplink, and no kept
 //!   take holds one.
-//! - The words never leave this module but for the clipboard: no log line, no event, no
-//!   store, no `debug::audio`, no report. What the API, the CLI and the notification get is
-//!   kinds and numbers ([`ghost_api::dictation`]). The audio and the text are wiped when
-//!   dropped (`Zeroizing`).
+//! - The words leave this module only for the window they are typed into, the clipboard,
+//!   the operator's own desktop as the live view (`Live`, on its own channel, never the
+//!   event bus) and, by the operator's switch, their model for the tidy: no log line, no
+//!   event on the bus, no store, no `debug::audio`, no report. What the API, the CLI and the
+//!   notification get is kinds and numbers ([`ghost_api::dictation`]). The audio and the text
+//!   are wiped when dropped (`Zeroizing`).
 
 pub mod cleanup;
 pub mod clipboard;
+pub mod desk;
+pub mod key;
+pub mod portal;
+pub mod review;
+pub mod typing;
 
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
@@ -26,8 +36,8 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use ghost_api::Phase;
 use ghost_api::dictation::{
-    DictationOutcome, DictationPort, DictationReason, DictationResult, DictationState,
-    DictationView,
+    DictationLiveView, DictationOutcome, DictationPort, DictationReason, DictationResult,
+    DictationScene, DictationState, DictationView,
 };
 use ghost_voice::stt::{SharedRecognizer, TRAILING_SECS, dithered};
 use ghost_voice::transport::MediaIn;
@@ -37,11 +47,18 @@ use tracing::{info, warn};
 use zeroize::Zeroizing;
 
 pub use clipboard::{Clipboard, NoClipboard, XClipboard};
+pub use review::{NoReviewer, Reviewer};
 
 use crate::daemon::{Daemon, lock};
 
-/// The longest a dictation records in this slice: one whole read, no pieces.
-pub const LIMIT: Duration = Duration::from_secs(30);
+/// The longest a dictation records, held, locked by a tap or run from a command; it then
+/// stops by itself and what was said is read (two minutes to start, 2026-11-25).
+pub const LIMIT: Duration = Duration::from_secs(120);
+/// A piece is read at a pause only once it is at least this long; shorter ones wait for the
+/// next pause or the end.
+pub const PIECE_MIN: Duration = Duration::from_millis(600);
+/// How often the live view's level is sent while recording (about fifteen a second).
+pub const LEVEL_EVERY: Duration = Duration::from_millis(66);
 /// The rate the capture gives and Parakeet reads.
 pub const RATE: u32 = 16_000;
 /// How long a start waits for the passive loop to let go of the microphone.
@@ -135,20 +152,104 @@ impl Leases {
 
 // --- what the coordinator stands on ---------------------------------------------------------
 
+/// Who started a dictation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Origin {
+    /// `ghostd dictate`, the control API: ends on the clipboard, refused while not listening.
+    Command,
+    /// The dictation key, seen through the desktop's shortcut portal: a real key press. It may
+    /// open the microphone while not listening, for that dictation only (ADR 0057 as amended
+    /// 2026-11-25), and only it types into a window.
+    Key,
+}
+
 /// The daemon's side, or a test's.
 #[async_trait]
 pub trait Host: Send + Sync {
     /// Why a dictation cannot start now, if it cannot.
-    fn refusal(&self) -> Option<DictationReason>;
+    fn refusal(&self, origin: Origin) -> Option<DictationReason>;
     /// Why a dictation that has been opening its microphone must not record after all:
-    /// listening was turned off, or Ghost is stopping. Asked again just before recording.
-    fn still_allowed(&self) -> Option<DictationReason>;
+    /// listening was turned off (a command's), or Ghost is stopping. Asked again just
+    /// before recording.
+    fn still_allowed(&self, origin: Origin) -> Option<DictationReason>;
     /// The microphone from the passive loop.
     async fn take_mic(&self) -> Result<MicHold, DictationReason>;
     /// Dictation's own capture on the session's microphone.
     async fn open(&self) -> Result<Box<dyn MediaIn>, DictationReason>;
     /// The shared Parakeet.
     fn recognizer(&self) -> Option<SharedRecognizer>;
+    /// A speech detector to cut pieces at pauses, fresh for each dictation. None: one whole
+    /// read at the end.
+    fn pauses(&self) -> Option<Box<dyn Pauses>> {
+        None
+    }
+}
+
+/// Whether a frame is speech, for cutting pieces at pauses: true from the start of speech
+/// until a pause long enough to end it (the detector's own stop time, about half a second).
+pub trait Pauses: Send {
+    fn speaking(&mut self, frame: &[i16]) -> bool;
+}
+
+/// Types into the window that has the keyboard (the RemoteDesktop portal in the daemon).
+#[async_trait]
+pub trait Typer: Send + Sync {
+    /// Type `text`, printable ASCII only ([`typing::plan`] made it). An error is the reason
+    /// it couldn't, and the text goes to the clipboard.
+    async fn type_text(&self, text: &str) -> Result<(), DictationReason>;
+}
+
+/// No typing: the clipboard.
+pub struct NoTyper;
+
+#[async_trait]
+impl Typer for NoTyper {
+    async fn type_text(&self, _text: &str) -> Result<(), DictationReason> {
+        Err(DictationReason::TypingFailed)
+    }
+}
+
+/// The operator's own desktop, for the live view (`DaemonState::publish_dictation`).
+pub trait Live: Send + Sync {
+    fn show(&self, view: DictationLiveView);
+}
+
+pub struct NoLive;
+
+impl Live for NoLive {
+    fn show(&self, _view: DictationLiveView) {}
+}
+
+/// The default output muted while recording, and its earlier state put back.
+pub trait Muter: Send + Sync {
+    fn mute(&self);
+    fn restore(&self);
+}
+
+pub struct NoMute;
+
+impl Muter for NoMute {
+    fn mute(&self) {}
+    fn restore(&self) {}
+}
+
+/// What the coordinator uses beside its host: each has a default that does nothing.
+pub struct Parts {
+    pub typer: Arc<dyn Typer>,
+    pub reviewer: Arc<dyn Reviewer>,
+    pub live: Arc<dyn Live>,
+    pub muter: Arc<dyn Muter>,
+}
+
+impl Default for Parts {
+    fn default() -> Self {
+        Self {
+            typer: Arc::new(NoTyper),
+            reviewer: Arc::new(NoReviewer),
+            live: Arc::new(NoLive),
+            muter: Arc::new(NoMute),
+        }
+    }
 }
 
 /// What the operator sees when nobody is at a terminal: Ghost's fixed sentences and counts.
@@ -238,6 +339,10 @@ enum End {
 struct Captured {
     samples: Zeroizing<Vec<i16>>,
     end: End,
+    /// The pieces read at pauses while recording, in order; each is the cleaned text.
+    pieces: Vec<tokio::task::JoinHandle<Option<Zeroizing<String>>>>,
+    /// Where the last piece ended: the rest is read at the end.
+    cut: usize,
 }
 
 /// What a start holds once the first frame is in. Fields drop in this order: the capture,
@@ -265,6 +370,7 @@ struct Starting {
 
 struct Recording {
     generation: u64,
+    origin: Origin,
     since: Instant,
     first_frame_ms: u64,
     stop: CancellationToken,
@@ -300,6 +406,8 @@ impl Stage {
 
 struct Inner {
     generation: u64,
+    /// Who started the current (or last) generation: what the end shows and says.
+    origin: Origin,
     phase: Stage,
     last: Option<DictationResult>,
 }
@@ -349,6 +457,7 @@ pub struct Dictation {
     host: Arc<dyn Host>,
     clipboard: Arc<dyn Clipboard>,
     notes: Arc<dyn Notifier>,
+    parts: Parts,
     limit: Duration,
     /// Each change of stage, one at a time. Never held across a capture's open or close, a
     /// read, or the clipboard.
@@ -366,14 +475,26 @@ impl Dictation {
         notes: Arc<dyn Notifier>,
         limit: Duration,
     ) -> Arc<Self> {
+        Self::with_parts(host, clipboard, notes, Parts::default(), limit)
+    }
+
+    pub fn with_parts(
+        host: Arc<dyn Host>,
+        clipboard: Arc<dyn Clipboard>,
+        notes: Arc<dyn Notifier>,
+        parts: Parts,
+        limit: Duration,
+    ) -> Arc<Self> {
         Arc::new_cyclic(|me| Self {
             host,
             clipboard,
             notes,
+            parts,
             limit,
             ops: tokio::sync::Mutex::new(()),
             inner: Mutex::new(Inner {
                 generation: 0,
+                origin: Origin::Command,
                 phase: Stage::Idle,
                 last: None,
             }),
@@ -418,6 +539,12 @@ impl Dictation {
         self.view_with(last)
     }
 
+    /// Each result as it is decided: the key's loop watches it for a dictation that ended
+    /// by itself.
+    pub fn decided(&self) -> watch::Receiver<Option<(u64, DictationResult)>> {
+        self.done.subscribe()
+    }
+
     /// The result decided for `generation`, if it was.
     fn result_of(&self, generation: u64) -> Option<DictationResult> {
         self.done
@@ -428,9 +555,65 @@ impl Dictation {
 
     /// Decide `generation`'s result: remembered, sent to whoever waits, shown.
     fn decide(&self, generation: u64, r: DictationResult) {
-        lock(&self.inner).last = Some(r);
+        let origin = {
+            let mut inner = lock(&self.inner);
+            inner.last = Some(r);
+            inner.origin
+        };
         self.done.send_replace(Some((generation, r)));
-        self.notes.show(Note::Ended(r));
+        self.ended(origin, r);
+    }
+
+    /// How a dictation ended, shown: the live view's last state, and a notification unless
+    /// the key's own scene says it (ADR 0077 as amended 2026-11-25: from the key, only what
+    /// went wrong and the clipboard's "Press Ctrl+V" are notified; a typed text, nothing
+    /// heard and a cancel are the scene's).
+    fn ended(&self, origin: Origin, r: DictationResult) {
+        use DictationOutcome as O;
+        let quiet = origin == Origin::Key
+            && match r.outcome {
+                O::Typed | O::NothingHeard => true,
+                O::Cancelled => r.reason != Some(DictationReason::Failed),
+                O::OnClipboard | O::NotOnClipboard | O::Refused => false,
+            };
+        if !quiet {
+            self.notes.show(Note::Ended(r));
+        }
+        let scene = match r.outcome {
+            O::Typed => DictationScene::Typed,
+            O::OnClipboard => DictationScene::Clipboard,
+            O::NothingHeard => DictationScene::NothingHeard,
+            O::NotOnClipboard | O::Cancelled | O::Refused => DictationScene::Stopped,
+        };
+        self.parts.live.show(DictationLiveView {
+            scene,
+            key: origin == Origin::Key,
+            level: None,
+            text: None,
+            seconds: r.seconds,
+            limit_secs: self.limit.as_secs_f64(),
+            sentence: Some(r.sentence()),
+        });
+    }
+
+    /// The live view while recording or writing.
+    fn live(
+        &self,
+        origin: Origin,
+        scene: DictationScene,
+        level: Option<f32>,
+        text: Option<String>,
+        seconds: f64,
+    ) {
+        self.parts.live.show(DictationLiveView {
+            scene,
+            key: origin == Origin::Key,
+            level,
+            text,
+            seconds,
+            limit_secs: self.limit.as_secs_f64(),
+            sentence: None,
+        });
     }
 
     /// An operation of `generation` failed (a panic, or an exit that did not settle): the
@@ -454,44 +637,58 @@ impl Dictation {
     }
 
     /// A refusal: said and answered.
-    fn refuse(&self, reason: DictationReason) -> DictationView {
+    fn refuse(&self, origin: Origin, reason: DictationReason) -> DictationView {
         let r = DictationResult::refused(reason);
         info!("dictation: refused ({reason:?})");
-        self.notes.show(Note::Ended(r));
+        self.ended(origin, r);
         self.view_with(Some(r))
     }
 
-    /// Open the microphone and record. The dictation is the coordinator's from here: the
-    /// start runs as its own task, so dropping this request (a client gone) changes nothing.
+    /// Open the microphone and record, from a command. The dictation is the coordinator's
+    /// from here: the start runs as its own task, so dropping this request (a client gone)
+    /// changes nothing.
     pub async fn start(&self) -> DictationView {
+        self.start_from(Origin::Command).await
+    }
+
+    /// Open the microphone and record, from the dictation key.
+    pub async fn start_key(&self) -> DictationView {
+        self.start_from(Origin::Key).await
+    }
+
+    async fn start_from(&self, origin: Origin) -> DictationView {
         let (generation, cancel) = {
             let _op = self.ops.lock().await;
             match self.state() {
                 DictationState::Idle => {}
                 DictationState::Starting | DictationState::Recording => {
-                    return self.refuse(DictationReason::AlreadyDictating);
+                    return self.refuse(origin, DictationReason::AlreadyDictating);
                 }
-                DictationState::Reading => return self.refuse(DictationReason::StillReading),
+                DictationState::Reading => {
+                    return self.refuse(origin, DictationReason::StillReading);
+                }
             }
-            if let Some(r) = self.host.refusal() {
-                return self.refuse(r);
+            if let Some(r) = self.host.refusal(origin) {
+                return self.refuse(origin, r);
             }
             if self.host.recognizer().is_none() {
-                return self.refuse(DictationReason::NoSpeechModel);
+                return self.refuse(origin, DictationReason::NoSpeechModel);
             }
             let cancel = CancellationToken::new();
             let mut inner = lock(&self.inner);
             inner.generation += 1;
+            inner.origin = origin;
             inner.phase = Stage::Starting(Starting {
                 generation: inner.generation,
                 cancel: cancel.clone(),
             });
             (inner.generation, cancel)
         };
+        self.live(origin, DictationScene::Starting, None, None, 0.0);
         let Some(me) = self.me.upgrade() else {
             return self.view();
         };
-        match tokio::spawn(me.run_start(generation, cancel)).await {
+        match tokio::spawn(me.run_start(generation, cancel, origin)).await {
             Ok(v) => v,
             Err(_) => self.view_with(self.result_of(generation)),
         }
@@ -501,6 +698,7 @@ impl Dictation {
         self: Arc<Self>,
         generation: u64,
         cancel: CancellationToken,
+        origin: Origin,
     ) -> DictationView {
         let mut settle = Settle::new(&self.me, generation);
         let t0 = Instant::now();
@@ -522,7 +720,7 @@ impl Dictation {
             }
         };
         // Asked again just before recording: listening may have gone off meanwhile.
-        if let Some(why) = self.host.still_allowed() {
+        if let Some(why) = self.host.still_allowed(origin) {
             close_off(opened);
             settle.disarm();
             return self.unstarted(generation, Unstarted::Refused(why));
@@ -536,23 +734,34 @@ impl Dictation {
         );
         let stop = CancellationToken::new();
         let (captured_tx, captured_rx) = oneshot::channel();
+        // Muted for the recording only: `record` puts it back as it stops, however it stops.
+        self.parts.muter.mute();
         tokio::spawn(record(
             opened,
-            stop.clone(),
-            self.limit,
-            self.me.clone(),
-            generation,
+            Recorder {
+                stop: stop.clone(),
+                limit: self.limit,
+                me: self.me.clone(),
+                generation,
+                origin,
+                pauses: self.host.pauses(),
+                model: self.host.recognizer(),
+            },
             captured_tx,
         ));
         lock(&self.inner).phase = Stage::Recording(Recording {
             generation,
+            origin,
             since: t0,
             first_frame_ms,
             stop,
             captured: captured_rx,
         });
         settle.disarm();
-        self.notes.show(Note::Recording);
+        if origin == Origin::Command {
+            self.notes.show(Note::Recording); // the key's scene says it
+        }
+        self.live(origin, DictationScene::Listening, Some(0.0), None, 0.0);
         self.view_with(None)
     }
 
@@ -639,7 +848,7 @@ impl Dictation {
         match self.state() {
             DictationState::Idle => self.start().await,
             DictationState::Starting | DictationState::Recording => self.stop().await,
-            DictationState::Reading => self.refuse(DictationReason::StillReading),
+            DictationState::Reading => self.refuse(Origin::Command, DictationReason::StillReading),
         }
     }
 
@@ -703,6 +912,7 @@ impl Dictation {
             Next::Read(rec) => rec,
         };
         let generation = rec.generation;
+        let origin = rec.origin;
         let mut settle = Settle::new(&self.me, generation);
         rec.stop.cancel();
         // What was recorded: the capture closes on its own (the registry tracks it).
@@ -711,8 +921,11 @@ impl Dictation {
         let captured = captured.unwrap_or(Captured {
             samples: Zeroizing::new(Vec::new()),
             end: End::Stopped,
+            pieces: Vec::new(),
+            cut: 0,
         });
         let seconds = captured.samples.len() as f64 / f64::from(RATE);
+        self.live(origin, DictationScene::Writing, None, None, seconds);
         let mut result = DictationResult {
             seconds,
             first_frame_ms: Some(rec.first_frame_ms),
@@ -724,13 +937,30 @@ impl Dictation {
             End::Stopped => None,
         };
         let mut read_failed = failed;
-        let text = match self.host.recognizer() {
+        // The rest since the last piece, read now; then the pieces read while recording, in
+        // order, and the rest after them.
+        let Captured {
+            samples,
+            pieces,
+            cut,
+            ..
+        } = captured;
+        let tail = match self.host.recognizer() {
             Some(model) => {
-                let samples = captured.samples;
                 let read = tokio::task::spawn_blocking(move || {
-                    let (text, queue, took) = read(&model, &samples);
+                    let rest = &samples[cut.min(samples.len())..];
+                    let out = if !rest.is_empty() {
+                        let (text, queue, took) = read(&model, rest);
+                        (cleanup::clean(&text), queue, took)
+                    } else {
+                        (
+                            Zeroizing::new(String::new()),
+                            Duration::ZERO,
+                            Duration::ZERO,
+                        )
+                    };
                     drop(samples); // wiped here, off the runtime
-                    (cleanup::clean(&text), queue, took)
+                    out
                 })
                 .await;
                 match read {
@@ -747,14 +977,34 @@ impl Dictation {
             }
             None => Zeroizing::new(String::new()),
         };
+        let mut parts: Vec<Zeroizing<String>> = Vec::with_capacity(pieces.len() + 1);
+        for p in pieces {
+            match p.await {
+                Ok(Some(t)) if !t.is_empty() => parts.push(t),
+                Ok(_) => {}
+                Err(_) => read_failed = true,
+            }
+        }
+        if !tail.is_empty() {
+            parts.push(tail);
+        }
+        let text = joined(&parts);
+        drop(parts);
         if read_failed {
             drop(text);
             settle.disarm();
             self.failed(generation);
             return self.view_with(self.result_of(generation));
         }
+        // From the key, the model's tidy, by the operator's switch: still in Reading, so a
+        // cancel meanwhile drops it all.
+        let text = if origin == Origin::Key && !text.is_empty() {
+            self.tidy(text).await
+        } else {
+            text
+        };
         // The commit: only while this dictation is still the one being read. `ops` is not
-        // held while the clipboard is set; the stage says Writing meanwhile.
+        // held while the text is typed or the clipboard set; the stage says Writing meanwhile.
         {
             let _op = self.ops.lock().await;
             let mut inner = lock(&self.inner);
@@ -768,23 +1018,15 @@ impl Dictation {
         }
         if !text.is_empty() {
             result.chars = text.chars().count();
-            let clipboard = self.clipboard.clone();
-            let set = tokio::task::spawn_blocking(move || clipboard.set(text)).await;
-            match set {
-                Ok(Ok(())) => result.outcome = DictationOutcome::OnClipboard,
-                Ok(Err(why)) => {
-                    result.outcome = DictationOutcome::NotOnClipboard;
-                    result.reason = Some(why);
-                }
-                Err(_) => {
-                    result.outcome = DictationOutcome::NotOnClipboard;
-                    result.reason = Some(DictationReason::ClipboardFailed);
-                }
+            let (outcome, why) = self.deliver(origin, text).await;
+            result.outcome = outcome;
+            if why.is_some() {
+                result.reason = why;
             }
         }
         info!(
-            "dictation: {:?}{}; {:.1} s recorded, read in {} ms after {} ms in the queue, {} \
-             characters",
+            "dictation: {:?}{}; {:.1} s recorded, the rest read in {} ms after {} ms in the \
+             queue, {} characters",
             result.outcome,
             result
                 .reason
@@ -804,6 +1046,68 @@ impl Dictation {
         settle.disarm();
         self.decide(generation, result);
         self.view_with(Some(result))
+    }
+
+    /// The model's tidy, within [`review::WAIT`], taken only when [`review::accept`] says so.
+    async fn tidy(&self, text: Zeroizing<String>) -> Zeroizing<String> {
+        let asked = tokio::time::timeout(review::WAIT, self.parts.reviewer.review(&text)).await;
+        match asked {
+            Ok(Some(tidied)) if review::accept(&text, &tidied) => {
+                info!("dictation: tidied by the model");
+                cleanup::sanitize(&tidied)
+            }
+            Ok(Some(_)) => {
+                info!("dictation: the model changed too much; typing what was read");
+                text
+            }
+            Ok(None) => text,
+            Err(_) => {
+                info!("dictation: the model took too long; typing what was read");
+                text
+            }
+        }
+    }
+
+    /// Where the text goes: typed from the key when every character has a key and the typing
+    /// works, the clipboard otherwise, and always from a command.
+    async fn deliver(
+        &self,
+        origin: Origin,
+        text: Zeroizing<String>,
+    ) -> (DictationOutcome, Option<DictationReason>) {
+        if origin == Origin::Key {
+            match typing::plan(&text) {
+                typing::Plan::Type(t) => match self.parts.typer.type_text(&t).await {
+                    Ok(()) => return (DictationOutcome::Typed, None),
+                    Err(why) => {
+                        info!("dictation: couldn't type it ({why:?}); the clipboard instead");
+                        return self
+                            .to_clipboard(text, Some(DictationReason::TypingFailed))
+                            .await;
+                    }
+                },
+                typing::Plan::Clipboard => {
+                    return self.to_clipboard(text, Some(DictationReason::NoKeys)).await;
+                }
+            }
+        }
+        self.to_clipboard(text, None).await
+    }
+
+    async fn to_clipboard(
+        &self,
+        text: Zeroizing<String>,
+        why: Option<DictationReason>,
+    ) -> (DictationOutcome, Option<DictationReason>) {
+        let clipboard = self.clipboard.clone();
+        match tokio::task::spawn_blocking(move || clipboard.set(text)).await {
+            Ok(Ok(())) => (DictationOutcome::OnClipboard, why),
+            Ok(Err(e)) => (DictationOutcome::NotOnClipboard, Some(e)),
+            Err(_) => (
+                DictationOutcome::NotOnClipboard,
+                Some(DictationReason::ClipboardFailed),
+            ),
+        }
     }
 
     /// Drop the dictation, starting, recording or being read: nothing reaches the
@@ -868,23 +1172,147 @@ impl Dictation {
     }
 }
 
-/// Record until stopped, the limit (in samples, or in time for a capture that stalls), or
-/// the microphone going away; send what was recorded, then close the capture and give the
-/// microphone back, and if it ended by itself, finish the dictation. The buffer is the whole
-/// limit from the start, so it never grows and leaves no copy behind; it is wiped when
-/// dropped. A panic here settles the stage (`Settle`), and unwinding drops the capture
-/// before the lease.
-async fn record(
-    mut opened: Opened,
+/// What a recording runs with.
+struct Recorder {
     stop: CancellationToken,
     limit: Duration,
     me: Weak<Dictation>,
     generation: u64,
-    captured: oneshot::Sender<Captured>,
-) {
+    origin: Origin,
+    pauses: Option<Box<dyn Pauses>>,
+    model: Option<SharedRecognizer>,
+}
+
+/// The words read so far, a slot per piece in order, for the live view. Wiped when dropped.
+#[derive(Default)]
+struct Heard {
+    slots: Vec<Option<Zeroizing<String>>>,
+}
+
+impl Heard {
+    fn text(&self) -> Option<String> {
+        let parts: Vec<&str> = self
+            .slots
+            .iter()
+            .flatten()
+            .map(|t| t.as_str())
+            .filter(|t| !t.is_empty())
+            .collect();
+        (!parts.is_empty()).then(|| parts.join(" "))
+    }
+}
+
+/// Puts the output's sound back when the recording ends, however it ends.
+struct Unmute(Weak<Dictation>);
+
+impl Drop for Unmute {
+    fn drop(&mut self) {
+        if let Some(d) = self.0.upgrade() {
+            d.parts.muter.restore();
+        }
+    }
+}
+
+/// The pieces' texts joined, sanitized; wiped when dropped.
+fn joined(parts: &[Zeroizing<String>]) -> Zeroizing<String> {
+    let len = parts.iter().map(|p| p.len() + 1).sum();
+    let mut all = Zeroizing::new(String::with_capacity(len));
+    for p in parts {
+        if !all.is_empty() {
+            all.push(' ');
+        }
+        all.push_str(p);
+    }
+    cleanup::sanitize(&all)
+}
+
+/// A frame's level, 0.0 to 1.0: its RMS in dBFS from -50 (0.0) to 0 (1.0).
+fn level_of(frame: &[i16]) -> f32 {
+    if frame.is_empty() {
+        return 0.0;
+    }
+    let sum: f64 = frame.iter().map(|&s| f64::from(s) * f64::from(s)).sum();
+    let rms = (sum / frame.len() as f64).sqrt() / 32768.0;
+    if rms <= 0.0 {
+        return 0.0;
+    }
+    ((20.0 * rms.log10() + 50.0) / 50.0).clamp(0.0, 1.0) as f32
+}
+
+impl Dictation {
+    /// Whether `generation` is the one recording now.
+    fn recording(&self, generation: u64) -> bool {
+        matches!(&lock(&self.inner).phase, Stage::Recording(r) if r.generation == generation)
+    }
+}
+
+/// Read one piece on the shared Parakeet while the recording goes on; its cleaned text goes
+/// into its slot and the live view.
+#[allow(clippy::too_many_arguments)]
+fn read_piece(
+    model: SharedRecognizer,
+    piece: Zeroizing<Vec<i16>>,
+    index: usize,
+    heard: Arc<Mutex<Heard>>,
+    me: Weak<Dictation>,
+    generation: u64,
+    origin: Origin,
+    since: Instant,
+) -> tokio::task::JoinHandle<Option<Zeroizing<String>>> {
+    tokio::spawn(async move {
+        let text = tokio::task::spawn_blocking(move || {
+            let (text, _, _) = read(&model, &piece);
+            drop(piece); // wiped here, off the runtime
+            cleanup::clean(&text)
+        })
+        .await
+        .ok()?;
+        let now = {
+            let mut h = lock(&heard);
+            if h.slots.len() <= index {
+                h.slots.resize_with(index + 1, || None);
+            }
+            h.slots[index] = Some(text.clone());
+            h.text()
+        };
+        if let Some(d) = me.upgrade()
+            && d.recording(generation)
+        {
+            d.live(
+                origin,
+                DictationScene::Listening,
+                None,
+                now,
+                since.elapsed().as_secs_f64(),
+            );
+        }
+        Some(text)
+    })
+}
+
+/// Record until stopped, the limit (in samples, or in time for a capture that stalls), or
+/// the microphone going away; cut a piece at each pause after speech and read it while
+/// recording goes on; send the level to the live view; send what was recorded, then close
+/// the capture and give the microphone back, and if it ended by itself, finish the
+/// dictation. The buffer is the whole limit from the start, so it never grows and leaves no
+/// copy behind; it is wiped when dropped. A panic here settles the stage (`Settle`), and
+/// unwinding drops the capture before the lease; the output's sound is put back either way.
+async fn record(mut opened: Opened, r: Recorder, captured: oneshot::Sender<Captured>) {
+    let Recorder {
+        stop,
+        limit,
+        me,
+        generation,
+        origin,
+        mut pauses,
+        model,
+    } = r;
     let mut settle = Settle::new(&me, generation);
+    let _unmute = Unmute(me.clone());
     let max = (limit.as_secs_f64() * f64::from(RATE)) as usize;
+    let piece_min = (PIECE_MIN.as_secs_f64() * f64::from(RATE)) as usize;
     let deadline = tokio::time::Instant::now() + limit;
+    let since = Instant::now();
     let mut samples: Zeroizing<Vec<i16>> = Zeroizing::new(Vec::with_capacity(max));
     let take = |frame: &[i16], samples: &mut Vec<i16>| {
         let room = max - samples.len();
@@ -892,6 +1320,11 @@ async fn record(
     };
     take(&opened.first, &mut samples);
     opened.first = Zeroizing::new(Vec::new()); // the old one is wiped as it drops
+    let heard = Arc::new(Mutex::new(Heard::default()));
+    let mut pieces = Vec::new();
+    let mut cut = 0usize;
+    let mut speech = false;
+    let mut shown = Instant::now();
     let mut end = End::Stopped;
     loop {
         if samples.len() >= max {
@@ -909,6 +1342,41 @@ async fn record(
                 Some(f) => {
                     let f = Zeroizing::new(f.samples);
                     take(&f, &mut samples);
+                    if let Some(p) = pauses.as_mut() {
+                        if p.speaking(&f) {
+                            speech = true;
+                        } else if speech && samples.len() - cut >= piece_min {
+                            // A pause after speech: this piece is read now.
+                            speech = false;
+                            if let Some(m) = &model {
+                                let piece = Zeroizing::new(samples[cut..].to_vec());
+                                pieces.push(read_piece(
+                                    m.clone(),
+                                    piece,
+                                    pieces.len(),
+                                    heard.clone(),
+                                    me.clone(),
+                                    generation,
+                                    origin,
+                                    since,
+                                ));
+                                cut = samples.len();
+                            }
+                        }
+                    }
+                    if shown.elapsed() >= LEVEL_EVERY {
+                        shown = Instant::now();
+                        if let Some(d) = me.upgrade() {
+                            let text = lock(&heard).text();
+                            d.live(
+                                origin,
+                                DictationScene::Listening,
+                                Some(level_of(&f)),
+                                text,
+                                since.elapsed().as_secs_f64(),
+                            );
+                        }
+                    }
                 }
                 None => {
                     end = End::MicrophoneEnded;
@@ -917,8 +1385,14 @@ async fn record(
             },
         }
     }
-    // A cancelled dictation dropped the receiver: the samples go, wiped.
-    let _ = captured.send(Captured { samples, end });
+    // A cancelled dictation dropped the receiver: the samples go, wiped, and the pieces
+    // still being read are dropped unread.
+    let _ = captured.send(Captured {
+        samples,
+        end,
+        pieces,
+        cut,
+    });
     close_off(opened);
     settle.disarm();
     if end != End::Stopped {
@@ -1080,15 +1554,17 @@ pub struct DaemonHost {
 
 #[async_trait]
 impl Host for DaemonHost {
-    fn refusal(&self) -> Option<DictationReason> {
+    fn refusal(&self, origin: Origin) -> Option<DictationReason> {
         let Some(d) = self.d.upgrade() else {
             return Some(DictationReason::Stopping);
         };
         if d.stop.is_cancelled() {
             return Some(DictationReason::Stopping);
         }
-        if d.mic.is_off() {
-            return Some(DictationReason::NotListening); // ADR 0057 stands
+        // ADR 0057 as amended 2026-11-25: only a real key press opens the microphone while
+        // not listening, for that dictation; a command is refused.
+        if d.mic.is_off() && origin == Origin::Command {
+            return Some(DictationReason::NotListening);
         }
         if d.state.phase() == Phase::Recording {
             return Some(DictationReason::HearingTest);
@@ -1108,13 +1584,13 @@ impl Host for DaemonHost {
         None
     }
 
-    fn still_allowed(&self) -> Option<DictationReason> {
+    fn still_allowed(&self, origin: Origin) -> Option<DictationReason> {
         let Some(d) = self.d.upgrade() else {
             return Some(DictationReason::Stopping);
         };
         if d.stop.is_cancelled() {
             Some(DictationReason::Stopping)
-        } else if d.mic.is_off() {
+        } else if d.mic.is_off() && origin == Origin::Command {
             Some(DictationReason::NotListening)
         } else {
             None
@@ -1163,9 +1639,44 @@ impl Host for DaemonHost {
     fn recognizer(&self) -> Option<SharedRecognizer> {
         self.d.upgrade()?.models().map(|m| m.stt.clone())
     }
+
+    fn pauses(&self) -> Option<Box<dyn Pauses>> {
+        let d = self.d.upgrade()?;
+        let models = d.models()?;
+        let silero = ghost_infer::Silero::load(&models.silero).ok()?;
+        let params = ghost_infer::VadParams {
+            stop_secs: PAUSE.as_secs_f32(),
+            ..d.voice().vad_params()
+        };
+        Some(Box::new(SileroPauses {
+            vad: ghost_infer::VadAnalyzer::new(silero, params),
+            now: 0.0,
+        }))
+    }
+}
+
+/// The pause that ends a piece: half a second of quiet after speech.
+pub const PAUSE: Duration = Duration::from_millis(500);
+
+/// Silero over dictation's own frames, on the samples' own clock.
+struct SileroPauses {
+    vad: ghost_infer::VadAnalyzer,
+    now: f64,
+}
+
+impl Pauses for SileroPauses {
+    fn speaking(&mut self, frame: &[i16]) -> bool {
+        self.now += frame.len() as f64 / f64::from(RATE);
+        match self.vad.analyze(frame, self.now) {
+            Ok(state) => state != ghost_infer::VadState::Quiet,
+            Err(_) => false,
+        }
+    }
 }
 
 #[cfg(test)]
 mod barrier_tests;
+#[cfg(test)]
+mod key_tests;
 #[cfg(test)]
 mod tests;

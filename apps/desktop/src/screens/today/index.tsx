@@ -108,7 +108,7 @@ export default function TodayScreen(_: RouteProps) {
           <div className="today-setup">
             <p className="today-headline">
               <span className="today-headline__lead">{setupLocked ? "Your keyring is locked." : "Ghost needs a model before it can answer."}</span>{" "}
-              <span className="today-headline__rest">{setupLocked ? "It can’t read its passwords until it’s unlocked." : "Add the Anthropic password or a model endpoint, and the rest of this page fills in as it works."}</span>
+              <span className="today-headline__rest">{setupLocked ? "It can’t read its passwords until it’s unlocked." : "Choose your Claude Code, OpenAI Codex or Antigravity subscription and sign in, and the rest of this page fills in as it works."}</span>
             </p>
             <Button variant="primary" leadingIcon={<Settings2 />} href={setupHref}>
               {setupLocked ? "Unlock…" : "Finish setup"}

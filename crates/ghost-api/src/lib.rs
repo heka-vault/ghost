@@ -39,6 +39,7 @@ pub mod server;
 pub mod skill_catalog;
 pub mod speech_models;
 pub mod state;
+pub mod subscriptions;
 pub mod uninstall;
 pub mod wake_takes;
 

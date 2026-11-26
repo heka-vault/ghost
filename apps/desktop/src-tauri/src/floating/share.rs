@@ -1,8 +1,9 @@
 //! What the floating room does while the screen is shared (ADR 0059, amended 2026-11-13).
 //!
-//! By default it hides, as it always has: nothing of Ghost reaches a meeting or a recording by
-//! accident. The operator may choose otherwise (Settings › General › The floating room, "While my screen
-//! is shared"): show Ghost in the share, or be asked each time a share starts. Whatever they
+//! By default (since 2026-11-25) Ghost shows in the share, wearing the "Screen shared" mark so
+//! the operator always knows the audience sees it; before that it hid. The operator may choose
+//! otherwise (Settings › General › The floating room, "While my screen is shared"): hide Ghost
+//! from every share, or be asked each time a share starts. Whatever they
 //! answer, or toggle from the tray, holds for that share only and is forgotten when it ends.
 //!
 //! A pure state machine: the shell feeds it the capture it reads from mutter (`capture.rs`) and
@@ -18,11 +19,10 @@ use super::capture::Capture;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum WhileShared {
-    /// Ghost draws nothing at all while the screen is shared (the default, and what it did
-    /// before there was a choice).
-    #[default]
+    /// Ghost draws nothing at all while the screen is shared (the default until 2026-11-25).
     Hide,
-    /// Ghost shows in the share, with a mark that says the screen is being shared.
+    /// Ghost shows in the share, with a mark that says the screen is being shared (the default).
+    #[default]
     Show,
     /// A small card asks, on the surface's monitor, when a share starts.
     Ask,
@@ -109,8 +109,7 @@ mod tests {
     }
 
     #[test]
-    fn hide_is_the_default_and_hides_every_share() {
-        assert_eq!(WhileShared::default(), WhileShared::Hide);
+    fn hide_hides_every_share() {
         let t = Instant::now();
         let mut s = Share::default();
         assert_eq!(s.sharing(WhileShared::Hide, t), Sharing::None);
@@ -123,7 +122,8 @@ mod tests {
     }
 
     #[test]
-    fn show_shows_ghost_in_the_share() {
+    fn show_is_the_default_and_shows_ghost_in_the_share() {
+        assert_eq!(WhileShared::default(), WhileShared::Show);
         let t = Instant::now();
         let mut s = Share::default();
         s.seen(Capture::Yes, t);

@@ -398,7 +398,6 @@ async fn dictated_words_reach_only_the_clipboard() {
         wake_mode: "file".into(),
         chime: false,
         mcp_listen: String::new(),
-        nerd_dictation_flag: t("rt/nerd-dictation"),
         ..GhostdSettings::default()
     };
     let cache = t("cache").to_string_lossy().into_owned();

@@ -74,3 +74,12 @@ the speaker; `make perf` is not affected.
   path. (ADR 0058 is that path: `GET /calls/{id}`, on request.)
 - A new kind of activity is a new variant in `ghost_voice::activity::Activity`, `ActivityKind`
   in `ghost_api::models` and the TS client; it must carry no words.
+
+## Amended 2026-11-25: dictation's live view
+
+A dictation is not a session, and its live view is the one exception to "never the words"
+(ADR 0077 as amended today): the words read so far, the microphone's level and the state, to
+the operator's own desktop only, on a channel of their own merged into the `/events`
+WebSocket, never the event bus (so not the phone, an outside client or a tap), shown and
+never kept. The phone's call forwarding is an allow list since the same day, so a new kind
+stays on the desk unless it is added there on purpose.

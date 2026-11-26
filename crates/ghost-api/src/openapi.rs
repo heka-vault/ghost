@@ -208,6 +208,16 @@ pub struct MeterEvent {
     pub meter: crate::live::MeterView,
 }
 
+/// Dictation's live view (ADR 0077 as amended 2026-11-25): the words as they are read, to the
+/// operator's own `/events` WebSocket only, from its own channel, never the bus.
+#[derive(ToSchema)]
+pub struct DictationEvent {
+    #[serde(default)]
+    #[schema(value_type = String, default = "dictation")]
+    pub r#type: String,
+    pub dictation: crate::dictation::DictationLiveView,
+}
+
 /// What the event stream carries, discriminated by `type`.
 #[derive(ToSchema)]
 #[serde(untagged)]
@@ -231,6 +241,7 @@ pub struct MeterEvent {
     ("show_app" = "#/components/schemas/ShowAppEvent"),
     ("timing" = "#/components/schemas/TimingEvent"),
     ("meter" = "#/components/schemas/MeterEvent"),
+    ("dictation" = "#/components/schemas/DictationEvent"),
 )))]
 pub enum Event {
     Status(StatusEvent),
@@ -252,6 +263,7 @@ pub enum Event {
     ShowApp(ShowAppEvent),
     Timing(TimingEvent),
     Meter(MeterEvent),
+    Dictation(DictationEvent),
 }
 
 /// `POST /conversations/{slug}/notes` takes a free object with `text` in it.
@@ -297,6 +309,12 @@ pub fn finish(mut api: OpenApi) -> OpenApi {
         ("ShowAppEvent", ShowAppEvent::schema()),
         ("TimingEvent", TimingEvent::schema()),
         ("MeterEvent", MeterEvent::schema()),
+        ("DictationEvent", DictationEvent::schema()),
+        (
+            "DictationLiveView",
+            crate::dictation::DictationLiveView::schema(),
+        ),
+        ("DictationScene", crate::dictation::DictationScene::schema()),
         ("TimingView", crate::live::TimingView::schema()),
         ("MeterView", crate::live::MeterView::schema()),
         ("RoomGateView", crate::live::RoomGateView::schema()),

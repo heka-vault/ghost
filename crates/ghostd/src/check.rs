@@ -284,8 +284,9 @@ pub fn check_models(
             );
         } else {
             problems.push(format!(
-                "GHOST_WAKE_MODE=onnx but there is no model at {}; train one and copy it \
-                 there as docs/wake-recording.md says, or set GHOST_WAKE_MODEL_PATH",
+                "GHOST_WAKE_MODE=onnx but there is no model at {}; Ghost ships one (run \
+                 scripts/models.sh, or reinstall), or set GHOST_WAKE_MODEL_PATH, or \
+                 GHOST_WAKE_MODE=transcript",
                 hey.display()
             ));
         }
@@ -1062,9 +1063,11 @@ mod tests {
         std::fs::remove_file(cache.join("models/smart-turn-v3.2-cpu.onnx")).unwrap();
         std::fs::remove_file(cache.join("kokoro/voices-v1.0.bin")).unwrap();
         std::fs::remove_file(cache.join("wake/hey_ghost.onnx")).unwrap();
+        // The shipped detector too: with it there, a missing own one is no problem.
+        std::fs::remove_file(cache.join("models/hey_ghost.onnx")).unwrap();
         std::fs::remove_dir_all(dir.path().join("stt")).unwrap();
         let (out, problems) = check_models_in(dir.path(), &env, "onnx");
-        assert_eq!(problems.len(), 4, "{problems:?}\n{out}");
+        assert_eq!(problems.len(), 5, "{problems:?}\n{out}");
         assert!(
             problems[0].starts_with("smart-turn-v3.2-cpu.onnx was not found")
                 && problems[0].contains("scripts/models.sh")
@@ -1072,6 +1075,12 @@ mod tests {
             "{}",
             problems[0]
         );
+        assert!(
+            problems[1].starts_with("hey_ghost.onnx was not found"),
+            "{}",
+            problems[1]
+        );
+        let problems = &problems[1..];
         assert!(
             problems[1].starts_with("Parakeet: ")
                 && problems[1].contains("ghostd models fetch")
@@ -1087,7 +1096,7 @@ mod tests {
         );
         assert!(
             problems[3].starts_with("GHOST_WAKE_MODE=onnx but there is no model at")
-                && problems[3].contains("docs/wake-recording.md"),
+                && problems[3].contains("scripts/models.sh"),
             "{}",
             problems[3]
         );
@@ -1126,7 +1135,7 @@ mod tests {
         env.remove("GHOST_SILERO_MODEL");
         env.insert("GHOST_MODELS_DIR".to_string(), mine.display().to_string());
         let (_, problems) = check_models_in(dir.path(), &env, "transcript");
-        assert_eq!(problems.len(), 4, "{problems:?}");
+        assert_eq!(problems.len(), 7, "{problems:?}");
         assert!(
             problems[0].contains("is not there (GHOST_MODELS_DIR names its folder)"),
             "{}",

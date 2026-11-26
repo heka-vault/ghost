@@ -18,7 +18,6 @@ import {
   Button,
   Card,
   cx,
-  Disclosure,
   errorText,
   GhostChip,
   GhostMark,
@@ -37,14 +36,13 @@ import {
 import { AddOwnDialog } from "../apps/AddOwnDialog";
 import { AppIcon } from "../apps/AppIcon";
 import { ConnectDialog } from "../apps/ConnectDialog";
-import { FoundModels, NoticedLine, OtherToolsApps, useOtherTools } from "../apps/OtherTools";
+import { NoticedLine, OtherToolsApps, useOtherTools } from "../apps/OtherTools";
 import { verdictOf } from "../settings/check";
-import { ClaudeCodeFix, ClaudeCodeLead } from "../settings/ClaudeCodeCard";
-import { CLAUDE_CODE, claudeCodeOffer, claudeCodeValues } from "../settings/claudeCode";
 import { GhostVoice } from "../settings/GhostVoice";
-import { FROM_ENV } from "../settings/environment";
-import { CONNECTION_KEYS, micOptions, validateConnection } from "../settings/model";
-import { ModelSection } from "../settings/ModelSection";
+import { micOptions } from "../settings/model";
+import { otherProviderOf } from "../settings/ModelPage";
+import { SubscriptionPicker, useSubscriptions } from "../settings/SubscriptionPicker";
+import { onlyReady } from "../settings/subscriptions";
 import { HeroPresence, StepFrame, type StepFrameProps, useShortWindow } from "./frame";
 import { canFloat, setFirstMeeting, useFloating, useFloatingForward } from "../../app/floating";
 import { markStateOf, moodOf } from "../../app/mood";
@@ -171,132 +169,73 @@ export function WelcomeStep({ w }: { w: Wizard }) {
 /* ------------------------------------------------------------------------------- model */
 
 /**
- * Settings › Model's own section, on a draft of its own: any provider, its key in the vault,
- * its model from the provider's list, and Test, which checks the draft before anything is
- * saved. Continue saves the draft.
- *
- * When the operator's own Claude Code is signed in on this computer (ADR 0069), the step leads
- * with it: the choice already selected, applied only by its own button, which saves it and goes
- * on; every other way is one click away under "Use something else".
+ * Choose your subscription (ADR 0078): Claude Code, OpenAI Codex or Google Antigravity, the
+ * same picker as Settings › Model. Each card installs its program with the vendor's own
+ * installer, starts its own sign-in, and makes it Ghost's model; Continue goes on once Ghost
+ * has a model. A key, a local model or an address (ADR 0037) is not offered here for now.
  */
 export function ModelStep({ w }: { w: Wizard }) {
   const { client } = useGhost();
   const { online } = useLive();
   const design = !!w.design;
   const [conn, setConn] = useState<ModelConnectionView | null>(null);
-  const [values, setValuesState] = useState<Record<string, string>>({});
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [elsewhere, setElsewhere] = useState(false);
+  const subs = useSubscriptions();
   const s = w.settings;
-  // ADR 0068: a model connection already on this computer, one click each.
-  const others = useOtherTools();
-  const offer = claudeCodeOffer(others.view?.claude_code);
-  const savedProvider = (s?.values.GHOST_LLM_PROVIDER ?? "").trim();
-  const lead = offer?.kind === "use" && !elsewhere ? offer : null;
 
   const readConn = () => {
     client.modelConnection().then(setConn, () => setConn(null));
   };
   useEffect(readConn, [client, online]);
-  // The draft starts as what is saved.
-  useEffect(() => {
-    if (s) setValuesState(Object.fromEntries(CONNECTION_KEYS.map((k) => [k, s.values[k] ?? ""])));
-  }, [s]);
-
-  const problems = validateConnection(values);
-  const dirty = !!s && CONNECTION_KEYS.some((k) => (values[k] ?? "") !== (s.values[k] ?? ""));
-  const save = async (changed: Record<string, string | null>) => {
-    setBusy(true);
-    setError(null);
-    try {
-      await w.save({ values: changed });
-      readConn();
-      w.next();
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setBusy(false);
+  const inUse = !!subs.view?.in_use;
+  const other = s ? otherProviderOf(s, conn) : null;
+  const ready = inUse || (!!other && !!conn?.ready);
+  // Signed in to the one subscription Ghost can run: Continue makes it Ghost's model.
+  const only = ready ? null : onlyReady(subs.view);
+  const [using, setUsing] = useState(false);
+  const [useError, setUseError] = useState<string | null>(null);
+  const goOn = async () => {
+    if (only) {
+      setUsing(true);
+      setUseError(null);
+      try {
+        await client.useSubscription(only.id);
+        readConn();
+        await w.reload();
+      } catch (e) {
+        setUseError(e instanceof Error ? e.message : String(e));
+        return;
+      } finally {
+        setUsing(false);
+      }
     }
+    w.next();
   };
-  const submit = async () => {
-    if (!dirty) return w.next();
-    if (Object.keys(problems).length) return setError(Object.values(problems)[0]);
-    await save(Object.fromEntries(CONNECTION_KEYS.filter((k) => (values[k] ?? "") !== (s?.values[k] ?? "")).map((k) => [k, values[k]?.trim() || null])));
-  };
-  // ADR 0069: the one click that chooses Claude Code; nothing is saved until it.
-  const useClaudeCode = () => (savedProvider === CLAUDE_CODE ? w.next() : save(claudeCodeValues(CONNECTION_KEYS)));
 
   return (
     <StepFrame
       id="model"
       plain
-      title="Connect a model"
-      description={
-        lead
-          ? "Where Ghost thinks. Claude Code is already here; anything else works too."
-          : "Where Ghost thinks. Any provider works, a model on this computer too; Test says how well it will answer out loud."
-      }
-      primary={
-        lead
-          ? { label: savedProvider === CLAUDE_CODE ? "Continue" : "Use Claude Code", onClick: useClaudeCode, loading: busy, disabled: !online }
-          : { label: dirty ? "Save and continue" : "Continue", onClick: submit, loading: busy, disabled: !online }
-      }
+      title="Choose your subscription"
+      description="Where Ghost thinks: the AI subscription you already have, through its own program on this computer."
+      primary={{ label: only ? `Use ${only.title} and continue` : "Continue", onClick: () => void goOn(), loading: using, disabled: !online || !(ready || only) }}
       onBack={w.back}
       onSkip={w.progress.state.model === "done" ? undefined : w.skip}
       skipLabel={w.saved.met ? "Skip for now" : "Skip: meet Ghost first"}
       autoFocus={w.focusOnOpen}
-      notices={
-        <>
-          <NeedsGhost w={w} what="connect a model" />
-          {error && (
-            <Notice tone="danger" title="Couldn’t save" onDismiss={() => setError(null)}>
-              {error}
-            </Notice>
-          )}
-        </>
-      }
+      notices={<NeedsGhost w={w} what="choose a model" />}
     >
       {!s ? (
         <Card aria-hidden padding="md">
           <Skeleton height={14} width={220} />
         </Card>
-      ) : lead ? (
-        <div className="onb-model">
-          <ClaudeCodeLead offer={lead} chosen={savedProvider === CLAUDE_CODE} onElsewhere={() => setElsewhere(true)} />
-        </div>
       ) : (
         <div className="onb-model">
-          {offer?.kind === "fix" && <ClaudeCodeFix offer={offer} look={() => void others.look()} looking={others.looking} />}
-          <FoundModels
-            view={others.view}
-            chosen={(values.GHOST_LLM_PROVIDER ?? "").trim()}
-            onChoose={(provider, model, variable) => {
-              setValuesState((v) => ({ ...v, ...Object.fromEntries(CONNECTION_KEYS.map((k) => [k, ""])), GHOST_LLM_PROVIDER: provider, GHOST_LLM_MODEL: model ?? "" }));
-              // #137: the click on a key in the environment is the person's choice of it for
-              // Ghost: its name (never a value) into settings.env, with what is chosen already.
-              if (variable) {
-                const names = [...new Set([...(conn?.chosen_from_environment ?? []), variable])].sort().join(",");
-                client.updateSettings({ values: { [FROM_ENV]: names } }).then(readConn, (e) => setError(errorText(e)));
-              }
-            }}
-          />
-          <ModelSection
-            s={s}
-            conn={conn}
-            values={values}
-            online={online}
+          {useError && <p className="set-help is-readable" role="alert">{`Ghost couldn’t use it: ${useError}`}</p>}
+          <SubscriptionPicker
+            {...subs}
+            otherProvider={other}
             mock={design}
-            claudeCode={others.view ? others.view.claude_code : undefined}
-            lookAgain={() => void others.look()}
-            looking={others.looking}
-            showFix={false}
-            setValues={(patch) => setValuesState((v) => ({ ...v, ...patch }))}
-            help={(_, t) => t}
-            err={(k) => problems[k] ?? null}
-            fieldId={(k) => `onb-${k}`}
-            waiting={new Set()}
-            onPassword={() => {
+            onUsed={() => {
               readConn();
               void w.reload();
             }}
@@ -496,7 +435,7 @@ const NOT_HEARD_AFTER_MS = 12_000;
 
 /**
  * Where the moment will happen, in one line, with the switch right there (ADR 0059 as amended
- * 2026-11-14): over the desktop, by the person's visible choice, or in this window and why.
+ * 2026-11-14): over the desktop (on by default since 2026-11-25), or in this window and why.
  */
 function FloatLine({ floating, met }: { floating: ReturnType<typeof useFloating>; met: boolean }) {
   const st = floating.status;
@@ -550,8 +489,9 @@ function WindowMoment({ why }: { why: string | null }) {
  * no microphone) and Ghost comes forward over their desktop, lit, and says its own first line
  * (the daemon's `first_meeting`, never a model's), then answers what they said. The first run
  * arms it on Ghost (`PUT /first-meeting`) and on the floating room (`floating_first_meeting`,
- * so it floats over this window too), turns the floating room on once by the person's visible
- * choice (the switch under the title), and says where it happened. Where the desktop can't
+ * so it floats over this window too), shows the floating room's switch under the title (on by
+ * default since 2026-11-25, so the person can turn it off right there), and says where it
+ * happened. Where the desktop can't
  * float, or the screen is shared, the moment happens on this beat itself (2026-11-14: there is
  * no room view any more): the lit mark, Ghost's state, its first line as it is spoken, and one
  * sentence saying why it answered here.
@@ -586,14 +526,6 @@ export function WakeStep({ w }: { w: Wizard }) {
   const session = status?.session_id ?? null;
   const desk = !!session && status?.session_origin !== "phone";
   const mp = w.devices?.microphone ?? null;
-
-  // The floating room, on once, by the first run (never for an install that finished it).
-  const offered = useRef(false);
-  useEffect(() => {
-    if (offered.current || w.saved.finished || w.saved.floatOffered || !floating.status) return;
-    offered.current = true;
-    void floating.offer().then(() => w.setSaved({ floatOffered: true }));
-  }, [floating, w]);
 
   // Arm the moment on Ghost while it hasn't happened, and on the floating room until the
   // session it opened has ended, so Ghost stays over the desktop while it talks.

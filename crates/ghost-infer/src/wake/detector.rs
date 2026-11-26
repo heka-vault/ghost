@@ -49,17 +49,11 @@ pub const REMAINDER_FUZZY: f64 = 0.8;
 pub const DETECTOR_PHRASE: &str = "hey ghost";
 /// What a `ghost_*.onnx` model hears: the name opening a request.
 pub const ADDRESS_PHRASE: &str = "ghost";
-/// The openers the `ghost_*` models were trained on
-/// (docs/benchmarks/2026-10-23-ghost-openers.md): after a first word that is only shaped
-/// like the name, one of these must follow.
-pub const OPENERS: &[&str] = &[
-    "i need you",
-    "let's work on",
-    "what is the status of",
-    "what's the status of",
-    "what did we leave off",
-    "where did we leave off",
-];
+/// The openers the shipped `ghost_*` models are trained on (2026-11-26, the operator's
+/// "Ghost, can you …" and "Ghost, what …"; the method of
+/// docs/benchmarks/2026-10-23-ghost-openers.md): after a first word that is only shaped like
+/// the name, one of these must follow.
+pub const OPENERS: &[&str] = &["can you", "what", "what's"];
 pub const DEFAULT_MODEL_NAME: &str = "hey_ghost.onnx";
 /// Ghost addressed by name: one model, or one per opener.
 pub const ADDRESS_MODEL_GLOB: &str = "ghost_*.onnx";
