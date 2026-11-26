@@ -54,7 +54,7 @@ async fn main() -> anyhow::Result<()> {
                     segs += 1;
                     let hit = match_wake(&text, &phrases, fuzzy).is_some();
                     woke += usize::from(hit);
-                    let odd = text.chars().any(|c| !c.is_ascii());
+                    let odd = !text.is_ascii();
                     lines.push(format!(
                         "    {}{} {text:?}",
                         if hit { "*" } else { " " },

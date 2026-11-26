@@ -59,6 +59,9 @@ SILERO_TAG=v6.0
 SMART_TURN_REV=f766f81d3cfdf7737ac64aad813d91bbfd56bf93
 SMART_TURN_LICENSE_REV=24c720337e17befe0413bbc93b3504036c3a3bdc
 OPENWAKEWORD_TAG=v0.5.1
+# Ghost's own "hey ghost" detector (ADR 0025's amendment of 2026-11-26): the pre-release
+# that carries it, trained as .scratch/wake-train/pod/ does; Ghost's licence.
+HEY_GHOST_TAG=wake-hey-ghost-1
 
 # name|url|sha256|size|mode
 FILES=(
@@ -69,6 +72,7 @@ FILES=(
   "melspectrogram.onnx|https://github.com/dscripka/openWakeWord/releases/download/$OPENWAKEWORD_TAG/melspectrogram.onnx|ba2b0e0f8b7b875369a2c89cb13360ff53bac436f2895cced9f479fa65eb176f|1087958|644"
   "embedding_model.onnx|https://github.com/dscripka/openWakeWord/releases/download/$OPENWAKEWORD_TAG/embedding_model.onnx|70d164290c1d095d1d4ee149bc5e00543250a7316b59f31d056cff7bd3075c1f|1326578|644"
   "LICENSE.openwakeword|https://raw.githubusercontent.com/dscripka/openWakeWord/$OPENWAKEWORD_TAG/LICENSE|c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4|11357|644"
+  "hey_ghost.onnx|https://github.com/heka-vault/ghost/releases/download/$HEY_GHOST_TAG/hey_ghost.onnx|bf2fbc0ad778772ce82ab424d43b1ff3be96fec72a025cb10c653305c1b6f290|941854|644"
 )
 
 # Kokoro v1.0, the voice (ADR 0004): the model-files-v1.0 release of thewh1teagle/kokoro-onnx,

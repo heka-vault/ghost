@@ -1,6 +1,6 @@
 # 0025: A trained "hey ghost" detector wakes Ghost, and Parakeet confirms it
 
-- **Status:** proposed (supersedes ADR 0010 once accepted)
+- **Status:** accepted 2026-11-26 (supersedes ADR 0010; see the amendment of that date)
 - **Date:** 2026-10-22
 
 ADR 0010 woke Ghost by transcribing everything said in the room and matching the text. The [wake review](../benchmarks/2026-10-21-wake.md) measured its limits:
@@ -41,3 +41,25 @@ For a weak "hey ghost" hit, the check now also accepts a sentence of the reading
 The first frame at the floor still decides, though the score may still be rising, so a near miss that climbs past the threshold is checked. Waiting for the peak heard more takes, but it let confusables wake unchecked (issue #13).
 
 Waking on the bare name wherever Parakeet reads it was measured as well and not taken. In the operator's speech, half the times "ghost" was said were product talk, sign-offs ("Later, ghost") or session commands ("Hang on, ghost"), so the name must open what was said. Inside the detector's hits, accepting it anywhere heard nothing more and woke on "Hang on, Ghost" and "Hang up ghost".
+
+## Amendment, 2026-11-26: the detector ships, and wakes alone
+
+The detector was trained on 2026-10-22 and woke the operator's desk from 2026-10-24, but it
+only ever lived in that machine's cache (`~/.cache/ghost/wake/hey_ghost.onnx`); a release
+never carried it. When Ghost was removed and reinstalled on 2026-11-25 the desk fell back
+to transcript wake, and the operator's "Hey Ghost" went unheard with music on (#190).
+`wake-probe` on the 2026-10-21 script measured transcript wake at 38 wakes near, 18 with
+music, 8 far.
+
+- **It ships.** `hey_ghost.onnx` is the fifth of the small model files
+  (`ghost_infer::models::FILES`): fetched by `scripts/models.sh` from Ghost's own
+  pre-release `wake-hey-ghost-1`, pinned by SHA-256, staged into the bundle. Retrained the
+  same way as 2026-10-22 (livekit-wakeword, `conv_attention` medium, the look-alike
+  negatives of `hey_ghost_full.yaml`) on a Runpod A40 (`.scratch/wake-train/pod/`).
+- **Found in order:** `GHOST_WAKE_MODEL_PATH`; the operator's own in
+  `~/.cache/ghost/wake/`; the shipped one (bundle, then `~/.cache/ghost/models/`). A
+  retrained detector (ADR 0065) is chosen by `GHOST_WAKE_DETECTOR` as before.
+- **The defaults change:** `GHOST_WAKE_MODE` is `onnx` and `GHOST_WAKE_VERIFY` false, so the
+  detector wakes alone at 0.7, the operator's live setting since 2026-10-24 (every desk
+  "hey ghost" and no false wake in 6.1 h of read speech, 2026-10-22). Transcript wake stays
+  the fallback when the detector can't load, and the setting for anyone who prefers it.

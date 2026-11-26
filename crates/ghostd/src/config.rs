@@ -221,12 +221,15 @@ impl Default for GhostdSettings {
             phone_listen: String::new(),
             hooks_listen: String::new(),
             mcp_listen: ghost_core::ghost_app::clients::DEFAULT_LISTEN.into(),
-            wake_mode: "transcript".into(),
+            // The shipped detector (#190, ADR 0025); transcript wake when it can't load.
+            wake_mode: "onnx".into(),
             wake_phrases: String::new(),
             wake_fuzzy: 0.9,
             wake_model_path: None,
             wake_threshold: None,
-            wake_verify: true,
+            // The detector alone at 0.7: every desk "hey ghost" and no false wake in 6.1 h of
+            // read speech (2026-10-22); Parakeet's check is what lost wakes ("He goes.").
+            wake_verify: false,
             wake_cooldown_secs: 2.0,
             wake_check_threshold: Some(0.3),
             wake_address_model_path: None,
@@ -524,8 +527,14 @@ mod tests {
     fn the_detector_threshold_follows_the_check() {
         // With Parakeet's check the threshold only decides how often it runs; without it the
         // threshold is the whole decision, so it sits higher unless the operator set one.
+        // The shipped default is the detector alone (#190).
         let s = GhostdSettings::default();
-        assert_eq!(s.detector_threshold(), 0.3);
+        assert_eq!(s.detector_threshold(), 0.7);
+        let checked = GhostdSettings {
+            wake_verify: true,
+            ..Default::default()
+        };
+        assert_eq!(checked.detector_threshold(), 0.3);
         let unchecked = GhostdSettings {
             wake_verify: false,
             ..Default::default()
@@ -565,9 +574,9 @@ mod tests {
         assert_eq!(s.jev_deadline_secs, 0.5);
         assert_eq!(s.signin_port, 47823);
         assert_eq!(s.turn_retention_days, 0);
-        assert_eq!(s.wake_mode, "transcript");
+        assert_eq!(s.wake_mode, "onnx");
         assert_eq!(s.wake_fuzzy, 0.9);
-        assert!(s.wake_verify);
+        assert!(!s.wake_verify, "the detector alone (#190)");
         assert_eq!(s.wake_cooldown_secs, 2.0);
         assert_eq!(s.duck_apps, vec!["spotify"]);
         assert_eq!(s.duck_level, 0.25);
