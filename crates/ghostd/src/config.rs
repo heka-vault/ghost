@@ -485,8 +485,11 @@ impl GhostdSettings {
         (!n.is_empty() && n != crate::wake_detectors::SHIPPED).then_some(n)
     }
 
+    /// Parakeet checks an opener model's hit unless the operator said otherwise: alone the
+    /// openers heard 63% of trained openers, checked from 0.3 88% with no false wake
+    /// (2026-10-23), whatever "hey ghost" does on its own (#190).
     pub fn address_verify(&self) -> bool {
-        self.wake_address_verify.unwrap_or(self.wake_verify)
+        self.wake_address_verify.unwrap_or(true)
     }
 
     pub fn address_threshold(&self) -> f64 {
@@ -546,7 +549,13 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(set.detector_threshold(), 0.5);
-        assert_eq!(unchecked.address_threshold(), 0.7);
+        // The openers stay checked by Parakeet whatever "hey ghost" does (#190).
+        assert_eq!(unchecked.address_threshold(), 0.3);
+        let unchecked_openers = GhostdSettings {
+            wake_address_verify: Some(false),
+            ..Default::default()
+        };
+        assert_eq!(unchecked_openers.address_threshold(), 0.7);
         let address = GhostdSettings {
             wake_address_threshold: Some(0.6),
             ..Default::default()

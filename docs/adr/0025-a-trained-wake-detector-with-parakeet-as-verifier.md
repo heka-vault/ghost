@@ -63,3 +63,14 @@ music, 8 far.
   detector wakes alone at 0.7, the operator's live setting since 2026-10-24 (every desk
   "hey ghost" and no false wake in 6.1 h of read speech, 2026-10-22). Transcript wake stays
   the fallback when the detector can't load, and the setting for anyone who prefers it.
+- **Ghost by name, "Ghost, can you …" and "Ghost, what …"** (the operator, the same day):
+  "Hey Ghost" wakes Ghost and it answers; "Ghost, can you open Chrome for me", "Ghost, what
+  is the capital of Michigan?" are a request said with the name. Two opener models,
+  `ghost_can_you.onnx` and `ghost_what.onnx`, trained as the 2026-10-23 openers were (one
+  model per opener, the opener without the name and the name's sound-alikes as negatives),
+  ship beside the detector. A hit is checked by Parakeet from 0.3 by default
+  (`GHOST_WAKE_ADDRESS_VERIFY`, no longer following `GHOST_WAKE_VERIFY`), the request after
+  the name is the first turn (no greeting), and Ghost waits for the operator to finish, plays
+  its chime, then works. `OPENERS` is the trained ones only ("can you", "what", "what's");
+  October's four had no model left. The transcript phrases ("yo ghost", "okay ghost" …) wake
+  only in transcript mode.

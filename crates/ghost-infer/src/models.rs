@@ -35,8 +35,22 @@ pub const MELSPECTROGRAM: &str = "melspectrogram.onnx";
 pub const EMBEDDING: &str = "embedding_model.onnx";
 /// Ghost's trained "hey ghost" detector (ADR 0025), the shipped one.
 pub const HEY_GHOST: &str = "hey_ghost.onnx";
-/// The five, in the order `scripts/models.sh` fetches them.
-pub const FILES: [&str; 5] = [SILERO, SMART_TURN, MELSPECTROGRAM, EMBEDDING, HEY_GHOST];
+/// The shipped opener models: Ghost addressed by name, "Ghost, can you …" and "Ghost,
+/// what …" (2026-11-26).
+pub const GHOST_CAN_YOU: &str = "ghost_can_you.onnx";
+pub const GHOST_WHAT: &str = "ghost_what.onnx";
+/// The shipped opener models, in order.
+pub const OPENER_MODELS: [&str; 2] = [GHOST_CAN_YOU, GHOST_WHAT];
+/// The seven, in the order `scripts/models.sh` fetches them.
+pub const FILES: [&str; 7] = [
+    SILERO,
+    SMART_TURN,
+    MELSPECTROGRAM,
+    EMBEDDING,
+    HEY_GHOST,
+    GHOST_CAN_YOU,
+    GHOST_WHAT,
+];
 /// The operator's or a test's own folder of them, honoured first.
 pub const ENV_VAR: &str = "GHOST_MODELS_DIR";
 /// What fetches them into the cache.
@@ -214,11 +228,13 @@ mod tests {
         let c = put(&l.home_cache, MELSPECTROGRAM);
         let d = put(&l.home_cache, EMBEDDING);
         let e = put(&l.bundle, HEY_GHOST);
+        let f = put(&l.home_cache, GHOST_CAN_YOU);
+        let g = put(&l.bundle, GHOST_WHAT);
         let got: Vec<PathBuf> = FILES
             .iter()
             .map(|f| resolve(f, env(&[]), Some(&l.exe), Some(&l.home)).unwrap())
             .collect();
-        assert_eq!(got, vec![a, b, c, d, e]);
+        assert_eq!(got, vec![a, b, c, d, e, f, g]);
     }
 
     #[test]
@@ -304,7 +320,9 @@ mod tests {
                 "smart-turn-v3.2-cpu.onnx",
                 "melspectrogram.onnx",
                 "embedding_model.onnx",
-                "hey_ghost.onnx"
+                "hey_ghost.onnx",
+                "ghost_can_you.onnx",
+                "ghost_what.onnx"
             ]
         );
     }

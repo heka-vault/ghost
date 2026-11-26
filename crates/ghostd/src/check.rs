@@ -1135,7 +1135,7 @@ mod tests {
         env.remove("GHOST_SILERO_MODEL");
         env.insert("GHOST_MODELS_DIR".to_string(), mine.display().to_string());
         let (_, problems) = check_models_in(dir.path(), &env, "transcript");
-        assert_eq!(problems.len(), 5, "{problems:?}");
+        assert_eq!(problems.len(), 7, "{problems:?}");
         assert!(
             problems[0].contains("is not there (GHOST_MODELS_DIR names its folder)"),
             "{}",

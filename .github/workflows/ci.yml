@@ -173,6 +173,7 @@ jobs:
           for f in onnxruntime/libonnxruntime.so.1.24.4 onnxruntime/LICENSE \
                    models/silero_vad.onnx models/smart-turn-v3.2-cpu.onnx \
                    models/melspectrogram.onnx models/embedding_model.onnx models/hey_ghost.onnx \
+                   models/ghost_can_you.onnx models/ghost_what.onnx \
                    models/LICENSE.silero-vad models/LICENSE.smart-turn models/LICENSE.openwakeword \
                    espeak-ng-data/phontab espeak-ng-data/en_dict espeak-ng-data/COPYRIGHT \
                    espeak-ng-data/SOURCE espeak-ng-data/GHOST-ESPEAK-NG-VERSION \

@@ -762,6 +762,21 @@ pub fn wake_model_paths(cfg: &GhostdSettings, voice: &VoiceSettings) -> (PathBuf
                 })
                 .unwrap_or_default();
             found.sort();
+            // None of the operator's own: the shipped openers (#190), the bundle's or the
+            // cache's models folder, each found on its own.
+            if found.is_empty() {
+                let bundle = std::env::current_exe()
+                    .ok()
+                    .and_then(|exe| ghost_infer::models::bundle_dir(&exe));
+                let cache = voice.cache_dir.join(ghost_infer::models::FOLDER);
+                for name in ghost_infer::models::OPENER_MODELS {
+                    let in_bundle = bundle
+                        .as_ref()
+                        .map(|d| d.join(name))
+                        .filter(|p| p.is_file());
+                    found.push(in_bundle.unwrap_or_else(|| cache.join(name)));
+                }
+            }
             found
         }
     };
