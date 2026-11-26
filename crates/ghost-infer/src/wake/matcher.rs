@@ -37,6 +37,15 @@ static SENTENCE_END: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[.!?]+\s+")
 /// the end doesn't. A word of that shape counts as the name only when an opener follows it.
 static NAME_SHAPE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[gkc]h?o[a-z]{0,4}$").expect("fixed"));
+/// "Ghost" with its onset lost, as Parakeet reads the operator's name at the very start of
+/// what they said when the array takes the "G" (2026-11-26, #192: a `ghost_can_you` hit read
+/// "Oh, can you tell me the capital of Michigan?", with no "G" among Parakeet's five best
+/// first tokens, and "Host, can you …" from other cuts of the same audio; "Hey Ghost" loses
+/// its "hey" the same way, `HEY_SPELLINGS`). It counts as the name only as the first word
+/// heard and only when an opener follows it, so "oh, can you …" later in a sentence, or
+/// "so" and "okay", never do.
+static ONSETLESS_NAME: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^h?o(?:a?st|h)?$").expect("fixed"));
 
 /// A phrase found in a transcript and what was said after it ("" if nothing).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -216,9 +225,10 @@ fn opener_follows(words: &[String], openers: &[impl AsRef<str>]) -> bool {
 ///
 /// Unlike `match_wake` the name inside a sentence ("the ghost story") is no match. `fuzzy`
 /// compares phonetic keys as `match_wake` does: at 0.8 "goes" is "ghost". With `openers`, a
-/// first word merely shaped like the name (`NAME_SHAPE`, "Coach") also counts when one of
-/// them follows it: the detector heard the name, and the opener's words are the part
-/// Parakeet gets right.
+/// first word merely shaped like the name (`NAME_SHAPE`, "Coach"), or the very first word
+/// heard with the name's onset lost (`ONSETLESS_NAME`, "Oh"), also counts when one of them
+/// follows it: the detector heard the name, and the opener's words are the part Parakeet
+/// gets right.
 pub fn match_opening(
     text: &str,
     phrase: &str,
@@ -258,7 +268,10 @@ pub fn match_opening(
             if exact || near {
                 return Some(WakeMatch::new(phrase, &after(text, i + n)));
             }
-            let shaped = n == 1 && !openers.is_empty() && NAME_SHAPE.is_match(&window[0]);
+            let shaped = n == 1
+                && !openers.is_empty()
+                && (NAME_SHAPE.is_match(&window[0])
+                    || (i == 0 && ONSETLESS_NAME.is_match(&window[0])));
             if shaped && opener_follows(&words[i + 1..], openers) {
                 return Some(WakeMatch::new(phrase, &after(text, i + 1)));
             }
@@ -585,6 +598,45 @@ mod tests {
         ] {
             assert_eq!(match_opening(heard, "ghost", 0.9, OPENERS), None, "{heard}");
             assert_eq!(match_opening(heard, "ghost", 0.9, NONE), None, "{heard}");
+        }
+    }
+
+    #[test]
+    fn test_the_name_without_its_onset_opens_what_was_heard() {
+        // #192: the operator's "Ghost, can you …" as Parakeet read it, the "G" lost.
+        const SHIPPED: &[&str] = &["can you", "what", "what's"];
+        for (heard, asked) in [
+            (
+                "Oh, can you tell me the capital of Michigan?",
+                "can you tell me the capital of Michigan?",
+            ),
+            (
+                "Host, can you tell me the capital admission?",
+                "can you tell me the capital admission?",
+            ),
+            ("Oh what time is it?", "what time is it?"),
+        ] {
+            assert_eq!(
+                match_opening(heard, "ghost", 0.9, SHIPPED),
+                Some(WakeMatch::new("ghost", asked)),
+                "{heard}"
+            );
+        }
+        for heard in [
+            "Oh, can you tell me the capital of Michigan?",
+            "Host, can you tell me.",
+        ] {
+            // Without openers (transcript wake's check) it is not the name.
+            assert_eq!(match_opening(heard, "ghost", 0.9, NONE), None, "{heard}");
+        }
+        for heard in [
+            "Right. Oh, can you pass the salt?", // not the first word heard
+            "Oh, I'm not sure.",                 // no opener after it
+            "So can you tell me the capital?",   // "so" is not the name
+            "Okay, can you send it?",            // nor "okay"
+            "Only can you know.",
+        ] {
+            assert_eq!(match_opening(heard, "ghost", 0.9, SHIPPED), None, "{heard}");
         }
     }
 

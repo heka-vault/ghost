@@ -74,3 +74,12 @@ music, 8 far.
   its chime, then works. `OPENERS` is the trained ones only ("can you", "what", "what's");
   October's four had no model left. The transcript phrases ("yo ghost", "okay ghost" …) wake
   only in transcript mode.
+- **The name without its "G"** (#192, the first live test the same day): one of three
+  "Ghost, can you …" fired the model and Parakeet read "Oh, can you tell me the capital of
+  Michigan?", with no "G" among its five best first tokens; other cuts of the audio read
+  "Host". The array takes the onset, as it takes the "hey" of "Hey Ghost". So for an opener
+  model's hit, the very first word heard counts as the name when it is "Ghost" without its
+  onset ("oh", "o", "host", `ONSETLESS_NAME`) and an opener follows it. Only there: later in
+  a sentence, without an opener, or "so" and "okay", it never does. The cost is a room's
+  "Oh, what …" or "Oh, can you …" said as a whole utterance that also fires an opener model,
+  which would wake Ghost.
